@@ -10,26 +10,7 @@ import shutil
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "cloudflared_configs.json")
 TOKENS_FILE = os.path.join(os.path.dirname(__file__), "cloudflared_tokens.json")
 
-PRESETS = {
-  "Default": {"host":" 127.0.0.1"},
-  "MongoDB": {
-    "hostname": "mongodb.tondomaine.fr",
-    "host": "127.0.0.1",
-    "port": "27017"
-  },
-  "SSH": {
-    "hostname": "ssh.tondomaine.fr",
-    "host": "127.0.0.1",
-    "port": "22",
-    "token_id": "",
-    "token_secret": ""
-  },
-  "SERVICEWEB1": {
-    "hostname": "web.tondomaine.fr",
-    "host": "127.0.0.1",
-    "port": "8080"
-  }
-}
+PRESETS = {}
 TOKENS = {}
 
 class CloudflaredTab:
@@ -46,7 +27,7 @@ class CloudflaredTab:
         self.import_btn.grid(row=0, column=1, padx=2, sticky='ew')
 
         self.save_btn = ttk.Button(self.frame, text="Enregistrer", command=self.save_config)
-        self.save_btn.grid(row=0, column=2, padx=(0, 2), sticky='we')
+        self.save_btn.grid(row=0, column=2, padx=(0, 2), sticky='ew')
 
         self.new_profile_btn = ttk.Button(self.frame, text="➕", width=3, command=self.create_new_profile)
         self.new_profile_btn.grid(row=0, column=3, padx=(0, 5), sticky='w')
@@ -57,7 +38,7 @@ class CloudflaredTab:
         self.token_menu.grid(row=0, column=5, sticky="ew", padx=2)
         self.token_menu.bind("<<ComboboxSelected>>", self.load_token_profile)
 
-        ttk.Button(self.frame, text="Importer Token", command=self.import_tokens).grid(row=0, column=6, padx=2, sticky='we')
+        ttk.Button(self.frame, text="Importer Token", command=self.import_tokens).grid(row=0, column=6, padx=2, sticky='ew')
         ttk.Button(self.frame, text="Enregistrer Token", command=self.save_token).grid(row=0, column=7, padx=2, sticky='ew')
         ttk.Button(self.frame, text="➕", width=3, command=self.create_new_token_profile).grid(row=0, column=8, padx=(0, 5), sticky='w')
 
@@ -174,6 +155,7 @@ class CloudflaredTab:
                 json.dump(PRESETS, f_config, indent=2)
             messagebox.showinfo("Import", f"Configurations importées : {imported_names}")
             self.profile_menu['values'] = list(PRESETS.keys())
+            messagebox.showinfo("Import", "Configurations importées.")
 
     def import_tokens(self):
         file_path = filedialog.askopenfilename(title="Importer un fichier de tokens", filetypes=[("Fichiers JSON", "*.json")])
@@ -188,6 +170,7 @@ class CloudflaredTab:
                 json.dump(TOKENS, f_tokens, indent=2)
             messagebox.showinfo("Import", f"Tokens importés : {imported_names}")
             self.token_menu['values'] = list(TOKENS.keys())
+            messagebox.showinfo("Import", "Tokens importés.")
 
     def run_cloudflared(self):
         path = self.cloudflared_path_var.get()
@@ -226,6 +209,7 @@ class CloudflaredGUI:
 
         # Charger les profils AVANT d'ajouter des onglets
         self.load_configs_and_tokens()
+        self.load_saved_cloudflared_path()
         self.detect_cloudflared()
 
         self.top_frame = ttk.Frame(root)
@@ -261,6 +245,7 @@ class CloudflaredGUI:
         path = filedialog.askopenfilename(title="Sélectionner cloudflared.exe", filetypes=[("Executable", "*.exe")])
         if path:
             self.cloudflared_path_var.set(path)
+            self.save_cloudflared_path(path)
 
     def download_cloudflared(self):
         save_path = filedialog.asksaveasfilename(defaultextension=".exe", filetypes=[("Executable", "*.exe")], title="Enregistrer cloudflared.exe")
@@ -282,6 +267,18 @@ class CloudflaredGUI:
         if os.path.exists(TOKENS_FILE):
             with open(TOKENS_FILE, "r") as f:
                 TOKENS.update(json.load(f))
+
+    def save_cloudflared_path(self, path):
+        save_file = os.path.join(os.path.dirname(__file__), "cloudflared_path.json")
+        with open(save_file, "w") as f:
+            json.dump({"path": path}, f)
+
+    def load_saved_cloudflared_path(self):
+        save_file = os.path.join(os.path.dirname(__file__), "cloudflared_path.json")
+        if os.path.exists(save_file):
+            with open(save_file, "r") as f:
+                data = json.load(f)
+                self.cloudflared_path_var.set(data.get("path", ""))
 
     def open_download_page(self):
         webbrowser.open("https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/")
