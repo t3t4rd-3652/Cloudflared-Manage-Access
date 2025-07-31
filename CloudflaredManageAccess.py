@@ -7,10 +7,41 @@ import urllib.request
 import json
 import shutil
 
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), "cloudflared_configs.json")
-TOKENS_FILE = os.path.join(os.path.dirname(__file__), "cloudflared_tokens.json")
+import sys
+def resource_path(relative_path):
+    """
+    Renvoie le chemin absolu vers une ressource, compatible avec les modes script et exécutable PyInstaller.
 
-PRESETS = {}
+    Args:
+        relative (str): Le chemin relatif vers la ressource.
+
+    Returns:
+        str: Le chemin absolu vers la ressource.
+    """
+    try:
+        base_path = sys._MEIPASS  # utilisé par PyInstaller
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
+APPDATA_DIR = os.path.join(os.getenv('APPDATA'), "CloudflaredManager")
+os.makedirs(APPDATA_DIR, exist_ok=True)
+
+CONFIG_FILE = os.path.join(APPDATA_DIR, "cloudflared_configs.json")
+TOKENS_FILE = os.path.join(APPDATA_DIR, "cloudflared_tokens.json")
+
+print(CONFIG_FILE,TOKENS_FILE)
+
+PRESETS = {
+  "MongoDB": {
+    "hostname": "mongodb.tondomaine.fr",
+    "host": "127.0.0.1",
+    "port": "27017"},
+  "SSH": {
+    "hostname": "ssh.tondomaine.fr",
+    "host": "127.0.0.1",
+    "port": "22"}}
 TOKENS = {}
 
 class CloudflaredTab:
@@ -73,11 +104,20 @@ class CloudflaredTab:
             self.frame.columnconfigure(i, weight=1)
 
     def toggle_token_fields(self):
+        """
+        Active ou désactive les champs d'entrée des tokens en fonction de la case à cocher 'Utiliser un Service Token'.
+        """
         state = "normal" if self.use_token_var.get() else "disabled"
         self.token_id_entry.configure(state=state)
         self.token_secret_entry.configure(state=state)
+        if state == "disabled":
+            self.token_id_entry.delete(0, tk.END)
+            self.token_secret_entry.delete(0, tk.END)
 
     def create_new_profile(self):
+        """
+        Crée un nouveau profil de connexion en demandant un nom via une boîte de dialogue, puis l'ajoute à la liste déroulante.
+        """
         name = simpledialog.askstring("Nouveau profil", "Nom du nouveau profil :")
         if name and name not in PRESETS:
             PRESETS[name] = {}
@@ -85,6 +125,9 @@ class CloudflaredTab:
             self.profile_var.set(name)
 
     def create_new_token_profile(self):
+        """
+        Crée un nouveau profil de token vide après avoir demandé un nom, puis l'ajoute à la liste déroulante.
+        """
         name = simpledialog.askstring("Nouveau token", "Nom du nouveau token :")
         if name and name not in TOKENS:
             TOKENS[name] = {"token_id": "", "token_secret": ""}
@@ -92,6 +135,12 @@ class CloudflaredTab:
             self.token_profile_var.set(name)
 
     def load_profile(self, event=None):
+        """
+        Charge les paramètres d'un profil sélectionné (hostname, hôte local, port, token) dans les champs de l'interface.
+
+        Args:
+            event: (Optionnel) Événement Tkinter, ignoré.
+        """
         name = self.profile_var.get()
         config = PRESETS.get(name, {})
         self.hostname_entry.delete(0, tk.END)
@@ -106,7 +155,17 @@ class CloudflaredTab:
         self.token_secret_entry.insert(0, config.get("token_secret", ""))
 
     def load_token_profile(self, event=None):
+        """
+        Charge les informations d’un profil de token sélectionné (ID et secret), et active les champs associés.
+
+        Args:
+            event: (Optionnel) Événement Tkinter, ignoré.
+        """
         name = self.token_profile_var.get()
+        if not name:
+            return
+        self.use_token_var.set(True)
+        self.toggle_token_fields()
         token = TOKENS.get(name, {})
         self.token_id_entry.delete(0, tk.END)
         self.token_id_entry.insert(0, token.get("token_id", ""))
@@ -114,6 +173,10 @@ class CloudflaredTab:
         self.token_secret_entry.insert(0, token.get("token_secret", ""))
 
     def save_config(self):
+        """
+        Sauvegarde le profil de connexion courant dans le fichier JSON de configuration.
+        Affiche une boîte d'information à la fin.
+        """
         name = self.profile_var.get()
         if not name:
             return
@@ -130,6 +193,10 @@ class CloudflaredTab:
         messagebox.showinfo("Sauvegarde", f"Configuration '{name}' enregistrée.")
 
     def save_token(self):
+        """
+        Sauvegarde le profil de token courant dans le fichier JSON dédié.
+        Affiche une boîte d'information à la fin.
+        """
         name = self.token_profile_var.get()
         if not name:
             return
@@ -143,6 +210,10 @@ class CloudflaredTab:
         messagebox.showinfo("Sauvegarde", f"Token '{name}' enregistré.")
 
     def import_config(self):
+        """
+        Importe un fichier JSON contenant des profils de configuration cloudflared.
+        Met à jour la liste des profils et sauvegarde dans le fichier local.
+        """
         file_path = filedialog.askopenfilename(title="Importer un fichier de profils", filetypes=[("Fichiers JSON", "*.json")])
         if not file_path:
             return
@@ -158,6 +229,10 @@ class CloudflaredTab:
             messagebox.showinfo("Import", "Configurations importées.")
 
     def import_tokens(self):
+        """
+        Importe un fichier JSON contenant des tokens.
+        Met à jour la liste des tokens et sauvegarde dans le fichier local.
+        """
         file_path = filedialog.askopenfilename(title="Importer un fichier de tokens", filetypes=[("Fichiers JSON", "*.json")])
         if not file_path:
             return
@@ -173,6 +248,11 @@ class CloudflaredTab:
             messagebox.showinfo("Import", "Tokens importés.")
 
     def run_cloudflared(self):
+        """
+        Lance la commande cloudflared avec les paramètres fournis par l'utilisateur.
+        Gère l'utilisation ou non d'un token.
+        Affiche une boîte de dialogue en cas d’erreur ou de succès.
+        """
         path = self.cloudflared_path_var.get()
         if not path or not os.path.isfile(path):
             messagebox.showerror("Erreur", "Chemin vers cloudflared non valide.")
@@ -203,6 +283,12 @@ class CloudflaredTab:
 
 class CloudflaredGUI:
     def __init__(self, root):
+        """
+        Initialise l'interface principale, charge les profils, configure les onglets et les boutons.
+        
+        Args:
+            root (tk.Tk): Fenêtre principale Tkinter.
+        """
         self.root = root
         self.root.title("Gestionnaire Cloudflared TCP Tunnel")
         self.cloudflared_path_var = tk.StringVar()
@@ -237,17 +323,28 @@ class CloudflaredGUI:
         self.add_tab()
 
     def detect_cloudflared(self):
+        """
+        Tente de détecter automatiquement le chemin vers l'exécutable cloudflared via la variable d’environnement PATH.
+        """
         path = shutil.which("cloudflared")
         if path:
             self.cloudflared_path_var.set(path)
 
     def browse_exe(self):
+        """
+        Ouvre une boîte de dialogue pour sélectionner manuellement le fichier cloudflared.exe.
+        Sauvegarde ensuite le chemin dans un fichier JSON.
+        """
         path = filedialog.askopenfilename(title="Sélectionner cloudflared.exe", filetypes=[("Executable", "*.exe")])
         if path:
             self.cloudflared_path_var.set(path)
             self.save_cloudflared_path(path)
 
     def download_cloudflared(self):
+        """
+        Télécharge automatiquement l’exécutable cloudflared depuis GitHub.
+        Demande où l’enregistrer via une boîte de dialogue.
+        """
         save_path = filedialog.asksaveasfilename(defaultextension=".exe", filetypes=[("Executable", "*.exe")], title="Enregistrer cloudflared.exe")
         if not save_path:
             return
@@ -260,6 +357,10 @@ class CloudflaredGUI:
             messagebox.showerror("Erreur de téléchargement", f"Impossible de télécharger : {e}")
 
     def load_configs_and_tokens(self):
+        """
+        Charge les fichiers JSON existants contenant les profils et les tokens.
+        Met à jour les variables globales `PRESETS` et `TOKENS`.
+        """
         global PRESETS, TOKENS
         if os.path.exists(CONFIG_FILE):
             with open(CONFIG_FILE, "r") as f:
@@ -269,21 +370,36 @@ class CloudflaredGUI:
                 TOKENS.update(json.load(f))
 
     def save_cloudflared_path(self, path):
-        save_file = os.path.join(os.path.dirname(__file__), "cloudflared_path.json")
+        """
+        Sauvegarde le chemin vers cloudflared dans un fichier JSON.
+
+        Args:
+            path (str): Chemin absolu vers l’exécutable cloudflared.
+        """
+        save_file = os.path.join(APPDATA_DIR, "cloudflared_path.json")
         with open(save_file, "w") as f:
             json.dump({"path": path}, f)
 
     def load_saved_cloudflared_path(self):
-        save_file = os.path.join(os.path.dirname(__file__), "cloudflared_path.json")
+        """
+        Charge le chemin précédemment sauvegardé vers cloudflared depuis le fichier JSON.
+        """
+        save_file = os.path.join(APPDATA_DIR, "cloudflared_path.json")
         if os.path.exists(save_file):
             with open(save_file, "r") as f:
                 data = json.load(f)
                 self.cloudflared_path_var.set(data.get("path", ""))
 
     def open_download_page(self):
+        """
+        Ouvre la page officielle de téléchargement de cloudflared dans le navigateur par défaut.
+        """
         webbrowser.open("https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/")
 
     def add_tab(self):
+        """
+        Ajoute un nouvel onglet de configuration (nouvelle instance de CloudflaredTab) à l’interface.
+        """
         self.tab_count += 1
         tab = CloudflaredTab(self.tab_control, self.cloudflared_path_var)
         tab.profile_menu['values'] = list(PRESETS.keys())
@@ -293,6 +409,10 @@ class CloudflaredGUI:
         self.tab_control.select(len(self.tabs) - 1)
 
     def remove_current_tab(self):
+        """
+        Supprime l’onglet actuellement sélectionné si plus d’un onglet est présent.
+        Affiche une alerte si l'utilisateur tente de supprimer le dernier onglet.
+        """
         if len(self.tabs) <= 1:
             messagebox.showinfo("Impossible", "Impossible de supprimer le dernier onglet.")
             return
@@ -302,5 +422,6 @@ class CloudflaredGUI:
 
 if __name__ == "__main__":
     root = tk.Tk()
+    root.iconbitmap(resource_path("cloudflared.ico"))
     app = CloudflaredGUI(root)
     root.mainloop()
