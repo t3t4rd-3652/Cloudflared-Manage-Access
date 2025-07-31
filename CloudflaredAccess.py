@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, simpledialog
 import subprocess
 import os
 import webbrowser
@@ -11,34 +11,26 @@ CONFIG_FILE = os.path.join(os.path.dirname(__file__), "cloudflared_configs.json"
 TOKENS_FILE = os.path.join(os.path.dirname(__file__), "cloudflared_tokens.json")
 
 PRESETS = {
-    "Default": {},
-    "MongoDB": {
-        "hostname": "mongodb.tondomaine.fr",
-        "host": "127.0.0.1",
-        "port": "27017"
-    },
-    "SSH": {
-        "hostname": "ssh.tondomaine.fr",
-        "host": "127.0.0.1",
-        "port": "22"
-    },
-    "SERVICEWEB1": {
-        "hostname": "web1.tondomaine.fr",
-        "host": "127.0.0.1",
-        "port": "8080"
-    }
+  "Default": {"host":" 127.0.0.1"},
+  "MongoDB": {
+    "hostname": "mongodb.tondomaine.fr",
+    "host": "127.0.0.1",
+    "port": "27017"
+  },
+  "SSH": {
+    "hostname": "ssh.tondomaine.fr",
+    "host": "127.0.0.1",
+    "port": "22",
+    "token_id": "",
+    "token_secret": ""
+  },
+  "SERVICEWEB1": {
+    "hostname": "web.tondomaine.fr",
+    "host": "127.0.0.1",
+    "port": "8080"
+  }
 }
-
-TOKENS = {
-    "Token MongoDB": {
-        "token_id": "",
-        "token_secret": ""
-    },
-    "Token SSH": {
-        "token_id": "",
-        "token_secret": ""
-    }
-}
+TOKENS = {}
 
 class CloudflaredTab:
     def __init__(self, parent, cloudflared_path_var):
@@ -47,28 +39,31 @@ class CloudflaredTab:
 
         self.profile_var = tk.StringVar(value="Default")
         self.profile_menu = ttk.Combobox(self.frame, textvariable=self.profile_var, state="readonly")
-        self.profile_menu['values'] = list(PRESETS.keys())
         self.profile_menu.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
         self.profile_menu.bind("<<ComboboxSelected>>", self.load_profile)
 
         self.import_btn = ttk.Button(self.frame, text="Importer", command=self.import_config)
-        self.import_btn.grid(row=0, column=1, padx=2 ,sticky='ew')
+        self.import_btn.grid(row=0, column=1, padx=2, sticky='ew')
 
         self.save_btn = ttk.Button(self.frame, text="Enregistrer", command=self.save_config)
-        self.save_btn.grid(row=0, column=2, padx=(0, 5),sticky='ew')
+        self.save_btn.grid(row=0, column=2, padx=(0, 2), sticky='we')
 
-        ttk.Label(self.frame, text="Tokens :").grid(row=0, column=3, sticky="e")
+        self.new_profile_btn = ttk.Button(self.frame, text="➕", width=3, command=self.create_new_profile)
+        self.new_profile_btn.grid(row=0, column=3, padx=(0, 5), sticky='w')
+
+        ttk.Label(self.frame, text="Tokens :").grid(row=0, column=4, sticky="e")
         self.token_profile_var = tk.StringVar(value="")
         self.token_menu = ttk.Combobox(self.frame, textvariable=self.token_profile_var, state="readonly")
-        self.token_menu['values'] = list(TOKENS.keys())
-        self.token_menu.grid(row=0, column=4, sticky="ew", padx=5)
+        self.token_menu.grid(row=0, column=5, sticky="ew", padx=2)
         self.token_menu.bind("<<ComboboxSelected>>", self.load_token_profile)
 
-        ttk.Button(self.frame, text="Importer Token", command=self.import_tokens).grid(row=0, column=5, padx=5,sticky='w')
+        ttk.Button(self.frame, text="Importer Token", command=self.import_tokens).grid(row=0, column=6, padx=2, sticky='we')
+        ttk.Button(self.frame, text="Enregistrer Token", command=self.save_token).grid(row=0, column=7, padx=2, sticky='ew')
+        ttk.Button(self.frame, text="➕", width=3, command=self.create_new_token_profile).grid(row=0, column=8, padx=(0, 5), sticky='w')
 
         ttk.Label(self.frame, text="Hostname :").grid(row=1, column=0, sticky="e")
         self.hostname_entry = ttk.Entry(self.frame)
-        self.hostname_entry.grid(row=1, column=1, columnspan=5, sticky="ew", padx=5, pady=5)
+        self.hostname_entry.grid(row=1, column=1, columnspan=8, sticky="ew", padx=5, pady=5)
 
         ttk.Label(self.frame, text="Hôte local :").grid(row=2, column=0, sticky="e")
         self.host_entry = ttk.Entry(self.frame)
@@ -80,26 +75,40 @@ class CloudflaredTab:
 
         self.use_token_var = tk.BooleanVar()
         self.use_token_check = ttk.Checkbutton(self.frame, text="Utiliser un Service Token", variable=self.use_token_var, command=self.toggle_token_fields)
-        self.use_token_check.grid(row=3, columnspan=6, sticky="w", padx=5)
+        self.use_token_check.grid(row=3, columnspan=9, sticky="w", padx=5)
 
         ttk.Label(self.frame, text="Token ID :").grid(row=4, column=0, sticky="e")
         self.token_id_entry = ttk.Entry(self.frame, state="disabled")
-        self.token_id_entry.grid(row=4, column=1, columnspan=5, sticky="ew", padx=5, pady=5)
+        self.token_id_entry.grid(row=4, column=1, columnspan=8, sticky="ew", padx=5, pady=5)
 
         ttk.Label(self.frame, text="Token Secret :").grid(row=5, column=0, sticky="e")
         self.token_secret_entry = ttk.Entry(self.frame, state="disabled")
-        self.token_secret_entry.grid(row=5, column=1, columnspan=5, sticky="ew", padx=5, pady=5)
+        self.token_secret_entry.grid(row=5, column=1, columnspan=8, sticky="ew", padx=5, pady=5)
 
         self.launch_button = ttk.Button(self.frame, text="Lancer la connexion", command=self.run_cloudflared)
-        self.launch_button.grid(row=6, columnspan=6, pady=10)
+        self.launch_button.grid(row=6, columnspan=9, pady=10)
 
-        for i in range(6):
+        for i in range(9):
             self.frame.columnconfigure(i, weight=1)
 
     def toggle_token_fields(self):
         state = "normal" if self.use_token_var.get() else "disabled"
         self.token_id_entry.configure(state=state)
         self.token_secret_entry.configure(state=state)
+
+    def create_new_profile(self):
+        name = simpledialog.askstring("Nouveau profil", "Nom du nouveau profil :")
+        if name and name not in PRESETS:
+            PRESETS[name] = {}
+            self.profile_menu['values'] = list(PRESETS.keys())
+            self.profile_var.set(name)
+
+    def create_new_token_profile(self):
+        name = simpledialog.askstring("Nouveau token", "Nom du nouveau token :")
+        if name and name not in TOKENS:
+            TOKENS[name] = {"token_id": "", "token_secret": ""}
+            self.token_menu['values'] = list(TOKENS.keys())
+            self.token_profile_var.set(name)
 
     def load_profile(self, event=None):
         name = self.profile_var.get()
@@ -139,23 +148,46 @@ class CloudflaredTab:
         self.profile_menu['values'] = list(PRESETS.keys())
         messagebox.showinfo("Sauvegarde", f"Configuration '{name}' enregistrée.")
 
-    def import_config(self):
-        if not os.path.exists(CONFIG_FILE):
+    def save_token(self):
+        name = self.token_profile_var.get()
+        if not name:
             return
-        with open(CONFIG_FILE, "r") as f:
+        TOKENS[name] = {
+            "token_id": self.token_id_entry.get(),
+            "token_secret": self.token_secret_entry.get()
+        }
+        with open(TOKENS_FILE, "w") as f:
+            json.dump(TOKENS, f, indent=2)
+        self.token_menu['values'] = list(TOKENS.keys())
+        messagebox.showinfo("Sauvegarde", f"Token '{name}' enregistré.")
+
+    def import_config(self):
+        file_path = filedialog.askopenfilename(title="Importer un fichier de profils", filetypes=[("Fichiers JSON", "*.json")])
+        if not file_path:
+            return
+        with open(file_path, "r") as f:
             loaded = json.load(f)
             PRESETS.update(loaded)
             self.profile_menu['values'] = list(PRESETS.keys())
-            messagebox.showinfo("Import", "Configurations importées.")
+            imported_names = ', '.join(loaded.keys())
+            with open(CONFIG_FILE, "w") as f_config:
+                json.dump(PRESETS, f_config, indent=2)
+            messagebox.showinfo("Import", f"Configurations importées : {imported_names}")
+            self.profile_menu['values'] = list(PRESETS.keys())
 
     def import_tokens(self):
-        if not os.path.exists(TOKENS_FILE):
+        file_path = filedialog.askopenfilename(title="Importer un fichier de tokens", filetypes=[("Fichiers JSON", "*.json")])
+        if not file_path:
             return
-        with open(TOKENS_FILE, "r") as f:
+        with open(file_path, "r") as f:
             loaded = json.load(f)
             TOKENS.update(loaded)
             self.token_menu['values'] = list(TOKENS.keys())
-            messagebox.showinfo("Import", "Tokens importés.")
+            imported_names = ', '.join(loaded.keys())
+            with open(TOKENS_FILE, "w") as f_tokens:
+                json.dump(TOKENS, f_tokens, indent=2)
+            messagebox.showinfo("Import", f"Tokens importés : {imported_names}")
+            self.token_menu['values'] = list(TOKENS.keys())
 
     def run_cloudflared(self):
         path = self.cloudflared_path_var.get()
@@ -191,6 +223,9 @@ class CloudflaredGUI:
         self.root = root
         self.root.title("Gestionnaire Cloudflared TCP Tunnel")
         self.cloudflared_path_var = tk.StringVar()
+
+        # Charger les profils AVANT d'ajouter des onglets
+        self.load_configs_and_tokens()
         self.detect_cloudflared()
 
         self.top_frame = ttk.Frame(root)
@@ -239,12 +274,23 @@ class CloudflaredGUI:
         except Exception as e:
             messagebox.showerror("Erreur de téléchargement", f"Impossible de télécharger : {e}")
 
+    def load_configs_and_tokens(self):
+        global PRESETS, TOKENS
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, "r") as f:
+                PRESETS.update(json.load(f))
+        if os.path.exists(TOKENS_FILE):
+            with open(TOKENS_FILE, "r") as f:
+                TOKENS.update(json.load(f))
+
     def open_download_page(self):
         webbrowser.open("https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/")
 
     def add_tab(self):
         self.tab_count += 1
         tab = CloudflaredTab(self.tab_control, self.cloudflared_path_var)
+        tab.profile_menu['values'] = list(PRESETS.keys())
+        tab.token_menu['values'] = list(TOKENS.keys())
         self.tabs.append(tab)
         self.tab_control.add(tab.frame, text=f"Connexion {self.tab_count}")
         self.tab_control.select(len(self.tabs) - 1)
@@ -258,13 +304,6 @@ class CloudflaredGUI:
         del self.tabs[current]
 
 if __name__ == "__main__":
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "r") as f:
-            PRESETS.update(json.load(f))
-    if os.path.exists(TOKENS_FILE):
-        with open(TOKENS_FILE, "r") as f:
-            TOKENS.update(json.load(f))
-
     root = tk.Tk()
     app = CloudflaredGUI(root)
     root.mainloop()
