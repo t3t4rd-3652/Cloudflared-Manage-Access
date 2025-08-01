@@ -31,9 +31,11 @@ os.makedirs(APPDATA_DIR, exist_ok=True)
 CONFIG_FILE = os.path.join(APPDATA_DIR, "cloudflared_configs.json")
 TOKENS_FILE = os.path.join(APPDATA_DIR, "cloudflared_tokens.json")
 
-print(CONFIG_FILE,TOKENS_FILE)
-
-PRESETS = {
+# print(CONFIG_FILE,TOKENS_FILE)
+if os.path.isfile(CONFIG_FILE):
+    PRESETS={}
+else:
+    PRESETS = {
   "MongoDB": {
     "hostname": "mongodb.tondomaine.fr",
     "host": "127.0.0.1",
@@ -42,6 +44,7 @@ PRESETS = {
     "hostname": "ssh.tondomaine.fr",
     "host": "127.0.0.1",
     "port": "22"}}
+
 TOKENS = {}
 
 class CloudflaredTab:
@@ -71,7 +74,7 @@ class CloudflaredTab:
 
     def rename_token(self):
         name = self.token_profile_var.get()
-        print(name not in TOKENS)
+        # print(name not in TOKENS)
         if name not in TOKENS:
             return
         new_name = simpledialog.askstring("Renommer le token", "Nouveau nom :", initialvalue=name)
