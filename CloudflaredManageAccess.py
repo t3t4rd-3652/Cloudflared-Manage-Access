@@ -158,10 +158,10 @@ class CloudflaredTab:
         self.token_secret_entry.grid(row=5, column=1, columnspan=8, sticky="ew", padx=5, pady=5)
 
         self.launch_button = ttk.Button(self.frame, text="Lancer la connexion", command=self.run_cloudflared)
-        self.launch_button.grid(row=6, columnspan=9, pady=10)
+        self.launch_button.grid(row=6,column=0, columnspan=9, pady=10)
 
         self.close_button = ttk.Button(self.frame, text="❌ Fermer connexion", command=self.close_connection)
-        self.close_button.grid(row=7, columnspan=9, pady=5)
+        self.close_button.grid(row=6,column=1, columnspan=9, pady=5)
 
         for i in range(9):
             match i:
