@@ -455,7 +455,7 @@ class CloudflaredGUI:
         self.button_frame.pack(pady=5)
 
         ttk.Button(self.button_frame, text="Nouvel onglet", command=self.add_tab).pack(side="left", padx=5)
-        ttk.Button(self.button_frame, text="Supprimer l'onglet courant", command=self.remove_current_tab).pack(side="left", padx=5)
+        ttk.Button(self.button_frame, text="Supprimer l'onglet", command=self.remove_current_tab).pack(side="left", padx=5)
 
         self.tabs = []
         self.tab_count = 0
