@@ -45,6 +45,54 @@ PRESETS = {
 TOKENS = {}
 
 class CloudflaredTab:
+    def rename_profile(self):
+        name = self.profile_var.get()
+        if name not in PRESETS:
+            return
+        new_name = simpledialog.askstring("Renommer le profil", "Nouveau nom :", initialvalue=name)
+        if new_name and new_name != name:
+            PRESETS[new_name] = PRESETS.pop(name)
+            self.profile_menu['values'] = list(PRESETS.keys())
+            self.profile_var.set(new_name)
+            with open(CONFIG_FILE, "w") as f:
+                json.dump(PRESETS, f, indent=2)
+
+    def delete_profile(self):
+        name = self.profile_var.get()
+        if name not in PRESETS:
+            return
+        confirm = messagebox.askyesno("Supprimer", f"Supprimer le profil '{name}' ?")
+        if confirm:
+            del PRESETS[name]
+            self.profile_menu['values'] = list(PRESETS.keys())
+            self.profile_var.set('')
+            with open(CONFIG_FILE, "w") as f:
+                json.dump(PRESETS, f, indent=2)
+
+    def rename_token(self):
+        name = self.token_profile_var.get()
+        print(name not in TOKENS)
+        if name not in TOKENS:
+            return
+        new_name = simpledialog.askstring("Renommer le token", "Nouveau nom :", initialvalue=name)
+        if new_name and new_name != name:
+            TOKENS[new_name] = TOKENS.pop(name)
+            self.token_menu['values'] = list(TOKENS.keys())
+            self.token_profile_var.set(new_name)
+            with open(TOKENS_FILE, "w") as f:
+                json.dump(TOKENS, f, indent=2)
+
+    def delete_token(self):
+        name = self.token_profile_var.get()
+        if name not in TOKENS:
+            return
+        confirm = messagebox.askyesno("Supprimer", f"Supprimer le token '{name}' ?")
+        if confirm:
+            del TOKENS[name]
+            self.token_menu['values'] = list(TOKENS.keys())
+            self.token_profile_var.set('')
+            with open(TOKENS_FILE, "w") as f:
+                json.dump(TOKENS, f, indent=2)
     def __init__(self, parent, cloudflared_path_var):
         self.frame = ttk.Frame(parent)
         self.cloudflared_path_var = cloudflared_path_var
@@ -61,17 +109,26 @@ class CloudflaredTab:
         self.save_btn.grid(row=0, column=2, padx=(0, 2), sticky='ew')
 
         self.new_profile_btn = ttk.Button(self.frame, text="➕", width=3, command=self.create_new_profile)
-        self.new_profile_btn.grid(row=0, column=3, padx=(0, 5), sticky='w')
+        self.new_profile_btn.grid(row=0, column=3, padx=(0, 5), sticky='ew')
 
-        ttk.Label(self.frame, text="Tokens :").grid(row=0, column=4, sticky="e")
+        self.rename_profile_btn = ttk.Button(self.frame, text="✏️", width=3, command=self.rename_profile)
+        self.rename_profile_btn.grid(row=0, column=4, padx=(0, 2), sticky='ew')
+        self.delete_profile_btn = ttk.Button(self.frame, text="🗑️", width=3, command=self.delete_profile)
+        self.delete_profile_btn.grid(row=0, column=5, padx=(0, 5), sticky='w')
+
+        ttk.Label(self.frame, text="Tokens :").grid(row=0, column=6, sticky="e")
         self.token_profile_var = tk.StringVar(value="")
         self.token_menu = ttk.Combobox(self.frame, textvariable=self.token_profile_var, state="readonly")
-        self.token_menu.grid(row=0, column=5, sticky="ew", padx=2)
+        self.token_menu.grid(row=0, column=7, sticky="ew", padx=2)
         self.token_menu.bind("<<ComboboxSelected>>", self.load_token_profile)
 
-        ttk.Button(self.frame, text="Importer Token", command=self.import_tokens).grid(row=0, column=6, padx=2, sticky='ew')
-        ttk.Button(self.frame, text="Enregistrer Token", command=self.save_token).grid(row=0, column=7, padx=2, sticky='ew')
-        ttk.Button(self.frame, text="➕", width=3, command=self.create_new_token_profile).grid(row=0, column=8, padx=(0, 5), sticky='w')
+        ttk.Button(self.frame, text="Importer Token", command=self.import_tokens).grid(row=0, column=8, padx=2, sticky='ew')
+        ttk.Button(self.frame, text="Enregistrer Token", command=self.save_token).grid(row=0, column=9, padx=2, sticky='ew')
+        ttk.Button(self.frame, text="➕", width=3, command=self.create_new_token_profile).grid(row=0, column=10, padx=(0, 5), sticky='w')
+        self.rename_token_btn = ttk.Button(self.frame, text="✏️", width=3, command=self.rename_token)
+        self.rename_token_btn.grid(row=0, column=11, padx=(0, 2), sticky='ew')
+        self.delete_token_btn = ttk.Button(self.frame, text="🗑️", width=3, command=self.delete_token)
+        self.delete_token_btn.grid(row=0, column=12, padx=(0, 5), sticky='w')
 
         ttk.Label(self.frame, text="Hostname :").grid(row=1, column=0, sticky="e")
         self.hostname_entry = ttk.Entry(self.frame)
@@ -100,8 +157,16 @@ class CloudflaredTab:
         self.launch_button = ttk.Button(self.frame, text="Lancer la connexion", command=self.run_cloudflared)
         self.launch_button.grid(row=6, columnspan=9, pady=10)
 
+        self.close_button = ttk.Button(self.frame, text="❌ Fermer connexion", command=self.close_connection)
+        self.close_button.grid(row=7, columnspan=9, pady=5)
+
         for i in range(9):
-            self.frame.columnconfigure(i, weight=1)
+            match i:
+                case i if i > 1 and i < 6:
+                    pass
+                case _:
+                    # print(i)
+                    self.frame.columnconfigure(i, weight=1)
 
     def toggle_token_fields(self):
         """
@@ -190,7 +255,7 @@ class CloudflaredTab:
         with open(CONFIG_FILE, "w") as f:
             json.dump(PRESETS, f, indent=2)
         self.profile_menu['values'] = list(PRESETS.keys())
-        messagebox.showinfo("Sauvegarde", f"Configuration '{name}' enregistrée.")
+        timed_messagebox("Sauvegarde", f"Configuration '{name}' enregistrée.")
 
     def save_token(self):
         """
@@ -207,7 +272,7 @@ class CloudflaredTab:
         with open(TOKENS_FILE, "w") as f:
             json.dump(TOKENS, f, indent=2)
         self.token_menu['values'] = list(TOKENS.keys())
-        messagebox.showinfo("Sauvegarde", f"Token '{name}' enregistré.")
+        timed_messagebox("Sauvegarde", f"Token '{name}' enregistré.")
 
     def import_config(self):
         """
@@ -224,7 +289,7 @@ class CloudflaredTab:
             imported_names = ', '.join(loaded.keys())
             with open(CONFIG_FILE, "w") as f_config:
                 json.dump(PRESETS, f_config, indent=2)
-            messagebox.showinfo("Import", f"Configurations importées : {imported_names}")
+            timed_messagebox("Import", f"Configurations importées : {imported_names}")
             self.profile_menu['values'] = list(PRESETS.keys())
             messagebox.showinfo("Import", "Configurations importées.")
 
@@ -247,7 +312,66 @@ class CloudflaredTab:
             self.token_menu['values'] = list(TOKENS.keys())
             messagebox.showinfo("Import", "Tokens importés.")
 
+    def close_connection(self):
+        if not cloudflared_processes:
+            timed_messagebox("Erreur", "Aucune connexion active à fermer.")
+            return
+
+        def confirm_and_close(index):
+            proc = cloudflared_processes.pop(index)
+            if '--hostname' in proc.args:
+                hostname_index = proc.args.index('--hostname') + 1
+                hostname = proc.args[hostname_index]
+                # print(f"Hostname : {hostname}")
+                timed_messagebox("Connexion fermée", f"Connexion {hostname} arrêtée.")
+            else:
+                timed_messagebox("Connexion fermée", f"Connexion UNKNOWN arrêtée.")
+            proc.terminate()
+            update_connection_status()
+            try:
+                dialog.destroy()
+            except Exception as e:
+                pass
+        if len(cloudflared_processes) == 1:
+            confirm_and_close(0)
+        else:
+            dialog = tk.Toplevel()
+            dialog.title("Fermer une connexion")
+            dialog.geometry("500x260")
+            ttk.Label(dialog, text="Sélectionnez une connexion à fermer :").pack(pady=10)
+            listbox = tk.Listbox(dialog, width=80)
+            listbox.pack(padx=10, pady=5, fill="both", expand=True)
+            for i, p in enumerate(cloudflared_processes):
+                hostname = next((arg for j, arg in enumerate(p.args) if p.args[j-1] == '--hostname'), f"Connexion {i}")
+                listbox.insert(tk.END, f"{hostname}")
+
+            def on_select():
+                selected = listbox.curselection()
+                if selected:
+                    confirm_and_close(selected[0])
+
+            ttk.Button(dialog, text="Fermer la connexion sélectionnée", command=on_select).pack(pady=10)
+            dialog.attributes('-topmost', True)
+            dialog.grab_set()
+        update_connection_status()
+
     def run_cloudflared(self):
+        import socket
+        host = self.host_entry.get().strip() or "127.0.0.1"
+        port = self.port_entry.get().strip()
+        if not port.isdigit():
+            timed_messagebox("Erreur", "Le port spécifié n'est pas valide.")
+            return
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind((host, int(port)))
+            except OSError:
+                timed_messagebox("Port utilisé", f"Le port {port} est déjà utilisé localement. Veuillez en choisir un autre.")
+                return
+        for proc in cloudflared_processes:
+            if proc.args and f"--url {self.host_entry.get()}:{self.port_entry.get()}" in ' '.join(proc.args):
+                timed_messagebox("Erreur", f"Une connexion est déjà active sur le port {self.port_entry.get()}. Veuillez en choisir un autre.")
+                return
         """
         Lance la commande cloudflared avec les paramètres fournis par l'utilisateur.
         Gère l'utilisation ou non d'un token.
@@ -255,7 +379,7 @@ class CloudflaredTab:
         """
         path = self.cloudflared_path_var.get()
         if not path or not os.path.isfile(path):
-            messagebox.showerror("Erreur", "Chemin vers cloudflared non valide.")
+            timed_messagebox("Erreur", "Chemin vers cloudflared non valide.")
             return
 
         hostname = self.hostname_entry.get().strip()
@@ -276,13 +400,25 @@ class CloudflaredTab:
             cmd += ["--service-token-id", token_id, "--service-token-secret", token_secret]
 
         try:
-            subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_CONSOLE)
-            messagebox.showinfo("Succès", f"Connexion vers {hostname} lancée.")
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
+            cloudflared_processes.append(proc)
+            try:
+                _, stderr = proc.communicate(timeout=1)
+                if b"address already in use" in stderr:
+                    timed_messagebox("Port utilisé", f"Le port {port} est déjà utilisé. Veuillez en choisir un autre.")
+                    proc.terminate()
+                    return
+            except subprocess.TimeoutExpired:
+                pass
+            timed_messagebox("Succès", f"Connexion vers {hostname} lancée.")
+            update_connection_status()
         except Exception as e:
             messagebox.showerror("Erreur", f"Échec d'exécution : {e}")
 
 class CloudflaredGUI:
-    def __init__(self, root):
+    def __init__(self, root):  # Main GUI initialization
         """
         Initialise l'interface principale, charge les profils, configure les onglets et les boutons.
         
@@ -321,6 +457,9 @@ class CloudflaredGUI:
         self.tabs = []
         self.tab_count = 0
         self.add_tab()
+
+        self.status_label = ttk.Label(root, text="Connexions ouvertes : 0", anchor="e")
+        self.status_label.pack(side="bottom", fill="x", padx=5, pady=2)
 
     def detect_cloudflared(self):
         """
@@ -419,6 +558,40 @@ class CloudflaredGUI:
         current = self.tab_control.index(self.tab_control.select())
         self.tab_control.forget(current)
         del self.tabs[current]
+
+import signal
+import psutil
+import atexit
+
+cloudflared_processes = []
+connection_labels = []
+
+def timed_messagebox(title, message, duration=10000):
+    top = tk.Toplevel()
+    top.title(title)
+    top.geometry("400x100")
+    tk.Label(top, text=message, wraplength=380, justify="left").pack(padx=10, pady=10)
+    top.after(duration, top.destroy)
+    top.attributes('-topmost', True)
+    top.grab_set()
+
+
+def update_connection_status():
+    status_text = f"Connexions ouvertes : {len(cloudflared_processes)}"
+    if hasattr(app, 'status_label'):
+        app.status_label.config(text=status_text)
+
+
+def cleanup():
+    for proc in cloudflared_processes:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+atexit.register(cleanup)
 
 if __name__ == "__main__":
     root = tk.Tk()
