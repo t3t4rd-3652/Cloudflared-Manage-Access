@@ -19,9 +19,11 @@ Cloudflared GUI est une interface graphique portable (Tkinter) pour simplifier l
 
 🧳 100 % portable : aucune installation nécessaire, les fichiers restent locaux
 
-> 🚀 Exécution
+> 🚀 Exécution via python
 
 >> python cloudflared_gui.py
+
+Le .exe est également disponible dans \dist
 
 > 📚 Compilation
 
