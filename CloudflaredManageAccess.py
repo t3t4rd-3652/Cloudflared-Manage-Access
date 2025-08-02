@@ -8,6 +8,8 @@ import json
 import shutil
 
 import sys
+from pathlib import Path
+import platform
 def resource_path(relative_path):
     """
     Renvoie le chemin absolu vers une ressource, compatible avec les modes script et exécutable PyInstaller.
@@ -25,7 +27,19 @@ def resource_path(relative_path):
 
     return os.path.join(base_path, relative_path)
 
-APPDATA_DIR = os.path.join(os.getenv('APPDATA'), "CloudflaredManager")
+
+def get_appdata_dir():
+    system = platform.system()
+    if system == "Windows":
+        return os.path.join(os.getenv("APPDATA"), "CloudflaredManager")
+    elif system == "Darwin":  # macOS
+        return os.path.join(Path.home(), "Library", "Application Support", "CloudflaredManager")
+    else:  # Linux and others
+        return os.path.join(Path.home(), ".config", "CloudflaredManager")
+
+
+# APPDATA_DIR = os.path.join(os.getenv('APPDATA'), "CloudflaredManager")
+APPDATA_DIR = get_appdata_dir()
 os.makedirs(APPDATA_DIR, exist_ok=True)
 
 CONFIG_FILE = os.path.join(APPDATA_DIR, "cloudflared_configs.json")
@@ -403,9 +417,12 @@ class CloudflaredTab:
             cmd += ["--service-token-id", token_id, "--service-token-secret", token_secret]
 
         try:
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo = None
+            if platform.system() == "Windows":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
+
             cloudflared_processes.append(proc)
             try:
                 _, stderr = proc.communicate(timeout=1)
@@ -477,24 +494,37 @@ class CloudflaredGUI:
         Ouvre une boîte de dialogue pour sélectionner manuellement le fichier cloudflared.exe.
         Sauvegarde ensuite le chemin dans un fichier JSON.
         """
-        path = filedialog.askopenfilename(title="Sélectionner cloudflared.exe", filetypes=[("Executable", "*.exe")])
+        system = platform.system()
+        ext = ".exe" if system == "Windows" else ""
+        path = filedialog.askopenfilename(
+            title="Sélectionner cloudflared",
+            filetypes=[("Executable", f"*{ext}")],)
         if path:
             self.cloudflared_path_var.set(path)
             self.save_cloudflared_path(path)
 
     def download_cloudflared(self):
-        """
-        Télécharge automatiquement l’exécutable cloudflared depuis GitHub.
-        Demande où l’enregistrer via une boîte de dialogue.
-        """
-        save_path = filedialog.asksaveasfilename(defaultextension=".exe", filetypes=[("Executable", "*.exe")], title="Enregistrer cloudflared.exe")
+        system = platform.system()
+        urls = {
+            "Windows": "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe",
+            "Linux": "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64",
+            "Darwin": "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-amd64.tgz",  # ou .zip si tu préfères
+        }
+        url = urls.get(system)
+        if not url:
+            messagebox.showerror("Erreur", f"Système non supporté : {system}")
+            return
+
+        save_ext = ".exe" if system == "Windows" else ""
+        save_path = filedialog.asksaveasfilename(defaultextension=save_ext, filetypes=[("Executable", f"*{save_ext}")], title="Enregistrer cloudflared")
         if not save_path:
             return
-        url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
+
         try:
             urllib.request.urlretrieve(url, save_path)
+            os.chmod(save_path, 0o755)  # Rendre exécutable sur Unix
             self.cloudflared_path_var.set(save_path)
-            messagebox.showinfo("Téléchargement terminé", f"cloudflared.exe téléchargé à :\n{save_path}")
+            messagebox.showinfo("Téléchargement terminé", f"cloudflared téléchargé à :\n{save_path}")
         except Exception as e:
             messagebox.showerror("Erreur de téléchargement", f"Impossible de télécharger : {e}")
 
