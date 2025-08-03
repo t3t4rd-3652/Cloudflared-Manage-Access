@@ -215,6 +215,9 @@ class SSHRedirector:
             messagebox.showerror("Erreur", f"Impossible de récupérer les ports : {e}")
 
     def create_ssh_tunnel(self):
+        def is_port_in_use(port):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                return s.connect_ex(('localhost', port)) == 0
         host = self.host_entry.get().strip()
         port = int(self.port_entry.get().strip())
         user = self.user_entry.get().strip()
@@ -225,6 +228,14 @@ class SSHRedirector:
         selected_text = self.ports_listbox.get(selected[0])
         remote_port = selected_text.split()[0]
         local_port = self.local_port_entry.get().strip()
+        if not local_port.isdigit():
+            messagebox.showerror("Erreur", "Le port local doit être un nombre entier.")
+            return
+        local_port = int(local_port)
+
+        if is_port_in_use(local_port):
+            messagebox.showerror("Port occupé", f"Le port local {local_port} est déjà utilisé.")
+            return
 
         key_files = list(Path.home().joinpath(".ssh").glob("id_ed25519*"))
         key_file = next((k for k in key_files if not k.name.endswith(".pub")), None)
@@ -243,7 +254,12 @@ class SSHRedirector:
         ]
 
         try:
-            proc = subprocess.Popen(cmd)
+            startupinfo = None
+            if platform.system() == "Windows":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+            proc = subprocess.Popen(cmd, startupinfo=startupinfo)
             active_ssh_tunnels.append((f"{host}:{remote_port} → localhost:{local_port}", proc))
             self.refresh_connection_list()
             messagebox.showinfo("Tunnel actif", f"localhost:{local_port} redirige vers {host}:{remote_port}")
