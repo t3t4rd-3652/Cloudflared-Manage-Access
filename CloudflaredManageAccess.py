@@ -6,10 +6,272 @@ import webbrowser
 import urllib.request
 import json
 import shutil
-
+import paramiko
+import atexit
+import socket
+import string
 import sys
 from pathlib import Path
 import platform
+import random
+
+active_ssh_tunnels = []
+ssh_keys_summary = []
+
+# Charger les clés SSH existantes au démarrage
+
+def load_existing_ssh_keys():
+    ssh_dir = Path.home() / ".ssh"
+    if ssh_dir.exists():
+        for k in ssh_dir.glob("*"):
+            if (
+                k.is_file()
+                and not k.name.endswith(".pub")
+                and os.access(k, os.R_OK)
+                and not k.name.startswith("known_hosts")
+            ):
+                if str(k) not in ssh_keys_summary:
+                    ssh_keys_summary.append(str(k))
+
+load_existing_ssh_keys()
+
+# Fermer tous les tunnels SSH à la fermeture de l'application
+def cleanup_ssh_tunnels():
+    for _, proc in active_ssh_tunnels:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+atexit.register(cleanup_ssh_tunnels)
+
+class SSHRedirector:
+    def __init__(self, parent):
+        self.top = tk.Toplevel(parent)
+        self.top.title("Redirection SSH")
+        self.top.geometry("600x750")
+        self.top.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        ttk.Label(self.top, text="Hôte distant (IP ou nom) :").pack(pady=5)
+        self.host_entry = ttk.Entry(self.top)
+        self.host_entry.pack(fill="x", padx=10)
+
+        ttk.Label(self.top, text="Port SSH distant (défaut : 22) :").pack(pady=5)
+        self.port_entry = ttk.Entry(self.top)
+        self.port_entry.insert(0, "22")
+        self.port_entry.pack(fill="x", padx=10)
+
+        ttk.Label(self.top, text="Nom d'utilisateur SSH :").pack(pady=5)
+        self.user_entry = ttk.Entry(self.top)
+        self.user_entry.pack(fill="x", padx=10)
+
+        ttk.Button(self.top, text="Lister les ports ouverts", command=self.list_ports).pack(pady=10)
+
+        self.ports_listbox = tk.Listbox(self.top, height=6)
+        self.ports_listbox.pack(padx=10, fill="both", expand=False)
+
+        ttk.Label(self.top, text="Port local souhaité :").pack(pady=5)
+        self.local_port_entry = ttk.Entry(self.top)
+        self.local_port_entry.pack(fill="x", padx=10)
+
+        self.run_btn = ttk.Button(self.top, text="Créer le tunnel SSH", command=self.create_ssh_tunnel)
+        self.run_btn.pack(pady=15)
+
+        ttk.Separator(self.top).pack(fill='x', pady=10)
+        ttk.Label(self.top, text="Connexions SSH ouvertes :").pack(pady=5)
+        self.conn_listbox = tk.Listbox(self.top, height=6)
+        self.conn_listbox.pack(padx=10, fill="both", expand=False)
+        ttk.Button(self.top, text="Fermer la connexion sélectionnée", command=self.close_selected_connection).pack(pady=10)
+
+        ttk.Separator(self.top).pack(fill='x', pady=10)
+        ttk.Label(self.top, text="Clés SSH générées :").pack(pady=5)
+        self.keys_listbox = tk.Listbox(self.top, height=4)
+        self.keys_listbox.pack(padx=10, fill="both", expand=False)
+
+        self.key_actions_frame = ttk.Frame(self.top)
+        self.key_actions_frame.pack(pady=5)
+        ttk.Button(self.key_actions_frame, text="Supprimer la clé sélectionnée", command=self.delete_selected_key).pack(side="left", padx=5)
+        ttk.Button(self.key_actions_frame, text="Envoyer la clé sélectionnée", command=self.send_selected_key).pack(side="left", padx=5)
+
+        self.refresh_connection_list()
+        self.refresh_key_list()
+
+    def toggle_password_field(self):
+        if self.use_password_var.get():
+            self.password_frame.pack(fill="x", padx=10)
+        else:
+            self.password_frame.forget()
+
+    def on_close(self):
+        cleanup_ssh_tunnels()
+        self.top.destroy()
+
+    def refresh_key_list(self):
+        self.keys_listbox.delete(0, tk.END)
+        for path in ssh_keys_summary:
+            self.keys_listbox.insert(tk.END, path)
+
+    def generate_random_key_name(self):
+        return "id_ed25519_" + ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+
+    def generate_ssh_key(self):
+        custom_name_ = simpledialog.askstring("Nom de la clé", "Nom personnalisé pour la clé (laisser vide pour auto)")
+        if not custom_name_:
+            custom_name = self.generate_random_key_name()
+        else:
+            custom_name = "id_ed25519_" + custom_name_
+        key_path = Path.home() / ".ssh" / custom_name
+        subprocess.run(["ssh-keygen", "-t", "ed25519", "-f", str(key_path), "-N", ""])
+        ssh_keys_summary.append(str(key_path))
+        self.refresh_key_list()
+        return custom_name
+
+    def send_ssh_key_to_server(self, host, port, username, key_name):
+        pubkey_path = Path.home() / ".ssh" / f"{key_name}.pub"
+        with open(pubkey_path, "r") as f:
+            pubkey = f.read().strip()
+
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        password = simpledialog.askstring("Mot de passe SSH", f"Mot de passe pour {username}@{host}:{port}", show='*')
+        try:
+            ssh.connect(hostname=host, port=port, username=username, password=password)
+            ssh.exec_command("mkdir -p ~/.ssh && chmod 700 ~/.ssh")
+            ssh.exec_command(f'echo "{pubkey}" >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys')
+            ssh.close()
+            messagebox.showinfo("Succès", "Clé SSH copiée avec succès.")
+        except Exception as e:
+            messagebox.showerror("Erreur SSH", str(e))
+
+    def send_selected_key(self):
+        selected = self.keys_listbox.curselection()
+        if not selected:
+            return
+        key_path = Path(self.keys_listbox.get(selected[0]))
+        key_name = key_path.name
+        host = self.host_entry.get().strip()
+        port = int(self.port_entry.get().strip())
+        user = self.user_entry.get().strip()
+        self.send_ssh_key_to_server(host, port, user, key_name)
+
+    def delete_selected_key(self):
+        selected = self.keys_listbox.curselection()
+        if not selected:
+            return
+        key_path = Path(self.keys_listbox.get(selected[0]))
+        confirm = messagebox.askyesno("Supprimer", f"Supprimer la clé {key_path.name} ?")
+        if confirm:
+            try:
+                key_path.unlink(missing_ok=True)
+                pub_path = key_path.with_suffix(".pub")
+                pub_path.unlink(missing_ok=True)
+                ssh_keys_summary.remove(str(key_path))
+                self.refresh_key_list()
+            except Exception as e:
+                messagebox.showerror("Erreur", str(e))
+
+    def list_ports(self):
+        host = self.host_entry.get().strip()
+        port = int(self.port_entry.get().strip())
+        user = self.user_entry.get().strip()
+        try:
+            key_files = list(Path.home().joinpath(".ssh").glob("id_ed25519*"))
+            key_file = next((k for k in key_files if k.name.endswith(".pub") is False), None)
+            if not key_file:
+                confirm = messagebox.askyesno("Clé SSH manquante", "Aucune clé SSH détectée. Voulez-vous en générer une et l'envoyer maintenant ?")
+                if confirm:
+                    key_name = self.generate_ssh_key()
+                    self.send_ssh_key_to_server(host, port, user, key_name)
+                    messagebox.showinfo("Info", "Clé créée et envoyée. Vous pouvez relancer la récupération des ports.")
+                return
+
+            pkey = paramiko.Ed25519Key(filename=str(key_file))
+
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(hostname=host, port=port, username=user, pkey=pkey)
+
+            stdin, stdout, stderr = client.exec_command("ss -tuln | grep LISTEN")
+            output = stdout.readlines()
+            client.close()
+
+            self.ports_listbox.delete(0, tk.END)
+            seen_ports = set()
+            for line in output:
+                parts = line.split()
+                if len(parts) >= 5:
+                    addr = parts[4]
+                    if ':' in addr:
+                        port_num = addr.split(':')[-1]
+                        if port_num not in seen_ports:
+                            seen_ports.add(port_num)
+                            try:
+                                service_name = socket.getservbyport(int(port_num), 'tcp')
+                            except:
+                                service_name = "inconnu"
+                            proto = parts[0].lower()
+                            self.ports_listbox.insert(tk.END, f"{port_num} ({proto}) - {service_name}")
+
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Impossible de récupérer les ports : {e}")
+
+    def create_ssh_tunnel(self):
+        host = self.host_entry.get().strip()
+        port = int(self.port_entry.get().strip())
+        user = self.user_entry.get().strip()
+        selected = self.ports_listbox.curselection()
+        if not selected:
+            messagebox.showwarning("Aucun port sélectionné", "Veuillez sélectionner un port distant à rediriger.")
+            return
+        selected_text = self.ports_listbox.get(selected[0])
+        remote_port = selected_text.split()[0]
+        local_port = self.local_port_entry.get().strip()
+
+        key_files = list(Path.home().joinpath(".ssh").glob("id_ed25519*"))
+        key_file = next((k for k in key_files if not k.name.endswith(".pub")), None)
+        if not key_file:
+            confirm = messagebox.askyesno("Clé SSH manquante", "Aucune clé SSH détectée. Voulez-vous en générer une ?")
+            if confirm:
+                key_name = self.generate_ssh_key()
+                self.send_ssh_key_to_server(host, port, user, key_name)
+                messagebox.showinfo("Clé créée", "La clé a été générée et envoyée. Vous pouvez relancer le tunnel.")
+            else:
+                return
+
+        cmd = [
+            "ssh", "-i", str(key_file), "-p", str(port), "-N",
+            "-L", f"{local_port}:localhost:{remote_port}", f"{user}@{host}"
+        ]
+
+        try:
+            proc = subprocess.Popen(cmd)
+            active_ssh_tunnels.append((f"{host}:{remote_port} → localhost:{local_port}", proc))
+            self.refresh_connection_list()
+            messagebox.showinfo("Tunnel actif", f"localhost:{local_port} redirige vers {host}:{remote_port}")
+        except Exception as e:
+            messagebox.showerror("Erreur de tunnel", str(e))
+
+    def refresh_connection_list(self):
+        self.conn_listbox.delete(0, tk.END)
+        for label, _ in active_ssh_tunnels:
+            self.conn_listbox.insert(tk.END, label)
+
+    def close_selected_connection(self):
+        selected = self.conn_listbox.curselection()
+        if not selected:
+            return
+        index = selected[0]
+        label, proc = active_ssh_tunnels.pop(index)
+        proc.terminate()
+        self.refresh_connection_list()
+        messagebox.showinfo("Connexion fermée", f"Connexion {label} arrêtée.")
+
+    def refresh_key_list(self):
+        self.keys_listbox.delete(0, tk.END)
+        for path in ssh_keys_summary:
+            self.keys_listbox.insert(tk.END, path)
+
+
+#################################
 def resource_path(relative_path):
     """
     Renvoie le chemin absolu vers une ressource, compatible avec les modes script et exécutable PyInstaller.
@@ -473,6 +735,7 @@ class CloudflaredGUI:
 
         ttk.Button(self.button_frame, text="Nouvel onglet", command=self.add_tab).pack(side="left", padx=5)
         ttk.Button(self.button_frame, text="Supprimer l'onglet", command=self.remove_current_tab).pack(side="left", padx=5)
+        ttk.Button(self.button_frame, text="🔐 Redirection SSH", command=lambda: SSHRedirector(self.root)).pack(side="left", padx=5)
 
         self.tabs = []
         self.tab_count = 0
