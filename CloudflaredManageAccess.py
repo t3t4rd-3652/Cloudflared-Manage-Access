@@ -512,13 +512,18 @@ class SSHRedirector:
         if not selected:
             return
         index = selected[0]
-        if self.var_check.get() == 0:
-            label, proc = active_ssh_tunnels.pop(index)
+        conn_data = active_ssh_tunnels.pop(index)
+
+        if len(conn_data) == 2:
+            # Connexion via clé privée (proc subprocess)
+            label, proc = conn_data
             proc.terminate()
-        else:
-            label, client, stop_event = active_ssh_tunnels.pop(index)
+        elif len(conn_data) == 3:
+            # Connexion via mot de passe (thread paramiko)
+            label, client, stop_event = conn_data
             if isinstance(stop_event, threading.Event):
                 stop_event.set()
+
         self.refresh_connection_list()
         messagebox.showinfo("Connexion fermée", f"Connexion {label} arrêtée.")
 
@@ -977,7 +982,7 @@ class CloudflaredGUI:
         self.top_frame = ttk.Frame(root)
         self.top_frame.pack(fill="x", pady=5)
 
-        ttk.Label(self.top_frame, text="cloudflared.exe :").pack(side="left", padx=5)
+        ttk.Label(self.top_frame, text="cloudflared :").pack(side="left", padx=5)
         self.path_entry = ttk.Entry(self.top_frame, textvariable=self.cloudflared_path_var, width=50)
         self.path_entry.pack(side="left", padx=5)
 
