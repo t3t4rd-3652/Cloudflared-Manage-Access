@@ -14,41 +14,113 @@ import sys
 from pathlib import Path
 import platform
 import random
+import threading
+import select
+
+# Définition du dossier APPDATA pour stocker les clés SSH du projet
+def get_appdata_dir():
+    system = platform.system()
+    if system == "Windows":
+        return os.path.join(os.getenv("APPDATA"), "CloudflaredManager")
+    elif system == "Darwin":
+        return os.path.join(Path.home(), "Library", "Application Support", "CloudflaredManager")
+    else:
+        return os.path.join(Path.home(), ".config", "CloudflaredManager")
+
+APPDATA_DIR = get_appdata_dir()
+os.makedirs(APPDATA_DIR, exist_ok=True)
+SSH_KEY_DIR = Path(APPDATA_DIR) / "ssh_keys"
+SSH_KEY_DIR.mkdir(parents=True, exist_ok=True)
+
+active_paramiko_connections = {}
+
+def forward_tunnel(local_port, remote_host, remote_port, transport):
+    """Écoute sur local_port et transfère vers remote_port via transport Paramiko."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(('localhost', local_port))
+    sock.listen(1)
+    try:
+        while True:
+            client_socket, addr = sock.accept()
+            chan = transport.open_channel(
+                "direct-tcpip",
+                (remote_host, remote_port),
+                addr
+            )
+            threading.Thread(target=transfer, args=(client_socket, chan), daemon=True).start()
+    except Exception as e:
+        print(f"[Tunnel fermé] {e}")
+    finally:
+        sock.close()
+
+def transfer(src, dst):
+    """Transfert bidirectionnel de données entre deux sockets."""
+    while True:
+        data = src.recv(1024)
+        if not data:
+            break
+        dst.send(data)
+    src.close()
+    dst.close()
 
 active_ssh_tunnels = []
 ssh_keys_summary = []
 
-# Charger les clés SSH existantes au démarrage
-
 def load_existing_ssh_keys():
-    ssh_dir = Path.home() / ".ssh"
-    if ssh_dir.exists():
-        for k in ssh_dir.glob("*"):
+    if SSH_KEY_DIR.exists():
+        for k in SSH_KEY_DIR.glob("*"):
             if (
                 k.is_file()
                 and not k.name.endswith(".pub")
                 and os.access(k, os.R_OK)
-                and not k.name.startswith("known_hosts")
-            ):
+                and not k.name.startswith("known_hosts")):
                 if str(k) not in ssh_keys_summary:
                     ssh_keys_summary.append(str(k))
 
 load_existing_ssh_keys()
 
-# Fermer tous les tunnels SSH à la fermeture de l'application
+# def cleanup_ssh_tunnels():
+#     # print(active_ssh_tunnels)
+#     for el in active_paramiko_connections:
+#         if len(el) == 2:
+#             for label, proc in el:
+#                 try:
+#                     proc.terminate()
+#                     # messagebox.showinfo("Connexion fermée", f"Connexion {label} arrêtée.")
+#                 except Exception as e:
+#                     print("ERROR CLEANUP: ", e)
+                
+#         else:
+#             for label, client, stop_event in active_ssh_tunnels:
+#                 if isinstance(stop_event, threading.Event):
+#                     stop_event.set()
 def cleanup_ssh_tunnels():
-    for _, proc in active_ssh_tunnels:
+    # Tunnels lancés via clé privée
+    for label, proc in [t for t in active_ssh_tunnels if len(t) == 2]:
         try:
             proc.terminate()
-        except Exception:
-            pass
+        except Exception as e:
+            print("ERROR CLEANUP KEY:", e)
+
+    # Tunnels lancés via mot de passe
+    for label, client, stop_event in [t for t in active_ssh_tunnels if len(t) == 3]:
+        try:
+            if isinstance(stop_event, threading.Event):
+                stop_event.set()
+            client.close()
+        except Exception as e:
+            print("ERROR CLEANUP PASSWORD:", e)
+                # messagebox.showinfo("Connexion fermée", f"Connexion {label} arrêtée.")
+        # self.refresh_connection_list()
+        # messagebox.showinfo("Connexion fermée", f"Connexion {label} arrêtée.")
+
 atexit.register(cleanup_ssh_tunnels)
 
 class SSHRedirector:
     def __init__(self, parent):
         self.top = tk.Toplevel(parent)
         self.top.title("Redirection SSH")
-        self.top.geometry("600x750")
+        self.top.geometry("600x780")
         self.top.protocol("WM_DELETE_WINDOW", self.on_close)
 
         ttk.Label(self.top, text="Hôte distant (IP ou nom) :").pack(pady=5)
@@ -63,6 +135,12 @@ class SSHRedirector:
         ttk.Label(self.top, text="Nom d'utilisateur SSH :").pack(pady=5)
         self.user_entry = ttk.Entry(self.top)
         self.user_entry.pack(fill="x", padx=10)
+
+        self.var_check = tk.IntVar(value=0)
+        self.check_button = ttk.Checkbutton(self.top, text='Connexion avec Mot de passe',variable=self.var_check,
+                                            onvalue=1,offvalue=0)
+        self.check_button.pack(fill="x", padx=10)
+
 
         ttk.Button(self.top, text="Lister les ports ouverts", command=self.list_ports).pack(pady=10)
 
@@ -95,11 +173,43 @@ class SSHRedirector:
         self.refresh_connection_list()
         self.refresh_key_list()
 
-    def toggle_password_field(self):
-        if self.use_password_var.get():
-            self.password_frame.pack(fill="x", padx=10)
+    def init_connection(self,host,port,user):
+        conn_key = (host,port,user)
+        if conn_key in active_paramiko_connections:
+            password,transport,client = active_paramiko_connections[conn_key]
+            print(f"[INFO] Réutilisation connexion: {host}:{port} ({user})")
+            if transport.is_active():
+                pass
+            else:
+                client = paramiko.SSHClient()
+                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                client.connect(hostname=host,
+                port=port,
+                username=user,
+                password=password,
+                look_for_keys=False,
+                allow_agent=False)
+                transport = client.get_transport()
+                active_paramiko_connections[conn_key] = (password,transport,client)
         else:
-            self.password_frame.forget()
+            password = simpledialog.askstring("Mot de passe SSH", f"Mot de passe pour {user}@{host}:{port}", show='*')
+            if not password:
+                messagebox.showwarning("Annulé", "Mot de passe non fourni.")
+                return
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(hostname=host,
+            port=port,
+            username=user,
+            password=password,
+            look_for_keys=False,
+            allow_agent=False)
+            transport = client.get_transport()
+            active_paramiko_connections[conn_key] = (password,transport,client)
+        return client
+        # print(self.var_check.get())
+        # self.var_check = not self.var_check
+        # print(self.var_check)
 
     def on_close(self):
         cleanup_ssh_tunnels()
@@ -119,14 +229,14 @@ class SSHRedirector:
             custom_name = self.generate_random_key_name()
         else:
             custom_name = "id_ed25519_" + custom_name_
-        key_path = Path.home() / ".ssh" / custom_name
+        key_path = SSH_KEY_DIR / custom_name
         subprocess.run(["ssh-keygen", "-t", "ed25519", "-f", str(key_path), "-N", ""])
         ssh_keys_summary.append(str(key_path))
         self.refresh_key_list()
         return custom_name
 
     def send_ssh_key_to_server(self, host, port, username, key_name):
-        pubkey_path = Path.home() / ".ssh" / f"{key_name}.pub"
+        pubkey_path = SSH_KEY_DIR / f"{key_name}.pub"
         with open(pubkey_path, "r") as f:
             pubkey = f.read().strip()
 
@@ -169,33 +279,87 @@ class SSHRedirector:
             except Exception as e:
                 messagebox.showerror("Erreur", str(e))
 
+#     def list_ports(self):
+#         host = self.host_entry.get().strip()
+#         port = int(self.port_entry.get().strip())
+#         user = self.user_entry.get().strip()
+#         try:
+#             if self.var_check.get() == 0:
+#                 key_files = list(SSH_KEY_DIR.glob("id_ed25519*"))
+#                 key_file = next((k for k in key_files if k.name.endswith(".pub") is False), None)
+#                 if not key_file:
+#                     confirm = messagebox.askyesno("Clé SSH manquante", "Aucune clé SSH détectée. Voulez-vous en générer une et l'envoyer maintenant ?")
+#                     if confirm:
+#                         key_name = self.generate_ssh_key()
+#                         self.send_ssh_key_to_server(host, port, user, key_name)
+#                         messagebox.showinfo("Info", "Clé créée et envoyée. Vous pouvez relancer la récupération des ports.")
+#                     return
+
+#                 pkey = paramiko.Ed25519Key(filename=str(key_file))
+#                 client = paramiko.SSHClient()
+#                 client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+#                 client.connect(hostname=host, port=port, username=user, pkey=pkey)
+#             else:
+#                 client = self.init_connection(host,port,user)   
+
+#             stdin, stdout, stderr = client.exec_command("ss -tuln | grep LISTEN")
+#             output = stdout.readlines()
+#             # client.close()
+
+#             self.ports_listbox.delete(0, tk.END)
+#             seen_ports = set()
+#             ports_info = []
+#             for line in output:
+#                 parts = line.split()
+#                 if len(parts) >= 5:
+#                     addr = parts[4]
+#                     if ':' in addr:
+#                         port_num = addr.split(':')[-1]
+#                         if port_num not in seen_ports:
+#                             seen_ports.add(port_num)
+#                             try:
+#                                 service_name = socket.getservbyport(int(port_num), 'tcp')
+#                             except:
+#                                 service_name = "inconnu"
+#                             proto = parts[0].lower()
+#                             self.ports_listbox.insert(tk.END, f"{port_num} ({proto}) - {service_name}")
+
+#         except Exception as e:
+#             messagebox.showerror("Erreur", f"Impossible de récupérer les ports : {e}")
+# d
     def list_ports(self):
         host = self.host_entry.get().strip()
         port = int(self.port_entry.get().strip())
         user = self.user_entry.get().strip()
         try:
-            key_files = list(Path.home().joinpath(".ssh").glob("id_ed25519*"))
-            key_file = next((k for k in key_files if k.name.endswith(".pub") is False), None)
-            if not key_file:
-                confirm = messagebox.askyesno("Clé SSH manquante", "Aucune clé SSH détectée. Voulez-vous en générer une et l'envoyer maintenant ?")
-                if confirm:
-                    key_name = self.generate_ssh_key()
-                    self.send_ssh_key_to_server(host, port, user, key_name)
-                    messagebox.showinfo("Info", "Clé créée et envoyée. Vous pouvez relancer la récupération des ports.")
-                return
+            if self.var_check.get() == 0:
+                key_files = list(SSH_KEY_DIR.glob("id_ed25519*"))
+                key_file = next((k for k in key_files if k.name.endswith(".pub") is False), None)
+                if not key_file:
+                    confirm = messagebox.askyesno(
+                        "Clé SSH manquante",
+                        "Aucune clé SSH détectée. Voulez-vous en générer une et l'envoyer maintenant ?"
+                    )
+                    if confirm:
+                        key_name = self.generate_ssh_key()
+                        self.send_ssh_key_to_server(host, port, user, key_name)
+                        messagebox.showinfo("Info", "Clé créée et envoyée. Vous pouvez relancer la récupération des ports.")
+                    return
 
-            pkey = paramiko.Ed25519Key(filename=str(key_file))
-
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            client.connect(hostname=host, port=port, username=user, pkey=pkey)
+                pkey = paramiko.Ed25519Key(filename=str(key_file))
+                client = paramiko.SSHClient()
+                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                client.connect(hostname=host, port=port, username=user, pkey=pkey)
+            else:
+                client = self.init_connection(host, port, user)   
 
             stdin, stdout, stderr = client.exec_command("ss -tuln | grep LISTEN")
             output = stdout.readlines()
-            client.close()
 
             self.ports_listbox.delete(0, tk.END)
             seen_ports = set()
+            ports_info = []
+
             for line in output:
                 parts = line.split()
                 if len(parts) >= 5:
@@ -209,11 +373,19 @@ class SSHRedirector:
                             except:
                                 service_name = "inconnu"
                             proto = parts[0].lower()
-                            self.ports_listbox.insert(tk.END, f"{port_num} ({proto}) - {service_name}")
+                            # On stocke le port en int pour trier correctement
+                            ports_info.append((int(port_num), proto, service_name))
+
+            # Tri croissant des ports
+            ports_info.sort(key=lambda x: x[0])
+
+            # Insertion dans la Listbox
+            for port_num, proto, service_name in ports_info:
+                self.ports_listbox.insert(tk.END, f"{port_num} ({proto}) - {service_name}")
 
         except Exception as e:
             messagebox.showerror("Erreur", f"Impossible de récupérer les ports : {e}")
-
+            
     def create_ssh_tunnel(self):
         def is_port_in_use(port):
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -236,48 +408,117 @@ class SSHRedirector:
         if is_port_in_use(local_port):
             messagebox.showerror("Port occupé", f"Le port local {local_port} est déjà utilisé.")
             return
+        
+        if self.var_check.get() == 0:
+                key_files = list(SSH_KEY_DIR.glob("id_ed25519*"))
+                key_file = next((k for k in key_files if k.name.endswith(".pub") is False), None)
+                if not key_file:
+                    confirm = messagebox.askyesno("Clé SSH manquante", "Aucune clé SSH détectée. Voulez-vous en générer une et l'envoyer maintenant ?")
+                    if confirm:
+                        key_name = self.generate_ssh_key()
+                        self.send_ssh_key_to_server(host, port, user, key_name)
+                        messagebox.showinfo("Info", "Clé créée et envoyée. Vous pouvez relancer la récupération des ports.")
+                    return
+                
+                cmd = ["ssh", "-i", str(key_file), "-p", str(port), "-N",
+                        "-L", f"{local_port}:localhost:{remote_port}", f"{user}@{host}"]
+                try:
+                    startupinfo = None
+                    if platform.system() == "Windows":
+                        startupinfo = subprocess.STARTUPINFO()
+                        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
-        key_files = list(Path.home().joinpath(".ssh").glob("id_ed25519*"))
-        key_file = next((k for k in key_files if not k.name.endswith(".pub")), None)
-        if not key_file:
-            confirm = messagebox.askyesno("Clé SSH manquante", "Aucune clé SSH détectée. Voulez-vous en générer une ?")
-            if confirm:
-                key_name = self.generate_ssh_key()
-                self.send_ssh_key_to_server(host, port, user, key_name)
-                messagebox.showinfo("Clé créée", "La clé a été générée et envoyée. Vous pouvez relancer le tunnel.")
-            else:
-                return
+                    proc = subprocess.Popen(cmd, startupinfo=startupinfo)
+                    active_ssh_tunnels.append((f"{host}:{remote_port} → localhost:{local_port}", proc))
+                    self.refresh_connection_list()
+                    messagebox.showinfo("Tunnel actif", f"localhost:{local_port} redirige vers {host}:{remote_port}")
+                except Exception as e:
+                    messagebox.showerror("Erreur de tunnel", str(e))
 
-        cmd = [
-            "ssh", "-i", str(key_file), "-p", str(port), "-N",
-            "-L", f"{local_port}:localhost:{remote_port}", f"{user}@{host}"
-        ]
 
-        try:
-            startupinfo = None
-            if platform.system() == "Windows":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        else:
+            client = self.init_connection(host,port,user)
+            transport = client.get_transport()
 
-            proc = subprocess.Popen(cmd, startupinfo=startupinfo)
-            active_ssh_tunnels.append((f"{host}:{remote_port} → localhost:{local_port}", proc))
+            def handler(chan, sock):
+                try : 
+                    while True:
+                        r, w, x = select.select([sock, chan], [], [])
+                        if sock in r:
+                            data = sock.recv(1024)
+                            if not data:
+                                break
+                            chan.send(data)
+                        if chan in r:
+                            data = chan.recv(1024)
+                            if not data:
+                                break
+                            sock.send(data)
+                except Exception as e:
+                    print('Handler Error: ', e)
+                chan.close()
+                sock.close()
+
+            def forward_tunnel(local_port, remote_host, remote_port, transport, stop_event):
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.bind(('127.0.0.1', local_port))
+                    sock.listen(100)
+                    print(f"[Tunnel] Écoute sur 127.0.0.1:{local_port} vers {remote_host}:{remote_port} (distant)")
+                    while not stop_event.is_set():
+                        try:
+                            sock.settimeout(1)  # permet de vérifier stop_event régulièrement
+                            client_sock, addr = sock.accept()
+                        except socket.timeout:
+                            continue
+                        print(f"[Tunnel] Connexion reçue depuis {addr}")
+                        try:
+                            chan = transport.open_channel(
+                                "direct-tcpip",
+                                (remote_host, remote_port),
+                                ('127.0.0.1', 0)
+                            )
+                        except Exception as e:
+                            print(f"[Tunnel] Erreur open_channel: {e}")
+                            client_sock.close()
+                            continue
+                        threading.Thread(target=handler, args=(chan, client_sock), daemon=True).start()
+                    sock.close()
+                except Exception as e:
+                    print('Forward tunnel Error: ', e)
+
+            import threading
+            stop_event = threading.Event()
+            t = threading.Thread(
+                target=forward_tunnel,
+                args=(local_port, "localhost", int(remote_port), transport,stop_event),
+                daemon=True)
+            t.start()
+
+            active_ssh_tunnels.append((f"{host}:{remote_port} → localhost:{local_port}", client,stop_event))
+            # print(active_ssh_tunnels)
             self.refresh_connection_list()
             messagebox.showinfo("Tunnel actif", f"localhost:{local_port} redirige vers {host}:{remote_port}")
-        except Exception as e:
-            messagebox.showerror("Erreur de tunnel", str(e))
 
     def refresh_connection_list(self):
         self.conn_listbox.delete(0, tk.END)
-        for label, _ in active_ssh_tunnels:
+        for el in active_ssh_tunnels:
+            label = el[0] if el else "Inconnu"
             self.conn_listbox.insert(tk.END, label)
+            # self.conn_listbox.insert(tk.END, label)
 
     def close_selected_connection(self):
         selected = self.conn_listbox.curselection()
         if not selected:
             return
         index = selected[0]
-        label, proc = active_ssh_tunnels.pop(index)
-        proc.terminate()
+        if self.var_check.get() == 0:
+            label, proc = active_ssh_tunnels.pop(index)
+            proc.terminate()
+        else:
+            label, client, stop_event = active_ssh_tunnels.pop(index)
+            if isinstance(stop_event, threading.Event):
+                stop_event.set()
         self.refresh_connection_list()
         messagebox.showinfo("Connexion fermée", f"Connexion {label} arrêtée.")
 
@@ -306,19 +547,19 @@ def resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 
-def get_appdata_dir():
-    system = platform.system()
-    if system == "Windows":
-        return os.path.join(os.getenv("APPDATA"), "CloudflaredManager")
-    elif system == "Darwin":  # macOS
-        return os.path.join(Path.home(), "Library", "Application Support", "CloudflaredManager")
-    else:  # Linux and others
-        return os.path.join(Path.home(), ".config", "CloudflaredManager")
+# def get_appdata_dir():
+#     system = platform.system()
+#     if system == "Windows":
+#         return os.path.join(os.getenv("APPDATA"), "CloudflaredManager")
+#     elif system == "Darwin":  # macOS
+#         return os.path.join(Path.home(), "Library", "Application Support", "CloudflaredManager")
+#     else:  # Linux and others
+#         return os.path.join(Path.home(), ".config", "CloudflaredManager")
 
 
 # APPDATA_DIR = os.path.join(os.getenv('APPDATA'), "CloudflaredManager")
-APPDATA_DIR = get_appdata_dir()
-os.makedirs(APPDATA_DIR, exist_ok=True)
+# APPDATA_DIR = get_appdata_dir()
+# os.makedirs(APPDATA_DIR, exist_ok=True)
 
 CONFIG_FILE = os.path.join(APPDATA_DIR, "cloudflared_configs.json")
 TOKENS_FILE = os.path.join(APPDATA_DIR, "cloudflared_tokens.json")
@@ -651,6 +892,11 @@ class CloudflaredTab:
         update_connection_status()
 
     def run_cloudflared(self):
+        """
+        Lance la commande cloudflared avec les paramètres fournis par l'utilisateur.
+        Gère l'utilisation ou non d'un token.
+        Affiche une boîte de dialogue en cas d’erreur ou de succès.
+        """
         import socket
         host = self.host_entry.get().strip() or "127.0.0.1"
         port = self.port_entry.get().strip()
@@ -667,11 +913,7 @@ class CloudflaredTab:
             if proc.args and f"--url {self.host_entry.get()}:{self.port_entry.get()}" in ' '.join(proc.args):
                 timed_messagebox("Erreur", f"Une connexion est déjà active sur le port {self.port_entry.get()}. Veuillez en choisir un autre.")
                 return
-        """
-        Lance la commande cloudflared avec les paramètres fournis par l'utilisateur.
-        Gère l'utilisation ou non d'un token.
-        Affiche une boîte de dialogue en cas d’erreur ou de succès.
-        """
+
         path = self.cloudflared_path_var.get()
         if not path or not os.path.isfile(path):
             timed_messagebox("Erreur", "Chemin vers cloudflared non valide.")
@@ -759,6 +1001,46 @@ class CloudflaredGUI:
 
         self.status_label = ttk.Label(root, text="Connexions ouvertes : 0", anchor="e")
         self.status_label.pack(side="bottom", fill="x", padx=5, pady=2)
+        
+        self.status_label.bind("<Button-1>", self.on_status_click)
+
+    def on_status_click(self, event):
+        def confirm_and_close_V2(index):
+            proc = cloudflared_processes.pop(index)
+            if '--hostname' in proc.args:
+                hostname_index = proc.args.index('--hostname') + 1
+                hostname = proc.args[hostname_index]
+                # print(f"Hostname : {hostname}")
+                timed_messagebox("Connexion fermée", f"Connexion {hostname} arrêtée.")
+            else:
+                timed_messagebox("Connexion fermée", f"Connexion UNKNOWN arrêtée.")
+            proc.terminate()
+            update_connection_status()
+            try:
+                dialog.destroy()
+            except Exception as e:
+                pass
+        try:
+            dialog = tk.Toplevel()
+            dialog.title("Fermer une connexion")
+            dialog.geometry("500x260")
+            ttk.Label(dialog, text="Sélectionnez une connexion à fermer :").pack(pady=10)
+            listbox = tk.Listbox(dialog, width=80)
+            listbox.pack(padx=10, pady=5, fill="both", expand=True)
+            for i, p in enumerate(cloudflared_processes):
+                hostname = next((arg for j, arg in enumerate(p.args) if p.args[j-1] == '--hostname'), f"Connexion {i}")
+                listbox.insert(tk.END, f"{hostname}")
+
+            def on_select():
+                selected = listbox.curselection()
+                if selected:
+                    confirm_and_close_V2(selected[0])
+
+            ttk.Button(dialog, text="Fermer la connexion sélectionnée", command=on_select).pack(pady=10)
+            dialog.attributes('-topmost', True)
+            dialog.grab_set()
+        except Exception as e:
+            messagebox.showerror("Erreur lors de la supression: ", e)
 
     def detect_cloudflared(self):
         """
