@@ -16,6 +16,7 @@ import platform
 import random
 import threading
 import select
+import atexit
 
 # Définition du dossier APPDATA pour stocker les clés SSH du projet
 def get_appdata_dir():
@@ -95,9 +96,6 @@ def cleanup_ssh_tunnels():
             client.close()
         except Exception as e:
             print("ERROR CLEANUP PASSWORD:", e)
-                # messagebox.showinfo("Connexion fermée", f"Connexion {label} arrêtée.")
-        # self.refresh_connection_list()
-        # messagebox.showinfo("Connexion fermée", f"Connexion {label} arrêtée.")
 
 atexit.register(cleanup_ssh_tunnels)
 
@@ -105,55 +103,81 @@ class SSHRedirector:
     def __init__(self, parent):
         self.top = tk.Toplevel(parent)
         self.top.title("Redirection SSH")
-        self.top.geometry("600x780")
+        self.top.geometry("450x600")
         self.top.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.top.resizable(False, False)
 
-        ttk.Label(self.top, text="Hôte distant (IP ou nom) :").pack(pady=5)
+        # Configuration du grid global
+        self.top.columnconfigure(0, weight=0)
+        self.top.columnconfigure(1, weight=1)
+
+        # Ligne 0 - Hôte distant
+        ttk.Label(self.top, text="Hôte distant (IP ou nom) :").grid(row=0, column=0, pady=5, sticky="w", padx=(10,0))
         self.host_entry = ttk.Entry(self.top)
-        self.host_entry.pack(fill="x", padx=10)
+        self.host_entry.grid(row=0, column=1, padx=(0,10), sticky="ew")
 
-        ttk.Label(self.top, text="Port SSH distant (défaut : 22) :").pack(pady=5)
-        self.port_entry = ttk.Entry(self.top)
+        # Ligne 2 - Port SSH distant
+        ttk.Label(self.top, text="Port (défaut : 22) :").grid(row=1, column=0, pady=5, sticky="w", padx=(10,0))
+        self.port_entry = ttk.Entry(self.top, width=8)
         self.port_entry.insert(0, "22")
-        self.port_entry.pack(fill="x", padx=10)
+        self.port_entry.grid(row=1, column=1, padx=(0,10), sticky="w")
 
-        ttk.Label(self.top, text="Nom d'utilisateur SSH :").pack(pady=5)
+        # Ligne 4 - Nom utilisateur SSH
+        ttk.Label(self.top, text="Nom d'utilisateur SSH :").grid(row=2, column=0, pady=5, sticky="w", padx=(10,0))
         self.user_entry = ttk.Entry(self.top)
-        self.user_entry.pack(fill="x", padx=10)
+        self.user_entry.grid(row=2, column=1, padx=(0,10), sticky="ew", columnspan=2)
+
+        # Ligne 6 - Frame pour checkbox + bouton
+        check_frame = ttk.Frame(self.top)
+        check_frame.grid(row=6, column=0, columnspan=2, sticky="w", padx=10, pady=5)
 
         self.var_check = tk.IntVar(value=0)
-        self.check_button = ttk.Checkbutton(self.top, text='Connexion avec Mot de passe',variable=self.var_check,
-                                            onvalue=1,offvalue=0)
-        self.check_button.pack(fill="x", padx=10)
+        self.check_button = ttk.Checkbutton(
+            check_frame, text='Connexion avec Mot de passe',
+            variable=self.var_check, onvalue=1, offvalue=0
+        )
+        self.check_button.pack(side="left")
 
+        ttk.Button(check_frame, text="Lister les ports ouverts", command=self.list_ports).pack(side="left", padx=(10, 0))
 
-        ttk.Button(self.top, text="Lister les ports ouverts", command=self.list_ports).pack(pady=10)
-
+        # Ligne 8 - Liste ports ouverts
         self.ports_listbox = tk.Listbox(self.top, height=6)
-        self.ports_listbox.pack(padx=10, fill="both", expand=False)
+        self.ports_listbox.grid(row=8, column=0, padx=10, pady=5, sticky="nsew", columnspan=2)
 
-        ttk.Label(self.top, text="Port local souhaité :").pack(pady=5)
-        self.local_port_entry = ttk.Entry(self.top)
-        self.local_port_entry.pack(fill="x", padx=10)
+        # Ligne 9 - Port local
+        check_frame_port = ttk.Frame(self.top)
+        check_frame_port.grid(row=9, column=0, columnspan=2, sticky="w", padx=10)
 
+        ttk.Label(check_frame_port, text="Port local souhaité :").pack(side="left")#.grid(row=9, column=0, pady=5, sticky="w", padx=10)
+        self.local_port_entry = ttk.Entry(check_frame_port, width=8)
+        self.local_port_entry.pack(side="left", padx=(10, 0))#.grid(row=9, column=1, sticky="w", padx=(0,10))
+
+        # Ligne 11 - Bouton créer tunnel
         self.run_btn = ttk.Button(self.top, text="Créer le tunnel SSH", command=self.create_ssh_tunnel)
-        self.run_btn.pack(pady=15)
+        self.run_btn.grid(row=9, column=1, columnspan=2, pady=0, padx=(30,10), sticky="ew")
 
-        ttk.Separator(self.top).pack(fill='x', pady=10)
-        ttk.Label(self.top, text="Connexions SSH ouvertes :").pack(pady=5)
+        # Ligne 12 - Séparateur
+        ttk.Separator(self.top).grid(row=12, column=0, columnspan=2, sticky="ew", pady=10)
+
+        # Ligne 13 - Connexions ouvertes
+        ttk.Label(self.top, text="Connexions SSH ouvertes :").grid(row=13, column=0, pady=0, sticky="w",padx=10)
         self.conn_listbox = tk.Listbox(self.top, height=6)
-        self.conn_listbox.pack(padx=10, fill="both", expand=False)
-        ttk.Button(self.top, text="Fermer la connexion sélectionnée", command=self.close_selected_connection).pack(pady=10)
+        self.conn_listbox.grid(row=14, column=0, padx=10, sticky="nsew", columnspan=2)
+        ttk.Button(self.top, text="Fermer la connexion sélectionnée", command=self.close_selected_connection).grid(row=15, column=0, pady=10, sticky="ew", columnspan=2)
 
-        ttk.Separator(self.top).pack(fill='x', pady=10)
-        ttk.Label(self.top, text="Clés SSH générées :").pack(pady=5)
+        # Ligne 16 - Séparateur
+        ttk.Separator(self.top).grid(row=16, column=0, sticky="ew", pady=10, columnspan=2)
+
+        # Ligne 17 - Clés SSH générées
+        ttk.Label(self.top, text="Clés SSH générées :").grid(row=17, column=0, pady=5, sticky="w", columnspan=2,padx=10)
         self.keys_listbox = tk.Listbox(self.top, height=4)
-        self.keys_listbox.pack(padx=10, fill="both", expand=False)
+        self.keys_listbox.grid(row=18, column=0, padx=10, sticky="nsew", columnspan=2)
 
+        # Ligne 19 - Frame actions clés
         self.key_actions_frame = ttk.Frame(self.top)
-        self.key_actions_frame.pack(pady=5)
-        ttk.Button(self.key_actions_frame, text="Supprimer la clé sélectionnée", command=self.delete_selected_key).pack(side="left", padx=5)
-        ttk.Button(self.key_actions_frame, text="Envoyer la clé sélectionnée", command=self.send_selected_key).pack(side="left", padx=5)
+        self.key_actions_frame.grid(row=19, column=0, pady=5, columnspan=2)
+        ttk.Button(self.key_actions_frame, text="Supprimer la clé sélectionnée", command=self.delete_selected_key).grid(row=0, column=0, padx=5)
+        ttk.Button(self.key_actions_frame, text="Envoyer la clé sélectionnée", command=self.send_selected_key).grid(row=0, column=1, padx=5)
 
         self.refresh_connection_list()
         self.refresh_key_list()
@@ -178,8 +202,13 @@ class SSHRedirector:
                 active_paramiko_connections[conn_key] = (password,transport,client)
         else:
             password = simpledialog.askstring("Mot de passe SSH", f"Mot de passe pour {user}@{host}:{port}", show='*')
-            if not password:
-                messagebox.showwarning("Annulé", "Mot de passe non fourni.")
+            if password != None:
+                password = password.strip()
+                if password == '':
+                    messagebox.showwarning("Annulé", "Mot de passe non fourni.")
+                    return self.init_connection(host,port,user)
+            else:
+                messagebox.showwarning("Annulé", "L'utilisateur a annulé la saisie")
                 return
             client = paramiko.SSHClient()
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -192,9 +221,6 @@ class SSHRedirector:
             transport = client.get_transport()
             active_paramiko_connections[conn_key] = (password,transport,client)
         return client
-        # print(self.var_check.get())
-        # self.var_check = not self.var_check
-        # print(self.var_check)
 
     def on_close(self):
         cleanup_ssh_tunnels()
@@ -288,38 +314,40 @@ class SSHRedirector:
                 client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                 client.connect(hostname=host, port=port, username=user, pkey=pkey)
             else:
-                client = self.init_connection(host, port, user)   
+                client = self.init_connection(host, port, user)
 
-            stdin, stdout, stderr = client.exec_command("ss -tuln | grep LISTEN")
-            output = stdout.readlines()
+            if client:
+                stdin, stdout, stderr = client.exec_command("ss -tuln | grep LISTEN")
+                output = stdout.readlines()
 
-            self.ports_listbox.delete(0, tk.END)
-            seen_ports = set()
-            ports_info = []
+                self.ports_listbox.delete(0, tk.END)
+                seen_ports = set()
+                ports_info = []
 
-            for line in output:
-                parts = line.split()
-                if len(parts) >= 5:
-                    addr = parts[4]
-                    if ':' in addr:
-                        port_num = addr.split(':')[-1]
-                        if port_num not in seen_ports:
-                            seen_ports.add(port_num)
-                            try:
-                                service_name = socket.getservbyport(int(port_num), 'tcp')
-                            except:
-                                service_name = "inconnu"
-                            proto = parts[0].lower()
-                            # On stocke le port en int pour trier correctement
-                            ports_info.append((int(port_num), proto, service_name))
+                for line in output:
+                    parts = line.split()
+                    if len(parts) >= 5:
+                        addr = parts[4]
+                        if ':' in addr:
+                            port_num = addr.split(':')[-1]
+                            if port_num not in seen_ports:
+                                seen_ports.add(port_num)
+                                try:
+                                    service_name = socket.getservbyport(int(port_num), 'tcp')
+                                except:
+                                    service_name = "inconnu"
+                                proto = parts[0].lower()
+                                # On stocke le port en int pour trier correctement
+                                ports_info.append((int(port_num), proto, service_name))
 
-            # Tri croissant des ports
-            ports_info.sort(key=lambda x: x[0])
+                # Tri croissant des ports
+                ports_info.sort(key=lambda x: x[0])
 
-            # Insertion dans la Listbox
-            for port_num, proto, service_name in ports_info:
-                self.ports_listbox.insert(tk.END, f"{port_num} ({proto}) - {service_name}")
-
+                # Insertion dans la Listbox
+                for port_num, proto, service_name in ports_info:
+                    self.ports_listbox.insert(tk.END, f"{port_num} ({proto}) - {service_name}")
+            else:
+                return
         except Exception as e:
             messagebox.showerror("Erreur", f"Impossible de récupérer les ports : {e}")
             
@@ -366,9 +394,9 @@ class SSHRedirector:
                         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
                     proc = subprocess.Popen(cmd, startupinfo=startupinfo)
-                    active_ssh_tunnels.append((f"{host}:{remote_port} → localhost:{local_port}", proc))
+                    active_ssh_tunnels.append((f"{host}:{remote_port} → localhost:{local_port} {user}@{host}:{port}", proc))
                     self.refresh_connection_list()
-                    messagebox.showinfo("Tunnel actif", f"localhost:{local_port} redirige vers {host}:{remote_port}")
+                    messagebox.showinfo("Tunnel actif", f"""L'adresse localhost:{local_port} redirige le port {remote_port}\nde la connexion {user}@{host}:{port}""")
                 except Exception as e:
                     messagebox.showerror("Erreur de tunnel", str(e))
 
@@ -435,7 +463,7 @@ class SSHRedirector:
             active_ssh_tunnels.append((f"{host}:{remote_port} → localhost:{local_port} {user}@{host}:{port}", client,stop_event))
             # print(active_ssh_tunnels)
             self.refresh_connection_list()
-            messagebox.showinfo("Tunnel actif", f"localhost:{local_port} redirige vers {host}:{remote_port}")
+            messagebox.showinfo("Tunnel actif", f"""L'adresse localhost:{local_port} redirige le port {remote_port}\nde la connexion {user}@{host}:{port}""")
 
     def refresh_connection_list(self):
         self.conn_listbox.delete(0, tk.END)
@@ -601,6 +629,7 @@ class CloudflaredTab:
 
         ttk.Label(self.frame, text="Hôte local :").grid(row=2, column=0, sticky="e")
         self.host_entry = ttk.Entry(self.frame)
+        self.host_entry.insert(0, "127.0.0.1")
         self.host_entry.grid(row=2, column=1, sticky="ew", padx=5, pady=5)
 
         ttk.Label(self.frame, text="Port :").grid(row=2, column=2, sticky="e")
@@ -803,6 +832,7 @@ class CloudflaredTab:
             dialog = tk.Toplevel()
             dialog.title("Fermer une connexion")
             dialog.geometry("500x260")
+            dialog.resizable(False, False)
             ttk.Label(dialog, text="Sélectionnez une connexion à fermer :").pack(pady=10)
             listbox = tk.Listbox(dialog, width=80)
             listbox.pack(padx=10, pady=5, fill="both", expand=True)
@@ -922,16 +952,28 @@ class CloudflaredGUI:
 
         ttk.Button(self.button_frame, text="Nouvel onglet", command=self.add_tab).pack(side="left", padx=5)
         ttk.Button(self.button_frame, text="Supprimer l'onglet", command=self.remove_current_tab).pack(side="left", padx=5)
-        ttk.Button(self.button_frame, text="🔐 Redirection SSH", command=lambda: SSHRedirector(self.root)).pack(side="left", padx=5)
+        self.redirect_ssh_btn = ttk.Button(self.button_frame, text="🔐 Redirection SSH", command=self.open_ssh_redirector)
+        self.redirect_ssh_btn.pack(side="left", padx=5)
+
 
         self.tabs = []
         self.tab_count = 0
         self.add_tab()
-
         self.status_label = ttk.Label(root, text="Connexions ouvertes : 0", anchor="e")
         self.status_label.pack(side="bottom", fill="x", padx=5, pady=2)
         
         self.status_label.bind("<Button-1>", self.on_status_click)
+
+    def open_ssh_redirector(self):
+        self.redirect_ssh_btn.config(state="disabled")
+        win = SSHRedirector(self.root)
+    
+        # Quand la fenêtre est fermée, réactiver le bouton
+        win.top.protocol("WM_DELETE_WINDOW", lambda: self.on_close_ssh(win))
+
+    def on_close_ssh(self, win):
+        win.top.destroy()
+        self.redirect_ssh_btn.config(state="normal")
 
     def on_status_click(self, event):
         def confirm_and_close_V2(index):
@@ -953,6 +995,7 @@ class CloudflaredGUI:
             dialog = tk.Toplevel()
             dialog.title("Fermer une connexion")
             dialog.geometry("500x260")
+            dialog.resizable(False, False)
             ttk.Label(dialog, text="Sélectionnez une connexion à fermer :").pack(pady=10)
             listbox = tk.Listbox(dialog, width=80)
             listbox.pack(padx=10, pady=5, fill="both", expand=True)
@@ -1047,6 +1090,7 @@ class CloudflaredGUI:
         Charge le chemin précédemment sauvegardé vers cloudflared depuis le fichier JSON.
         """
         save_file = os.path.join(APPDATA_DIR, "cloudflared_path.json")
+        # print(save_file)
         if os.path.exists(save_file):
             with open(save_file, "r") as f:
                 data = json.load(f)
@@ -1082,17 +1126,16 @@ class CloudflaredGUI:
         self.tab_control.forget(current)
         del self.tabs[current]
 
-import signal
-import psutil
-import atexit
+
 
 cloudflared_processes = []
 connection_labels = []
 
-def timed_messagebox(title, message, duration=10000):
+def timed_messagebox(title, message, duration=8000):
     top = tk.Toplevel()
     top.title(title)
     top.geometry("400x100")
+    top.resizable(False, False)
     tk.Label(top, text=message, wraplength=380, justify="left").pack(padx=10, pady=10)
     top.after(duration, top.destroy)
     top.attributes('-topmost', True)
