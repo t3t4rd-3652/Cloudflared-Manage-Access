@@ -28,6 +28,15 @@ def get_appdata_dir():
     else:
         return os.path.join(Path.home(), ".config", "CloudflaredManager")
 
+def get_user_dir():
+    system = platform.system()
+    if system == "Windows":
+        return os.path.join(os.getenv("USERPROFILE"))
+    elif system == "Darwin":
+        return os.path.join(Path.home(), "Library", "Application Support", "CloudflaredManager")
+    else:
+        return os.path.join(Path.home(), ".config", "CloudflaredManager")
+
 APPDATA_DIR = get_appdata_dir()
 os.makedirs(APPDATA_DIR, exist_ok=True)
 SSH_KEY_DIR = Path(APPDATA_DIR) / "ssh_keys"
@@ -1029,9 +1038,10 @@ class CloudflaredGUI:
         """
         system = platform.system()
         ext = ".exe" if system == "Windows" else ""
+        dir = get_user_dir()
         path = filedialog.askopenfilename(
             title="Sélectionner cloudflared",
-            filetypes=[("Executable", f"*{ext}")],)
+            filetypes=[("Executable", f"*{ext}")],initialfile="cloudflared-windows-amd64.exe", initialdir=dir)
         if path:
             self.cloudflared_path_var.set(path)
             self.save_cloudflared_path(path)
