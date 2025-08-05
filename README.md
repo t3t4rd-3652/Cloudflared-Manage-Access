@@ -23,7 +23,7 @@ Permet également de faire la gestion ainsi que la redirection de ports via une 
 
 > 🚀 Exécution via python
 
->> python cloudflared_gui.py
+>> python CloudflaredManageAccess.py
 
 Le .exe est également disponible dans \dist
 
