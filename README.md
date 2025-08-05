@@ -1,5 +1,5 @@
-# Cloudflared-Tunnel-Manager
-Cloudflared GUI est une interface graphique portable (Tkinter) pour simplifier la gestion de la connexion client aux différents tunnels TCP cloudflared access.
+# Cloudflared Manage Access
+CMA est une interface graphique portable (Tkinter) pour simplifier la gestion de la connexion client aux différents tunnels TCP cloudflared access.
 
 🎯 Fonctionnalités principales :
 
@@ -23,7 +23,7 @@ Permet également de faire la gestion ainsi que la redirection de ports via une 
 
 > 🚀 Exécution via python
 
->> python cloudflared_gui.py
+>> python CloudflaredManageAccess.py
 
 Le .exe est également disponible dans \dist
 
