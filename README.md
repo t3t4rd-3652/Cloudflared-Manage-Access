@@ -1,5 +1,5 @@
 # Cloudflared Manage Access
-Cloudflared GUI est une interface graphique portable (Tkinter) pour simplifier la gestion de la connexion client aux différents tunnels TCP cloudflared access.
+CMA est une interface graphique portable (Tkinter) pour simplifier la gestion de la connexion client aux différents tunnels TCP cloudflared access.
 
 🎯 Fonctionnalités principales :
 
