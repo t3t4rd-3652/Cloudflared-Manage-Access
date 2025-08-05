@@ -79,21 +79,6 @@ def load_existing_ssh_keys():
 
 load_existing_ssh_keys()
 
-# def cleanup_ssh_tunnels():
-#     # print(active_ssh_tunnels)
-#     for el in active_paramiko_connections:
-#         if len(el) == 2:
-#             for label, proc in el:
-#                 try:
-#                     proc.terminate()
-#                     # messagebox.showinfo("Connexion fermée", f"Connexion {label} arrêtée.")
-#                 except Exception as e:
-#                     print("ERROR CLEANUP: ", e)
-                
-#         else:
-#             for label, client, stop_event in active_ssh_tunnels:
-#                 if isinstance(stop_event, threading.Event):
-#                     stop_event.set()
 def cleanup_ssh_tunnels():
     # Tunnels lancés via clé privée
     for label, proc in [t for t in active_ssh_tunnels if len(t) == 2]:
@@ -279,54 +264,6 @@ class SSHRedirector:
             except Exception as e:
                 messagebox.showerror("Erreur", str(e))
 
-#     def list_ports(self):
-#         host = self.host_entry.get().strip()
-#         port = int(self.port_entry.get().strip())
-#         user = self.user_entry.get().strip()
-#         try:
-#             if self.var_check.get() == 0:
-#                 key_files = list(SSH_KEY_DIR.glob("id_ed25519*"))
-#                 key_file = next((k for k in key_files if k.name.endswith(".pub") is False), None)
-#                 if not key_file:
-#                     confirm = messagebox.askyesno("Clé SSH manquante", "Aucune clé SSH détectée. Voulez-vous en générer une et l'envoyer maintenant ?")
-#                     if confirm:
-#                         key_name = self.generate_ssh_key()
-#                         self.send_ssh_key_to_server(host, port, user, key_name)
-#                         messagebox.showinfo("Info", "Clé créée et envoyée. Vous pouvez relancer la récupération des ports.")
-#                     return
-
-#                 pkey = paramiko.Ed25519Key(filename=str(key_file))
-#                 client = paramiko.SSHClient()
-#                 client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-#                 client.connect(hostname=host, port=port, username=user, pkey=pkey)
-#             else:
-#                 client = self.init_connection(host,port,user)   
-
-#             stdin, stdout, stderr = client.exec_command("ss -tuln | grep LISTEN")
-#             output = stdout.readlines()
-#             # client.close()
-
-#             self.ports_listbox.delete(0, tk.END)
-#             seen_ports = set()
-#             ports_info = []
-#             for line in output:
-#                 parts = line.split()
-#                 if len(parts) >= 5:
-#                     addr = parts[4]
-#                     if ':' in addr:
-#                         port_num = addr.split(':')[-1]
-#                         if port_num not in seen_ports:
-#                             seen_ports.add(port_num)
-#                             try:
-#                                 service_name = socket.getservbyport(int(port_num), 'tcp')
-#                             except:
-#                                 service_name = "inconnu"
-#                             proto = parts[0].lower()
-#                             self.ports_listbox.insert(tk.END, f"{port_num} ({proto}) - {service_name}")
-
-#         except Exception as e:
-#             messagebox.showerror("Erreur", f"Impossible de récupérer les ports : {e}")
-# d
     def list_ports(self):
         host = self.host_entry.get().strip()
         port = int(self.port_entry.get().strip())
@@ -495,7 +432,7 @@ class SSHRedirector:
                 daemon=True)
             t.start()
 
-            active_ssh_tunnels.append((f"{host}:{remote_port} → localhost:{local_port}", client,stop_event))
+            active_ssh_tunnels.append((f"{host}:{remote_port} → localhost:{local_port} {user}@{host}:{port}", client,stop_event))
             # print(active_ssh_tunnels)
             self.refresh_connection_list()
             messagebox.showinfo("Tunnel actif", f"localhost:{local_port} redirige vers {host}:{remote_port}")
@@ -551,20 +488,6 @@ def resource_path(relative_path):
 
     return os.path.join(base_path, relative_path)
 
-
-# def get_appdata_dir():
-#     system = platform.system()
-#     if system == "Windows":
-#         return os.path.join(os.getenv("APPDATA"), "CloudflaredManager")
-#     elif system == "Darwin":  # macOS
-#         return os.path.join(Path.home(), "Library", "Application Support", "CloudflaredManager")
-#     else:  # Linux and others
-#         return os.path.join(Path.home(), ".config", "CloudflaredManager")
-
-
-# APPDATA_DIR = os.path.join(os.getenv('APPDATA'), "CloudflaredManager")
-# APPDATA_DIR = get_appdata_dir()
-# os.makedirs(APPDATA_DIR, exist_ok=True)
 
 CONFIG_FILE = os.path.join(APPDATA_DIR, "cloudflared_configs.json")
 TOKENS_FILE = os.path.join(APPDATA_DIR, "cloudflared_tokens.json")
@@ -634,6 +557,7 @@ class CloudflaredTab:
             self.token_profile_var.set('')
             with open(TOKENS_FILE, "w") as f:
                 json.dump(TOKENS, f, indent=2)
+                
     def __init__(self, parent, cloudflared_path_var):
         self.frame = ttk.Frame(parent)
         self.cloudflared_path_var = cloudflared_path_var
