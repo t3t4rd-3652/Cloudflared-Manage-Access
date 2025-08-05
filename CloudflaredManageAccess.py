@@ -1049,7 +1049,8 @@ class CloudflaredGUI:
             return
 
         save_ext = ".exe" if system == "Windows" else ""
-        save_path = filedialog.asksaveasfilename(defaultextension=save_ext, filetypes=[("Executable", f"*{save_ext}")], title="Enregistrer cloudflared")
+        save_path = filedialog.asksaveasfilename(defaultextension=save_ext, filetypes=[("Executable", f"*{save_ext}")], title="Enregistrer cloudflared",
+                                                 initialfile="cloudflared-windows-amd64.exe",initialdir=APPDATA_DIR)
         if not save_path:
             return
 
