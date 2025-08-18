@@ -120,25 +120,28 @@ class SSHRedirector:
         self.top.columnconfigure(0, weight=0)
         self.top.columnconfigure(1, weight=1)
 
-        # Ligne 0 - Hôte distant
-        ttk.Label(self.top, text="Hôte distant (IP ou nom) :").grid(row=0, column=0, pady=5, sticky="w", padx=(10,0))
+        # Ligne 0 - Profil de connexions
+        # ttk.Combobox(self.top, text="") #RAJOUTER UNE COMBOBOX AFIN DE PRENDRE EN COMPTE DES PROFILS DE CONNEXIONS DE REDIRECTION SSH 
+
+        # Ligne 1 - Hôte distant
+        ttk.Label(self.top, text="Hôte distant (IP ou nom) :").grid(row=1, column=0, pady=5, sticky="w", padx=(10,0))
         self.host_entry = ttk.Entry(self.top)
-        self.host_entry.grid(row=0, column=1, padx=(0,10), sticky="ew")
+        self.host_entry.grid(row=1, column=1, padx=(0,10), sticky="ew")
 
         # Ligne 2 - Port SSH distant
-        ttk.Label(self.top, text="Port (défaut : 22) :").grid(row=1, column=0, pady=5, sticky="w", padx=(10,0))
+        ttk.Label(self.top, text="Port (défaut : 22) :").grid(row=2, column=0, pady=5, sticky="w", padx=(10,0))
         self.port_entry = ttk.Entry(self.top, width=8)
         self.port_entry.insert(0, "22")
-        self.port_entry.grid(row=1, column=1, padx=(0,10), sticky="w")
+        self.port_entry.grid(row=2, column=1, padx=(0,10), sticky="w")
 
         # Ligne 4 - Nom utilisateur SSH
-        ttk.Label(self.top, text="Nom d'utilisateur SSH :").grid(row=2, column=0, pady=5, sticky="w", padx=(10,0))
+        ttk.Label(self.top, text="Nom d'utilisateur SSH :").grid(row=3, column=0, pady=5, sticky="w", padx=(10,0))
         self.user_entry = ttk.Entry(self.top)
-        self.user_entry.grid(row=2, column=1, padx=(0,10), sticky="ew", columnspan=2)
+        self.user_entry.grid(row=3, column=1, padx=(0,10), sticky="ew", columnspan=2)
 
         # Ligne 6 - Frame pour checkbox + bouton
         check_frame = ttk.Frame(self.top)
-        check_frame.grid(row=6, column=0, columnspan=2, sticky="w", padx=10, pady=5)
+        check_frame.grid(row=4, column=0, columnspan=2, sticky="w", padx=10, pady=5)
 
         self.var_check = tk.IntVar(value=0)
         self.check_button = ttk.Checkbutton(
@@ -151,11 +154,11 @@ class SSHRedirector:
 
         # Ligne 8 - Liste ports ouverts
         self.ports_listbox = tk.Listbox(self.top, height=6)
-        self.ports_listbox.grid(row=8, column=0, padx=10, pady=5, sticky="nsew", columnspan=2)
+        self.ports_listbox.grid(row=5, column=0, padx=10, pady=5, sticky="nsew", columnspan=2)
 
         # Ligne 9 - Port local
         check_frame_port = ttk.Frame(self.top)
-        check_frame_port.grid(row=9, column=0, columnspan=2, sticky="w", padx=10)
+        check_frame_port.grid(row=6, column=0, columnspan=2, sticky="w", padx=10)
 
         ttk.Label(check_frame_port, text="Port local souhaité :").pack(side="left")#.grid(row=9, column=0, pady=5, sticky="w", padx=10)
         self.local_port_entry = ttk.Entry(check_frame_port, width=8)
@@ -163,28 +166,28 @@ class SSHRedirector:
 
         # Ligne 11 - Bouton créer tunnel
         self.run_btn = ttk.Button(self.top, text="Créer le tunnel SSH", command=self.create_ssh_tunnel)
-        self.run_btn.grid(row=9, column=1, columnspan=2, pady=0, padx=(30,10), sticky="ew")
+        self.run_btn.grid(row=6, column=1, columnspan=2, pady=0, padx=(30,10), sticky="ew")
 
         # Ligne 12 - Séparateur
-        ttk.Separator(self.top).grid(row=12, column=0, columnspan=2, sticky="ew", pady=10)
+        ttk.Separator(self.top).grid(row=8, column=0, columnspan=2, sticky="ew", pady=10)
 
         # Ligne 13 - Connexions ouvertes
-        ttk.Label(self.top, text="Connexions SSH ouvertes :").grid(row=13, column=0, pady=0, sticky="w",padx=10)
+        ttk.Label(self.top, text="Connexions SSH ouvertes :").grid(row=9, column=0, pady=0, sticky="w",padx=10)
         self.conn_listbox = tk.Listbox(self.top, height=6)
-        self.conn_listbox.grid(row=14, column=0, padx=10, sticky="nsew", columnspan=2)
-        ttk.Button(self.top, text="Fermer la connexion sélectionnée", command=self.close_selected_connection).grid(row=15, column=0, pady=10, sticky="ew", columnspan=2)
+        self.conn_listbox.grid(row=10, column=0, padx=10, sticky="nsew", columnspan=2)
+        ttk.Button(self.top, text="Fermer la connexion sélectionnée", command=self.close_selected_connection).grid(row=11, column=0, pady=10, sticky="ew", columnspan=2)
 
         # Ligne 16 - Séparateur
-        ttk.Separator(self.top).grid(row=16, column=0, sticky="ew", pady=10, columnspan=2)
+        ttk.Separator(self.top).grid(row=12, column=0, sticky="ew", pady=10, columnspan=2)
 
         # Ligne 17 - Clés SSH générées
-        ttk.Label(self.top, text="Clés SSH générées :").grid(row=17, column=0, pady=5, sticky="w", columnspan=2,padx=10)
+        ttk.Label(self.top, text="Clés SSH générées :").grid(row=13, column=0, pady=5, sticky="w", columnspan=2,padx=10)
         self.keys_listbox = tk.Listbox(self.top, height=4)
-        self.keys_listbox.grid(row=18, column=0, padx=10, sticky="nsew", columnspan=2)
+        self.keys_listbox.grid(row=14, column=0, padx=10, sticky="nsew", columnspan=2)
 
         # Ligne 19 - Frame actions clés
         self.key_actions_frame = ttk.Frame(self.top)
-        self.key_actions_frame.grid(row=19, column=0, pady=5, columnspan=2)
+        self.key_actions_frame.grid(row=15, column=0, pady=5, columnspan=2)
         ttk.Button(self.key_actions_frame, text="Supprimer la clé sélectionnée", command=self.delete_selected_key).grid(row=0, column=0, padx=5)
         ttk.Button(self.key_actions_frame, text="Envoyer la clé sélectionnée", command=self.send_selected_key).grid(row=0, column=1, padx=5)
 
@@ -403,7 +406,7 @@ class SSHRedirector:
                         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
                     proc = subprocess.Popen(cmd, startupinfo=startupinfo)
-                    active_ssh_tunnels.append((f"{host}:{remote_port} → localhost:{local_port} {user}@{host}:{port}", proc))
+                    active_ssh_tunnels.append((f"{user}:{remote_port} → localhost:{local_port} {user}@{host}:{port}", proc))
                     self.refresh_connection_list()
                     messagebox.showinfo("Tunnel actif", f"""L'adresse localhost:{local_port} redirige le port {remote_port}\nde la connexion {user}@{host}:{port}""")
                 except Exception as e:
@@ -469,7 +472,7 @@ class SSHRedirector:
                 daemon=True)
             t.start()
 
-            active_ssh_tunnels.append((f"{host}:{remote_port} → localhost:{local_port} {user}@{host}:{port}", client,stop_event))
+            active_ssh_tunnels.append((f"{user}:{remote_port} → localhost:{local_port} {user}@{host}:{port}", client,stop_event))
             # print(active_ssh_tunnels)
             self.refresh_connection_list()
             messagebox.showinfo("Tunnel actif", f"""L'adresse localhost:{local_port} redirige le port {remote_port}\nde la connexion {user}@{host}:{port}""")
@@ -1010,7 +1013,16 @@ class CloudflaredGUI:
             listbox.pack(padx=10, pady=5, fill="both", expand=True)
             for i, p in enumerate(cloudflared_processes):
                 hostname = next((arg for j, arg in enumerate(p.args) if p.args[j-1] == '--hostname'), f"Connexion {i}")
-                listbox.insert(tk.END, f"{hostname}")
+                url = next((arg for j, arg in enumerate(p.args) if p.args[j-1] == '--url'), f"Connexion {i}")
+                try:
+                    token_ = next((arg for j, arg in enumerate(p.args) if p.args[j-1] == '--service-token-id'))
+                    # print(token_)
+                    if token_:
+                        token_name = hostname.split(".")[0]
+                        token = f"| Token sélectionné: {token_name}"
+                except:
+                    token = ""
+                listbox.insert(tk.END, f"{hostname} → {url} {token} ")
 
             def on_select():
                 selected = listbox.curselection()
