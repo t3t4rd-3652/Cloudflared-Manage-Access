@@ -112,7 +112,7 @@ class SSHRedirector:
     def __init__(self, parent):
         self.top = tk.Toplevel(parent)
         self.top.title("Redirection SSH")
-        self.top.geometry("450x600")
+        self.top.geometry("450x640")
         self.top.protocol("WM_DELETE_WINDOW", self.on_close)
         self.top.resizable(False, False)
 
@@ -121,7 +121,11 @@ class SSHRedirector:
         self.top.columnconfigure(1, weight=1)
 
         # Ligne 0 - Profil de connexions
-        # ttk.Combobox(self.top, text="") #RAJOUTER UNE COMBOBOX AFIN DE PRENDRE EN COMPTE DES PROFILS DE CONNEXIONS DE REDIRECTION SSH 
+        # RAJOUTER UNE COMBOBOX AFIN DE PRENDRE EN COMPTE DES PROFILS DE CONNEXIONS DE REDIRECTION SSH 
+        self.profile_redirect_var = tk.StringVar(value="Default")
+        self.profile_redirect = ttk.Combobox(self.top, textvariable=self.profile_redirect_var, state="readonly")
+        self.profile_redirect.grid(row=0, column=0, sticky="ew", padx=5, pady=(10,5),columnspan=2)
+        # self.profile_redirect.bind("<<ComboboxSelected>>", self.load_profile)
 
         # Ligne 1 - Hôte distant
         ttk.Label(self.top, text="Hôte distant (IP ou nom) :").grid(row=1, column=0, pady=5, sticky="w", padx=(10,0))
@@ -329,6 +333,39 @@ class SSHRedirector:
                 client = self.init_connection(host, port, user)
 
             if client:
+                # cmd = r"""bash -c '
+                #         declare -A MAP;
+                #         while IFS= read -r line; do
+                #         name="${line%% *}"; ports="${line#* }";
+                #         IFS=, read -ra items <<<"$ports";
+                #         for item in "${items[@]}"; do
+                #             item="$(echo "$item" | xargs)";
+                #             if [[ "$item" =~ :([0-9]+)->[0-9]+/(tcp|udp) ]]; then
+                #             port="${BASH_REMATCH[1]}"; proto="${BASH_REMATCH[2]}"; key="${proto}:${port}";
+                #             if [[ -n "${MAP[$key]}" && "${MAP[$key]}" != *"$name"* ]]; then
+                #                 MAP[$key]="${MAP[$key]},$name";
+                #             else
+                #                 MAP[$key]="$name";
+                #             fi;
+                #             fi;
+                #         done;
+                #         done < <(docker ps --format "{{.Names}} {{.Ports}}");
+
+                #         ss -tuln | awk "/LISTEN/ {print $1, $5}" | \
+                #         while read -r proto addr; do
+                #         if [[ "$addr" =~ :([0-9]+)$ ]]; then
+                #             port="${BASH_REMATCH[1]}";
+                #             svc="$(getent services "${port}/${proto}" | awk "{print $1}")";
+                #             [[ -z "$svc" ]] && svc="inconnu";
+                #             cname="${MAP[${proto}:${port}]}";
+                #             [[ -z "$cname" ]] && cname="-";
+                #             printf "%s %s %s %s\n" "$proto" "$port" "$svc" "$cname";
+                #         fi;
+                #         done | sort -k1,1 -k2,2n'
+                #         """
+
+                # stdin, stdout, stderr = client.exec_command(cmd)
+                # output = stdout.readlines();print(output)
                 stdin, stdout, stderr = client.exec_command("ss -tuln | grep LISTEN")
                 output = stdout.readlines()
 
@@ -531,6 +568,7 @@ def resource_path(relative_path):
 
 CONFIG_FILE = os.path.join(APPDATA_DIR, "cloudflared_configs.json")
 TOKENS_FILE = os.path.join(APPDATA_DIR, "cloudflared_tokens.json")
+SSH_REDIR_FILE = os.path.join(APPDATA_DIR, "cloudflared_ssh_redir.json")
 
 # print(CONFIG_FILE,TOKENS_FILE)
 if os.path.isfile(CONFIG_FILE):
@@ -547,6 +585,13 @@ else:
     "port": "22"}}
 
 TOKENS = {}
+SSH_REDIR = {
+    "Default": {
+        "host": "localhost",
+        "port": "22",
+        "user": ""
+    }
+}
 
 class CloudflaredTab:
     def rename_profile(self):
