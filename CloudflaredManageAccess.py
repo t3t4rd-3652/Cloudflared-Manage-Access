@@ -18,6 +18,52 @@ import threading
 import select
 import atexit
 
+class Tooltip:
+    def __init__(self, widget, text="", font=('Arial', 8, 'bold'), padx=5, pady=3, wraplength=200):
+        self.widget = widget
+        self.text = text
+        self.font = font
+        self.padx = padx
+        self.pady = pady
+        self.wraplength = wraplength
+        self.tooltip_window = None
+        self.label = None
+
+    def follow_mouse(self, event=None):
+        if self.tooltip_window and event:
+            self.tooltip_window.wm_geometry(f"+{event.x_root + 20}+{event.y_root + 10}")
+
+    def set_text(self, new_text):
+        self.text = new_text
+        if self.label and self.label.winfo_exists():
+            self.label.config(text=new_text)
+
+    def show_tooltip(self, x, y):
+        if self.tooltip_window or not self.text:
+            return
+        
+        self.tooltip_window = tk.Toplevel(self.widget)
+        self.tooltip_window.wm_overrideredirect(True)
+        self.tooltip_window.wm_geometry(f"+{x+20}+{y+10}")
+        
+        self.label = tk.Label(
+            self.tooltip_window,
+            text=self.text,
+            background="white",
+            relief="solid",
+            borderwidth=1,
+            font=self.font,
+            padx=self.padx,
+            pady=self.pady,
+            wraplength=self.wraplength
+        )
+        self.label.pack()
+
+    def hide_tooltip(self):
+        if self.tooltip_window:
+            self.tooltip_window.destroy()
+            self.tooltip_window = None
+
 # Définition du dossier APPDATA pour stocker les clés SSH du projet
 def get_appdata_dir():
     system = platform.system()
@@ -158,6 +204,10 @@ class SSHRedirector:
 
         # Ligne 8 - Liste ports ouverts
         self.ports_listbox = tk.Listbox(self.top, height=6)
+        tooltip = Tooltip(self.ports_listbox)
+        self.ports_listbox.bind("<Enter>", lambda e: tooltip.show_tooltip(e.x_root, e.y_root))
+        self.ports_listbox.bind("<Motion>", lambda e: (self.on_motion(tooltip, self.ports_listbox, e)))
+        self.ports_listbox.bind("<Leave>",  lambda e: self.on_leave(tooltip, e))
         self.ports_listbox.grid(row=5, column=0, padx=10, pady=5, sticky="nsew", columnspan=2)
 
         # Ligne 9 - Port local
@@ -179,7 +229,8 @@ class SSHRedirector:
         ttk.Label(self.top, text="Connexions SSH ouvertes :").grid(row=9, column=0, pady=0, sticky="w",padx=10)
         self.conn_listbox = tk.Listbox(self.top, height=6)
         self.conn_listbox.grid(row=10, column=0, padx=10, sticky="nsew", columnspan=2)
-        ttk.Button(self.top, text="Fermer la connexion sélectionnée", command=self.close_selected_connection).grid(row=11, column=0, pady=10, sticky="ew", columnspan=2)
+        ttk.Button(self.top,text="Ouvrir la page sélectionnée",command=self.open_redir_web).grid(row=11, column=0, pady=10,padx=(10,5), sticky="w")
+        ttk.Button(self.top, text="Fermer la connexion sélectionnée", command=self.close_selected_connection).grid(row=11, column=1, pady=10,padx=(5,10), sticky="ew")
 
         # Ligne 16 - Séparateur
         ttk.Separator(self.top).grid(row=12, column=0, sticky="ew", pady=10, columnspan=2)
@@ -237,6 +288,21 @@ class SSHRedirector:
             transport = client.get_transport()
             active_paramiko_connections[conn_key] = (password,transport,client)
         return client
+
+    def on_motion(self, tooltip, listbox, event):
+        idx = listbox.nearest(event.y)
+        if 0 <= idx < listbox.size():
+            # value = listbox.get(idx)
+            tooltip.set_text(f"{self.ports_info[idx][-1]}")
+            # Créer la fenêtre si besoin
+            if tooltip.tooltip_window is None:
+                tooltip.show_tooltip(event.x_root, event.y_root)
+            else:
+                # La faire suivre le curseur
+                tooltip.follow_mouse(event)
+
+    def on_leave(self, tooltip, event):
+        tooltip.hide_tooltip()
 
     def on_close(self):
         cleanup_ssh_tunnels()
@@ -333,68 +399,58 @@ class SSHRedirector:
                 client = self.init_connection(host, port, user)
 
             if client:
-                # cmd = r"""bash -c '
-                #         declare -A MAP;
-                #         while IFS= read -r line; do
-                #         name="${line%% *}"; ports="${line#* }";
-                #         IFS=, read -ra items <<<"$ports";
-                #         for item in "${items[@]}"; do
-                #             item="$(echo "$item" | xargs)";
-                #             if [[ "$item" =~ :([0-9]+)->[0-9]+/(tcp|udp) ]]; then
-                #             port="${BASH_REMATCH[1]}"; proto="${BASH_REMATCH[2]}"; key="${proto}:${port}";
-                #             if [[ -n "${MAP[$key]}" && "${MAP[$key]}" != *"$name"* ]]; then
-                #                 MAP[$key]="${MAP[$key]},$name";
-                #             else
-                #                 MAP[$key]="$name";
-                #             fi;
-                #             fi;
-                #         done;
-                #         done < <(docker ps --format "{{.Names}} {{.Ports}}");
+                try:
+                    stdin, stdout, stderr = client.exec_command("ports-report")
+                    print('ports-report')
+                except Exception as e:
+                    print(e)             
+                    messagebox.showwarning("Le binaire ports-report n'est pas disponible sur le serveur, veuillez l'installer.")
+                    stdin, stdout, stderr = client.exec_command("ss -tuln | grep LISTEN")
 
-                #         ss -tuln | awk "/LISTEN/ {print $1, $5}" | \
-                #         while read -r proto addr; do
-                #         if [[ "$addr" =~ :([0-9]+)$ ]]; then
-                #             port="${BASH_REMATCH[1]}";
-                #             svc="$(getent services "${port}/${proto}" | awk "{print $1}")";
-                #             [[ -z "$svc" ]] && svc="inconnu";
-                #             cname="${MAP[${proto}:${port}]}";
-                #             [[ -z "$cname" ]] && cname="-";
-                #             printf "%s %s %s %s\n" "$proto" "$port" "$svc" "$cname";
-                #         fi;
-                #         done | sort -k1,1 -k2,2n'
-                #         """
-
-                # stdin, stdout, stderr = client.exec_command(cmd)
-                # output = stdout.readlines();print(output)
-                stdin, stdout, stderr = client.exec_command("ss -tuln | grep LISTEN")
                 output = stdout.readlines()
-
                 self.ports_listbox.delete(0, tk.END)
-                seen_ports = set()
-                ports_info = []
+                self.ports_info = []
+                try:
+                    for line in output:
+                        parts = line.split()
+                        if parts:
+                            protocol = parts[0]
+                            port_ssh = parts[1]
+                            service = parts[2]
+                            match len(parts):
+                                case 5:
+                                    code_name = parts[3];code_int = parts[4]
+                                    total_code = code_name + " " + code_int
+                                    match code_int:
+                                        case '200':
+                                            final_code = code_name + f' ✅'
+                                        case '-':
+                                            final_code = ' ❓'; total_code = "Protocol non HTTP"
+                                        case _:
+                                            if parts[2] == '-':
+                                                service = 'WebApp'
+                                            final_code = code_name + f' ❌'
+                                case 4:
+                                    total_code = "HTTP Access Denied"
+                                    final_code = " ❌"
+                                case 6:
+                                    if service == 'http-alt':
+                                        service = 'WebApp'
+                                    code_name = parts[-2];code_int = parts[-1]
+                                    total_code = code_name + " " + code_int
+                                    final_code = " ❌"
+                                case _:
+                                    total_code = "Protocol non HTTP"
+                                    final_code = f'❓'
+                            self.ports_info.append((protocol,port_ssh,service,final_code,total_code))
 
-                for line in output:
-                    parts = line.split()
-                    if len(parts) >= 5:
-                        addr = parts[4]
-                        if ':' in addr:
-                            port_num = addr.split(':')[-1]
-                            if port_num not in seen_ports:
-                                seen_ports.add(port_num)
-                                try:
-                                    service_name = socket.getservbyport(int(port_num), 'tcp')
-                                except:
-                                    service_name = "inconnu"
-                                proto = parts[0].lower()
-                                # On stocke le port en int pour trier correctement
-                                ports_info.append((int(port_num), proto, service_name))
-
-                # Tri croissant des ports
-                ports_info.sort(key=lambda x: x[0])
-
-                # Insertion dans la Listbox
-                for port_num, proto, service_name in ports_info:
-                    self.ports_listbox.insert(tk.END, f"{port_num} ({proto}) - {service_name}")
+                    # Insertion dans la Listbox
+                    for protocol, port_ssh, service, final_code,total_code in self.ports_info:
+                        self.ports_listbox.insert(tk.END, f"{protocol} ({port_ssh}) - {service} → {final_code}")
+                        # Tooltip(key,f'Dernière Maj:\n{bdd_getime()}',font=('Roboto',12,'bold'))
+                except Exception as e:
+                    print(e)
+                    return
             else:
                 return
         except Exception as e:
@@ -412,7 +468,7 @@ class SSHRedirector:
             messagebox.showwarning("Aucun port sélectionné", "Veuillez sélectionner un port distant à rediriger.")
             return
         selected_text = self.ports_listbox.get(selected[0])
-        remote_port = selected_text.split()[0]
+        remote_port = selected_text.split()[1].strip("()")
         local_port = self.local_port_entry.get().strip()
         if not local_port.isdigit():
             messagebox.showerror("Erreur", "Le port local doit être un nombre entier.")
@@ -540,6 +596,10 @@ class SSHRedirector:
 
         self.refresh_connection_list()
         messagebox.showinfo("Connexion fermée", f"Connexion {label} arrêtée.")
+
+    def open_redir_web(self):
+        print(self.conn_listbox.get())
+        # webbrowser.open()
 
     def refresh_key_list(self):
         self.keys_listbox.delete(0, tk.END)
