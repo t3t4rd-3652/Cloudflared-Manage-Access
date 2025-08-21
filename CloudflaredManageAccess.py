@@ -16,53 +16,24 @@ import platform
 import random
 import threading
 import select
-import atexit
+from PIL import Image,ImageTk
+#################################
+def resource_path(relative_path):
+    """
+    Renvoie le chemin absolu vers une ressource, compatible avec les modes script et exécutable PyInstaller.
 
-class Tooltip:
-    def __init__(self, widget, text="", font=('Arial', 8, 'bold'), padx=5, pady=3, wraplength=200):
-        self.widget = widget
-        self.text = text
-        self.font = font
-        self.padx = padx
-        self.pady = pady
-        self.wraplength = wraplength
-        self.tooltip_window = None
-        self.label = None
+    Args:
+        relative (str): Le chemin relatif vers la ressource.
 
-    def follow_mouse(self, event=None):
-        if self.tooltip_window and event:
-            self.tooltip_window.wm_geometry(f"+{event.x_root + 20}+{event.y_root + 10}")
+    Returns:
+        str: Le chemin absolu vers la ressource.
+    """
+    try:
+        base_path = sys._MEIPASS  # utilisé par PyInstaller
+    except Exception:
+        base_path = os.path.abspath(".")
 
-    def set_text(self, new_text):
-        self.text = new_text
-        if self.label and self.label.winfo_exists():
-            self.label.config(text=new_text)
-
-    def show_tooltip(self, x, y):
-        if self.tooltip_window or not self.text:
-            return
-        
-        self.tooltip_window = tk.Toplevel(self.widget)
-        self.tooltip_window.wm_overrideredirect(True)
-        self.tooltip_window.wm_geometry(f"+{x+20}+{y+10}")
-        
-        self.label = tk.Label(
-            self.tooltip_window,
-            text=self.text,
-            background="white",
-            relief="solid",
-            borderwidth=1,
-            font=self.font,
-            padx=self.padx,
-            pady=self.pady,
-            wraplength=self.wraplength
-        )
-        self.label.pack()
-
-    def hide_tooltip(self):
-        if self.tooltip_window:
-            self.tooltip_window.destroy()
-            self.tooltip_window = None
+    return os.path.join(base_path, relative_path)
 
 # Définition du dossier APPDATA pour stocker les clés SSH du projet
 def get_appdata_dir():
@@ -83,12 +54,77 @@ def get_user_dir():
     else:
         return os.path.join(Path.home(), ".config", "CloudflaredManager")
 
+################ - VARIABLES - ######################
+
 APPDATA_DIR = get_appdata_dir()
 os.makedirs(APPDATA_DIR, exist_ok=True)
 SSH_KEY_DIR = Path(APPDATA_DIR) / "ssh_keys"
 SSH_KEY_DIR.mkdir(parents=True, exist_ok=True)
 
 active_paramiko_connections = {}
+cloudflared_processes = []
+connection_labels = []
+active_ssh_tunnels = []
+ssh_keys_summary = []
+
+CONFIG_FILE = os.path.join(APPDATA_DIR, "cloudflared_configs.json")
+TOKENS_FILE = os.path.join(APPDATA_DIR, "cloudflared_tokens.json")
+SSH_REDIR_FILE = os.path.join(APPDATA_DIR, "cloudflared_ssh_redir.json")
+
+# print(CONFIG_FILE,TOKENS_FILE)
+if os.path.isfile(CONFIG_FILE):
+    PRESETS={}
+else:
+    PRESETS = {
+  "MongoDB": {
+    "hostname": "mongodb.tondomaine.fr",
+    "host": "127.0.0.1",
+    "port": "27017"},
+  "SSH": {
+    "hostname": "ssh.tondomaine.fr",
+    "host": "127.0.0.1",
+    "port": "22"}}
+
+TOKENS = {}
+if os.path.isfile(SSH_REDIR_FILE):
+    SSH_REDIR = {}
+else:
+    SSH_REDIR = {
+    "Default": {
+        "host": "localhost",
+        "port": "22",
+        "user": ""
+    }
+}
+dir_ico = resource_path("ico") 
+
+add_ico = Image.open(r"ico\add.png")   # Chemin de ton image
+add_ico = add_ico.resize((20, 20))          # Redimensionner si nécessaire
+# add_tk = ImageTk.PhotoImage(add_ico)
+
+delete_ico = Image.open(r"ico\delete.png")
+delete_ico = delete_ico.resize((10, 10))
+# delete_tk = ImageTk.PhotoImage(delete_ico)
+
+edit_ico = Image.open(r"ico\edit.png")
+edit_ico = edit_ico.resize((50, 50))
+# edit_tk = ImageTk.PhotoImage(edit_ico)
+
+export_ico = Image.open(r"ico\export.png")
+export_ico = export_ico.resize((50, 50))
+# export_tk = ImageTk.PhotoImage(export_ico)
+
+import_ico = Image.open(r"ico\import.png")
+import_ico = import_ico.resize((50, 50))
+# import_tk = ImageTk.PhotoImage(import_ico)
+
+save_ico = Image.open(r"ico\save.png")
+save_ico = save_ico.resize((20, 20))
+# save_tk = ImageTk.PhotoImage(save_ico)
+
+# photo = ImageTk.PhotoImage(img)
+
+################################################
 
 def forward_tunnel(local_port, remote_host, remote_port, transport):
     """Écoute sur local_port et transfère vers remote_port via transport Paramiko."""
@@ -118,9 +154,6 @@ def transfer(src, dst):
         dst.send(data)
     src.close()
     dst.close()
-
-active_ssh_tunnels = []
-ssh_keys_summary = []
 
 def load_existing_ssh_keys():
     if SSH_KEY_DIR.exists():
@@ -152,8 +185,35 @@ def cleanup_ssh_tunnels():
         except Exception as e:
             print("ERROR CLEANUP PASSWORD:", e)
 
-atexit.register(cleanup_ssh_tunnels)
+def timed_messagebox(title, message, duration=8000):
+    top = tk.Toplevel()
+    top.title(title)
+    top.geometry("400x100")
+    top.resizable(False, False)
+    tk.Label(top, text=message, wraplength=380, justify="left").pack(padx=10, pady=10)
+    top.after(duration, top.destroy)
+    top.attributes('-topmost', True)
+    top.grab_set()
 
+
+def update_connection_status():
+    status_text = f"Connexions ouvertes : {len(cloudflared_processes)}"
+    if hasattr(app, 'status_label'):
+        app.status_label.config(text=status_text)
+
+
+def cleanup():
+    for proc in cloudflared_processes:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+
+atexit.register(cleanup_ssh_tunnels)
+##
 class SSHRedirector:
     def __init__(self, parent):
         self.top = tk.Toplevel(parent)
@@ -170,24 +230,37 @@ class SSHRedirector:
         # RAJOUTER UNE COMBOBOX AFIN DE PRENDRE EN COMPTE DES PROFILS DE CONNEXIONS DE REDIRECTION SSH 
         self.profile_redirect_var = tk.StringVar(value="Default")
         self.profile_redirect = ttk.Combobox(self.top, textvariable=self.profile_redirect_var, state="readonly")
-        self.profile_redirect.grid(row=0, column=0, sticky="ew", padx=5, pady=(10,5),columnspan=2)
-        # self.profile_redirect.bind("<<ComboboxSelected>>", self.load_profile)
+        self.profile_redirect.grid(row=0, column=0, sticky="ew", padx=5, pady=(10,5),columnspan=1)
+        self.profile_redirect.bind("<<ComboboxSelected>>", self.load_profile_ssh)
+
+        self.add_tk = ImageTk.PhotoImage(add_ico,(10,10))
+        self.save_tk = ImageTk.PhotoImage(save_ico,(10,10))
+
+
+
+        ttk.Button(self.top, image=self.add_tk, command=self.add_config_ssh).grid(row=0, column=1, sticky="ew", padx=5, pady=(10,5),columnspan=1)
+        ttk.Button(self.top, image=self.save_tk, command=self.save_config_ssh).grid(row=0, column=2, sticky="ew", padx=5, pady=(10,5),columnspan=1)
+        # ttk.Button(self.top, text='TEST', command=self.test).grid(row=0, column=3, sticky="ew", padx=5, pady=(10,5),columnspan=1)
+        # self.profile_add = 
+        # self.profile_suppr = 
+        # self.profile_modif = 
+
 
         # Ligne 1 - Hôte distant
         ttk.Label(self.top, text="Hôte distant (IP ou nom) :").grid(row=1, column=0, pady=5, sticky="w", padx=(10,0))
-        self.host_entry = ttk.Entry(self.top)
-        self.host_entry.grid(row=1, column=1, padx=(0,10), sticky="ew")
+        self.host_entry_ssh = ttk.Entry(self.top)
+        self.host_entry_ssh.grid(row=1, column=1, padx=(0,10), sticky="ew")
 
         # Ligne 2 - Port SSH distant
         ttk.Label(self.top, text="Port (défaut : 22) :").grid(row=2, column=0, pady=5, sticky="w", padx=(10,0))
-        self.port_entry = ttk.Entry(self.top, width=8)
-        self.port_entry.insert(0, "22")
-        self.port_entry.grid(row=2, column=1, padx=(0,10), sticky="w")
+        self.port_entry_ssh = ttk.Entry(self.top, width=8)
+        self.port_entry_ssh.insert(0, "22")
+        self.port_entry_ssh.grid(row=2, column=1, padx=(0,10), sticky="w")
 
         # Ligne 4 - Nom utilisateur SSH
         ttk.Label(self.top, text="Nom d'utilisateur SSH :").grid(row=3, column=0, pady=5, sticky="w", padx=(10,0))
-        self.user_entry = ttk.Entry(self.top)
-        self.user_entry.grid(row=3, column=1, padx=(0,10), sticky="ew", columnspan=2)
+        self.user_entry_ssh = ttk.Entry(self.top)
+        self.user_entry_ssh.grid(row=3, column=1, padx=(0,10), sticky="ew", columnspan=2)
 
         # Ligne 6 - Frame pour checkbox + bouton
         check_frame = ttk.Frame(self.top)
@@ -229,7 +302,7 @@ class SSHRedirector:
         ttk.Label(self.top, text="Connexions SSH ouvertes :").grid(row=9, column=0, pady=0, sticky="w",padx=10)
         self.conn_listbox = tk.Listbox(self.top, height=6)
         self.conn_listbox.grid(row=10, column=0, padx=10, sticky="nsew", columnspan=2)
-        ttk.Button(self.top,text="Ouvrir la page sélectionnée",command=self.open_redir_web).grid(row=11, column=0, pady=10,padx=(10,5), sticky="w")
+        ttk.Button(self.top,text="Ouvrir la page sélectionnée",command=self.open_redir_web).grid(row=11, column=0, pady=10,padx=(10,5), sticky="w") ##LAST ADD 
         ttk.Button(self.top, text="Fermer la connexion sélectionnée", command=self.close_selected_connection).grid(row=11, column=1, pady=10,padx=(5,10), sticky="ew")
 
         # Ligne 16 - Séparateur
@@ -351,9 +424,9 @@ class SSHRedirector:
             return
         key_path = Path(self.keys_listbox.get(selected[0]))
         key_name = key_path.name
-        host = self.host_entry.get().strip()
-        port = int(self.port_entry.get().strip())
-        user = self.user_entry.get().strip()
+        host = self.host_entry_ssh.get().strip()
+        port = int(self.port_entry_ssh.get().strip())
+        user = self.user_entry_ssh.get().strip()
         self.send_ssh_key_to_server(host, port, user, key_name)
 
     def delete_selected_key(self):
@@ -373,9 +446,9 @@ class SSHRedirector:
                 messagebox.showerror("Erreur", str(e))
 
     def list_ports(self):
-        host = self.host_entry.get().strip()
-        port = int(self.port_entry.get().strip())
-        user = self.user_entry.get().strip()
+        host = self.host_entry_ssh.get().strip()
+        port = int(self.port_entry_ssh.get().strip())
+        user = self.user_entry_ssh.get().strip()
         try:
             if self.var_check.get() == 0:
                 key_files = list(SSH_KEY_DIR.glob("id_ed25519*"))
@@ -401,7 +474,7 @@ class SSHRedirector:
             if client:
                 try:
                     stdin, stdout, stderr = client.exec_command("ports-report")
-                    print('ports-report')
+                    # print('ports-report')
                 except Exception as e:
                     print(e)             
                     messagebox.showwarning("Le binaire ports-report n'est pas disponible sur le serveur, veuillez l'installer.")
@@ -460,9 +533,9 @@ class SSHRedirector:
         def is_port_in_use(port):
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 return s.connect_ex(('localhost', port)) == 0
-        host = self.host_entry.get().strip()
-        port = int(self.port_entry.get().strip())
-        user = self.user_entry.get().strip()
+        host = self.host_entry_ssh.get().strip()
+        port = int(self.port_entry_ssh.get().strip())
+        user = self.user_entry_ssh.get().strip()
         selected = self.ports_listbox.curselection()
         if not selected:
             messagebox.showwarning("Aucun port sélectionné", "Veuillez sélectionner un port distant à rediriger.")
@@ -598,7 +671,14 @@ class SSHRedirector:
         messagebox.showinfo("Connexion fermée", f"Connexion {label} arrêtée.")
 
     def open_redir_web(self):
-        print(self.conn_listbox.get())
+        try:
+            part_url = active_ssh_tunnels[self.conn_listbox.curselection()[0]][0].split(" ")[2]
+            # print(active_ssh_tunnels[self.conn_listbox.curselection()[0]][0].split(" ")[2])
+            part_http = "http://"
+            url = part_http + part_url
+            webbrowser.open(url)
+        except Exception as e:
+            messagebox.showinfo(f"La page web n'a pas pu être ouverte: {e}")
         # webbrowser.open()
 
     def refresh_key_list(self):
@@ -606,53 +686,50 @@ class SSHRedirector:
         for path in ssh_keys_summary:
             self.keys_listbox.insert(tk.END, path)
 
+    def load_profile_ssh(self):
+        name = self.profile_redirect_var.get()
+        config = SSH_REDIR.get(name, {})
+        self.host_entry_ssh.delete(0, tk.END)
+        self.host_entry_ssh.insert(0, config.get("host", "localhost"))
+        self.port_entry_ssh.delete(0, tk.END)
+        self.port_entry_ssh.insert(0, config.get("port", ""))
+        self.user_entry_ssh.delete(0, tk.END)
+        self.user_entry_ssh.insert(0, config.get("user", ""))
 
-#################################
-def resource_path(relative_path):
-    """
-    Renvoie le chemin absolu vers une ressource, compatible avec les modes script et exécutable PyInstaller.
+    def save_config_ssh(self):
+        """
+        Sauvegarde le profil de connexion courant dans le fichier JSON de configuration.
+        Affiche une boîte d'information à la fin.
+        """
+        name = self.profile_redirect_var.get()
+        if not name:
+            return
+        SSH_REDIR[name] = {
+            "host": self.host_entry_ssh.get(),
+            "port": self.port_entry_ssh.get(),
+            "user": self.user_entry_ssh.get(),
+        }
+        with open(SSH_REDIR_FILE, "w") as f:
+            json.dump(SSH_REDIR, f, indent=2)
+        self.profile_redirect_var['values'] = list(SSH_REDIR.keys())
+        timed_messagebox("Sauvegarde", f"Configuration SSH '{name}' enregistrée.")
 
-    Args:
-        relative (str): Le chemin relatif vers la ressource.
-
-    Returns:
-        str: Le chemin absolu vers la ressource.
-    """
-    try:
-        base_path = sys._MEIPASS  # utilisé par PyInstaller
-    except Exception:
-        base_path = os.path.abspath(".")
-
-    return os.path.join(base_path, relative_path)
+    def add_config_ssh(self):
+        name = simpledialog.askstring("Nouveau token", "Nom du nouveau token :")
+        if name and name not in SSH_REDIR:
+            SSH_REDIR[name] = {}
+            self.profile_redirect_var['values'] = list(PRESETS.keys())
+            self.profile_redirect_var.set(name)
 
 
-CONFIG_FILE = os.path.join(APPDATA_DIR, "cloudflared_configs.json")
-TOKENS_FILE = os.path.join(APPDATA_DIR, "cloudflared_tokens.json")
-SSH_REDIR_FILE = os.path.join(APPDATA_DIR, "cloudflared_ssh_redir.json")
 
-# print(CONFIG_FILE,TOKENS_FILE)
-if os.path.isfile(CONFIG_FILE):
-    PRESETS={}
-else:
-    PRESETS = {
-  "MongoDB": {
-    "hostname": "mongodb.tondomaine.fr",
-    "host": "127.0.0.1",
-    "port": "27017"},
-  "SSH": {
-    "hostname": "ssh.tondomaine.fr",
-    "host": "127.0.0.1",
-    "port": "22"}}
+    # def test(self):
+    #     dir_picture = resource_path("ico") 
+    #     data = os.listdir(dir_picture)
+    #     timed_messagebox("TEST",f"{data}")
 
-TOKENS = {}
-SSH_REDIR = {
-    "Default": {
-        "host": "localhost",
-        "port": "22",
-        "user": ""
-    }
-}
 
+##
 class CloudflaredTab:
     def rename_profile(self):
         name = self.profile_var.get()
@@ -712,10 +789,10 @@ class CloudflaredTab:
         self.profile_menu.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
         self.profile_menu.bind("<<ComboboxSelected>>", self.load_profile)
 
-        self.import_btn = ttk.Button(self.frame, text="Importer", command=self.import_config)
+        self.import_btn = ttk.Button(self.frame, text="📥", command=self.import_config)
         self.import_btn.grid(row=0, column=1, padx=2, sticky='ew')
 
-        self.save_btn = ttk.Button(self.frame, text="Enregistrer", command=self.save_config)
+        self.save_btn = ttk.Button(self.frame, text="💾", command=self.save_config)
         self.save_btn.grid(row=0, column=2, padx=(0, 2), sticky='ew')
 
         self.new_profile_btn = ttk.Button(self.frame, text="➕", width=3, command=self.create_new_profile)
@@ -732,8 +809,8 @@ class CloudflaredTab:
         self.token_menu.grid(row=0, column=7, sticky="ew", padx=2)
         self.token_menu.bind("<<ComboboxSelected>>", self.load_token_profile)
 
-        ttk.Button(self.frame, text="Importer Token", command=self.import_tokens).grid(row=0, column=8, padx=2, sticky='ew')
-        ttk.Button(self.frame, text="Enregistrer Token", command=self.save_token).grid(row=0, column=9, padx=2, sticky='ew')
+        ttk.Button(self.frame, text="📥", command=self.import_tokens).grid(row=0, column=8, padx=2, sticky='ew')
+        ttk.Button(self.frame, text="💾", command=self.save_token).grid(row=0, column=9, padx=2, sticky='ew')
         ttk.Button(self.frame, text="➕", width=3, command=self.create_new_token_profile).grid(row=0, column=10, padx=(0, 5), sticky='w')
         self.rename_token_btn = ttk.Button(self.frame, text="✏️", width=3, command=self.rename_token)
         self.rename_token_btn.grid(row=0, column=11, padx=(0, 2), sticky='ew')
@@ -1254,41 +1331,56 @@ class CloudflaredGUI:
         self.tab_control.forget(current)
         del self.tabs[current]
 
+class Tooltip:
+    def __init__(self, widget, text="", font=('Arial', 8, 'bold'), padx=5, pady=3, wraplength=200):
+        self.widget = widget
+        self.text = text
+        self.font = font
+        self.padx = padx
+        self.pady = pady
+        self.wraplength = wraplength
+        self.tooltip_window = None
+        self.label = None
 
+    def follow_mouse(self, event=None):
+        if self.tooltip_window and event:
+            self.tooltip_window.wm_geometry(f"+{event.x_root + 20}+{event.y_root + 10}")
 
-cloudflared_processes = []
-connection_labels = []
+    def set_text(self, new_text):
+        self.text = new_text
+        if self.label and self.label.winfo_exists():
+            self.label.config(text=new_text)
 
-def timed_messagebox(title, message, duration=8000):
-    top = tk.Toplevel()
-    top.title(title)
-    top.geometry("400x100")
-    top.resizable(False, False)
-    tk.Label(top, text=message, wraplength=380, justify="left").pack(padx=10, pady=10)
-    top.after(duration, top.destroy)
-    top.attributes('-topmost', True)
-    top.grab_set()
+    def show_tooltip(self, x, y):
+        if self.tooltip_window or not self.text:
+            return
+        
+        self.tooltip_window = tk.Toplevel(self.widget)
+        self.tooltip_window.wm_overrideredirect(True)
+        self.tooltip_window.wm_geometry(f"+{x+20}+{y+10}")
+        
+        self.label = tk.Label(
+            self.tooltip_window,
+            text=self.text,
+            background="white",
+            relief="solid",
+            borderwidth=1,
+            font=self.font,
+            padx=self.padx,
+            pady=self.pady,
+            wraplength=self.wraplength
+        )
+        self.label.pack()
 
-
-def update_connection_status():
-    status_text = f"Connexions ouvertes : {len(cloudflared_processes)}"
-    if hasattr(app, 'status_label'):
-        app.status_label.config(text=status_text)
-
-
-def cleanup():
-    for proc in cloudflared_processes:
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+    def hide_tooltip(self):
+        if self.tooltip_window:
+            self.tooltip_window.destroy()
+            self.tooltip_window = None
 
 atexit.register(cleanup)
 
 if __name__ == "__main__":
     root = tk.Tk()
-    root.iconbitmap(resource_path("cloudflared.ico"))
+    root.iconbitmap(resource_path(r"ico\cloudflared.ico"))
     app = CloudflaredGUI(root)
     root.mainloop()
