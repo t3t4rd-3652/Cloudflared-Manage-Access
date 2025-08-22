@@ -96,33 +96,27 @@ else:
         "user": ""
     }
 }
-dir_ico = resource_path("ico") 
 
-add_ico = Image.open(r"ico\add.png")   # Chemin de ton image
-add_ico = add_ico.resize((15, 15))          # Redimensionner si nécessaire
-# add_tk = ImageTk.PhotoImage(add_ico)
-
+## - IMAGE - ##
+dir_ico = resource_path("ico") #DOSSIER IMAGE
+# BOUTON ADD
+add_ico = Image.open(r"ico\add.png")
+add_ico = add_ico.resize((15, 15))       
+# BOUTON DELETE
 delete_ico = Image.open(r"ico\delete.png")
 delete_ico = delete_ico.resize((15, 15))
-# delete_tk = ImageTk.PhotoImage(delete_ico)
-
+# BOUTON EDIT
 edit_ico = Image.open(r"ico\edit.png")
 edit_ico = edit_ico.resize((15, 15))
-# edit_tk = ImageTk.PhotoImage(edit_ico)
-
+# BOUTON EXPORT
 export_ico = Image.open(r"ico\export.png")
 export_ico = export_ico.resize((15, 15))
-# export_tk = ImageTk.PhotoImage(export_ico)
-
+# BOUTON IMPORT
 import_ico = Image.open(r"ico\import.png")
 import_ico = import_ico.resize((15, 15))
-# import_tk = ImageTk.PhotoImage(import_ico)
-
+# BOUTON SAVE
 save_ico = Image.open(r"ico\save.png")
 save_ico = save_ico.resize((15, 15))
-# save_tk = ImageTk.PhotoImage(save_ico)
-
-# photo = ImageTk.PhotoImage(img)
 
 ################################################
 
@@ -211,128 +205,137 @@ def cleanup():
             except subprocess.TimeoutExpired:
                 proc.kill()
 
-
 atexit.register(cleanup_ssh_tunnels)
 ##
+
 class SSHRedirector:
     def __init__(self, parent):
         self.top = tk.Toplevel(parent)
+        # - IMG
         self.add_tk = ImageTk.PhotoImage(add_ico,(10,10))
         self.save_tk = ImageTk.PhotoImage(save_ico,(10,10))
         self.delete_ico = ImageTk.PhotoImage(delete_ico,(10,10))
         self.edit_ico = ImageTk.PhotoImage(edit_ico,(10,10))
         self.export_ico = ImageTk.PhotoImage(export_ico,(10,10))
         self.import_ico = ImageTk.PhotoImage(import_ico,(10,10))
-
-
+        # - FENETRE ROOT
         self.top.title("Redirection SSH")
-        self.top.geometry("450x640")
+        self.top.geometry("420x630")
         self.top.protocol("WM_DELETE_WINDOW", self.on_close)
         self.top.resizable(False, False)
-
         # Configuration du grid global
         self.top.columnconfigure(0, weight=1)
         self.top.columnconfigure(1, weight=1)
-
         # Ligne 0 - Profil de connexions
         # RAJOUTER UNE COMBOBOX AFIN DE PRENDRE EN COMPTE DES PROFILS DE CONNEXIONS DE REDIRECTION SSH 
         self.profile_redirect_var = tk.StringVar(value="Default")
         self.profile_redirect = ttk.Combobox(self.top, textvariable=self.profile_redirect_var, state="readonly")
-        self.profile_redirect.grid(row=0, column=0, sticky="ew", padx=5, pady=(5,5),columnspan=4)
         self.profile_redirect.bind("<<ComboboxSelected>>", self.load_profile_ssh)
+        self.load_configs_ssh()
         frame_ico = ttk.Frame(self.top)
-        frame_ico.grid(row=0, column=4, sticky="ew", padx=2, pady=5,columnspan=2)
-        
-
-
-
-        ttk.Button(frame_ico, image=self.add_tk, command=self.add_config_ssh).grid(row=0, column=1, sticky="ew", padx=2, pady=(5,5),columnspan=1)
-        ttk.Button(frame_ico, image=self.save_tk).grid(row=0, column=2, sticky="w", padx=2, pady=(5,5),columnspan=1)
-        ttk.Button(frame_ico, image=self.delete_ico).grid(row=0, column=3, sticky="w", padx=2, pady=(5,5),columnspan=1)
-        ttk.Button(frame_ico, image=self.edit_ico).grid(row=0, column=4, sticky="w", padx=2, pady=(5,5),columnspan=1)
-        ttk.Button(frame_ico, image=self.import_ico).grid(row=0, column=5, sticky="w", padx=2, pady=(5,5),columnspan=1)
-        # ttk.Button(self.top, text='TEST', command=self.test).grid(row=0, column=3, sticky="ew", padx=5, pady=(10,5),columnspan=1)
-        # self.profile_add = 
-        # self.profile_suppr = 
-        # self.profile_modif = 
-
-
+        # - BUTTON
+        add_button = ttk.Button(frame_ico, image=self.add_tk, command=self.add_config_ssh)
+        save_button = ttk.Button(frame_ico, image=self.save_tk, command=self.save_config_ssh)
+        delete_button = ttk.Button(frame_ico, image=self.delete_ico, command=self.delete_profile_ssh)
+        edit_button = ttk.Button(frame_ico, image=self.edit_ico, command=self.rename_profile_ssh)
+        import_button = ttk.Button(frame_ico, image=self.import_ico, command=self.import_profile_ssh)
+        export_button = ttk.Button(frame_ico, image=self.export_ico, command=self.export_profile_ssh)
         # Ligne 1 - Hôte distant
-        ttk.Label(self.top, text="Hôte distant (IP ou nom) :").grid(row=1, column=0, pady=5, sticky="w", padx=(10,0))
+        label_host = ttk.Label(self.top, text="Hôte (IP ou nom) :")
         self.host_entry_ssh = ttk.Entry(self.top)
-        self.host_entry_ssh.grid(row=1, column=1, padx=(0,10), sticky="ew", columnspan=5)
-
         # Ligne 2 - Port SSH distant
-        ttk.Label(self.top, text="Port (défaut : 22) :").grid(row=2, column=0, pady=5, sticky="w", padx=(10,0))
+        label_port = ttk.Label(self.top, text="Port (défaut : 22) :")
         self.port_entry_ssh = ttk.Entry(self.top, width=8)
         self.port_entry_ssh.insert(0, "22")
-        self.port_entry_ssh.grid(row=2, column=1, padx=(0,10), sticky="w",columnspan=2)
-
-        # Ligne 4 - Nom utilisateur SSH
-        ttk.Label(self.top, text="Nom d'utilisateur SSH :").grid(row=3, column=0, pady=5, sticky="w", padx=(10,0))
+        # Ligne 3 - Nom utilisateur SSH
+        label_ssh_user = ttk.Label(self.top, text="Utilisateur SSH :")
         self.user_entry_ssh = ttk.Entry(self.top)
-        self.user_entry_ssh.grid(row=3, column=1, padx=(0,10), sticky="ew", columnspan=5)
-
-        # Ligne 6 - Frame pour checkbox + bouton
-        # check_frame = ttk.Frame(self.top)
-        # check_frame.grid(row=4, column=0, columnspan=5, sticky="w", padx=10, pady=5)
-
+        # Ligne 4 - Frame pour checkbox + bouton
         self.var_check = tk.IntVar(value=1)
-        self.check_button = ttk.Checkbutton(
-            self.top, text='Connexion avec Mot de passe',
-            variable=self.var_check, onvalue=1, offvalue=0
-        ).grid(row=4, column=0, columnspan=4, sticky="ew", padx=10, pady=5)
-        # self.check_button.pack(side="left")
-
-
-        ttk.Button(self.top, text="Lister les ports ouverts", command=self.list_ports).grid(row=4, column=3, columnspan=2, sticky="ew", padx=10, pady=5)#.pack(side="left", padx=(10, 0),fill='x',expand=True)
-
-        # Ligne 8 - Liste ports ouverts
+        self.check_button = ttk.Checkbutton(self.top, text='Connexion avec Mot de passe',variable=self.var_check, onvalue=1, offvalue=0)
+        button_list_port = ttk.Button(self.top, text="Lister les ports ouverts", command=self.list_ports)#.pack(side="left", padx=(10, 0),fill='x',expand=True)
+        # Ligne 5 - Liste ports ouverts
         self.ports_listbox = tk.Listbox(self.top, height=6)
         tooltip = Tooltip(self.ports_listbox)
         self.ports_listbox.bind("<Enter>", lambda e: tooltip.show_tooltip(e.x_root, e.y_root))
         self.ports_listbox.bind("<Motion>", lambda e: (self.on_motion(tooltip, self.ports_listbox, e)))
         self.ports_listbox.bind("<Leave>",  lambda e: self.on_leave(tooltip, e))
-        self.ports_listbox.grid(row=5, column=0, padx=10, pady=5, sticky="nsew", columnspan=6)
-
-        # Ligne 9 - Port local
+        # Ligne 6 - Port local
         check_frame_port = ttk.Frame(self.top)
-        check_frame_port.grid(row=6, column=0, columnspan=2, sticky="ew", padx=10)
-
-        ttk.Label(check_frame_port, text="Port local souhaité :").pack(side="left")#.grid(row=9, column=0, pady=5, sticky="w", padx=10)
+        label_port_wanted = ttk.Label(check_frame_port, text="Port local souhaité :")#.grid(row=9, column=0, pady=5, sticky="w", padx=10)
         self.local_port_entry = ttk.Entry(check_frame_port, width=8)
-        self.local_port_entry.pack(side="left", padx=(10, 0))#.grid(row=9, column=1, sticky="w", padx=(0,10))
-
-        # Ligne 11 - Bouton créer tunnel
+        # Ligne 7 - Bouton créer tunnel
         self.run_btn = ttk.Button(self.top, text="Créer le tunnel SSH", command=self.create_ssh_tunnel)
-        self.run_btn.grid(row=6, column=3, columnspan=2, pady=0, padx=(10,10), sticky="ew")
-
-        # Ligne 12 - Séparateur
-        ttk.Separator(self.top).grid(row=8, column=0, columnspan=6, sticky="ew", pady=10)
-
-        # Ligne 13 - Connexions ouvertes
-        ttk.Label(self.top, text="Connexions SSH ouvertes :").grid(row=9, column=0, pady=0, sticky="w",padx=10)
+        # Ligne 8 - Séparateur
+        separator_1 = ttk.Separator(self.top)
+        # Ligne 9 - Connexions ouvertes
+        label_port_open = ttk.Label(self.top, text="Tunnels SSH ouverts :")
         self.conn_listbox = tk.Listbox(self.top, height=6)
-        self.conn_listbox.grid(row=10, column=0, padx=10, sticky="nsew", columnspan=6)
-        ttk.Button(self.top,text="Ouvrir la page sélectionnée",command=self.open_redir_web).grid(row=11, column=0, pady=10,padx=(25,5), sticky="ew",columnspan=2) ##LAST ADD 
-        ttk.Button(self.top, text="Fermer la connexion sélectionnée", command=self.close_selected_connection).grid(row=11, column=3, pady=10,padx=(5,25), sticky="ew",columnspan=2)
-
-        # Ligne 16 - Séparateur
-        ttk.Separator(self.top).grid(row=12, column=0, sticky="ew", pady=10, columnspan=6)
-
-        # Ligne 17 - Clés SSH générées
-        ttk.Label(self.top, text="Clés SSH générées :").grid(row=13, column=0, pady=0, sticky="w", columnspan=2,padx=10)
+        # Ligne 10 - Gestion des connexions
+        open_selected_line = ttk.Button(self.top,text="Ouvrir la page sélectionnée",command=self.open_redir_web) ##LAST ADD 
+        close_selected_line = ttk.Button(self.top, text="Fermer la connexion sélectionnée", command=self.close_selected_connection)
+        # Ligne 11 - Séparateur
+        separator_2 = ttk.Separator(self.top)
+        # Ligne 12 - Clés SSH générées
+        label_generated_ssh_key = ttk.Label(self.top, text="Clés SSH générées :")
+        # Ligne 13 - Listbox des clés générées
         self.keys_listbox = tk.Listbox(self.top, height=4)
-        self.keys_listbox.grid(row=14, column=0, padx=10, sticky="nsew", columnspan=6)
-
-        # Ligne 19 - Frame actions clés
+        # Ligne 14 - Frame actions clés
         self.key_actions_frame = ttk.Frame(self.top)
-        self.key_actions_frame.grid(row=15, column=0, pady=5, columnspan=5)
-        ttk.Button(self.key_actions_frame, text="Supprimer la clé sélectionnée", command=self.delete_selected_key).grid(row=0, column=0, padx=5,columnspan=2)
-        ttk.Button(self.key_actions_frame, text="Envoyer la clé sélectionnée", command=self.send_selected_key).grid(row=0, column=3, padx=5, columnspan=2)
-
+        delete_selected_key = ttk.Button(self.key_actions_frame, text="Supprimer la clé sélectionnée", command=self.delete_selected_key)
+        send_selected_key = ttk.Button(self.key_actions_frame, text="Envoyer la clé sélectionnée", command=self.send_selected_key)
+        # - FUNCTION - INIT - #
         self.refresh_connection_list()
         self.refresh_key_list()
+        ########### - GRID - #############
+        #ROW 0
+        self.profile_redirect.grid(row=0, column=0, sticky="ew", padx=(10,5), pady=(7,2),columnspan=2)
+        frame_ico.grid(row=0, column=2, sticky="ew", padx=(5,0), pady=(5,2),columnspan=4)
+        add_button.grid(row=0, column=0, sticky="w", padx=(0,5), pady=(5,2),columnspan=1)
+        save_button.grid(row=0, column=1, sticky="w", padx=5, pady=(5,2),columnspan=1)
+        edit_button.grid(row=0, column=2, sticky="w", padx=5, pady=(5,2),columnspan=1)
+        import_button.grid(row=0, column=3, sticky="w", padx=5, pady=(5,2),columnspan=1)
+        export_button.grid(row=0, column=4, sticky="w", padx=5, pady=(5,2),columnspan=1)
+        delete_button.grid(row=0, column=5, sticky="w", padx=(5,10), pady=(5,2),columnspan=2)
+        # 1
+        label_host.grid(row=1, column=0, pady=5, sticky="w", padx=(10,0),columnspan=2)
+        self.host_entry_ssh.grid(row=1, column=1, padx=(0,10), sticky="ew", columnspan=5)
+        # 2 
+        label_port.grid(row=2, column=0, pady=5, sticky="w", padx=(10,0))
+        self.port_entry_ssh.grid(row=2, column=1, padx=(0,10), sticky="w",columnspan=2)
+        # 3
+        label_ssh_user.grid(row=3, column=0, pady=5, sticky="w", padx=(10,0))
+        self.user_entry_ssh.grid(row=3, column=1, padx=(0,10), sticky="ew", columnspan=5)
+        # 4 
+        self.check_button.grid(row=4, column=0, columnspan=4, sticky="ew", padx=10, pady=5)
+        button_list_port.grid(row=4, column=3, columnspan=2, sticky="ew", padx=10, pady=5)
+        # 5
+        self.ports_listbox.grid(row=5, column=0, padx=10, pady=5, sticky="nsew", columnspan=6)
+        # 6 
+        check_frame_port.grid(row=6, column=0, columnspan=2, sticky="ew", padx=10)
+        label_port_wanted.pack(side="left")
+        self.local_port_entry.pack(side="left", padx=(10, 0))#.grid(row=9, column=1, sticky="w", padx=(0,10))
+        self.run_btn.grid(row=6, column=3, columnspan=2, pady=0, padx=(10,10), sticky="ew")
+        # 7 
+        separator_1.grid(row=7, column=0, columnspan=6, sticky="ew", pady=10)
+        # 8
+        label_port_open.grid(row=8, column=0, pady=0, sticky="ew",padx=10)
+        # 9
+        self.conn_listbox.grid(row=9, column=0, padx=10, sticky="nsew", columnspan=6)
+        # 10 
+        open_selected_line.grid(row=10, column=0, pady=10,padx=(25,5), sticky="ew",columnspan=2)
+        close_selected_line.grid(row=10, column=3, pady=10,padx=(5,25), sticky="ew",columnspan=2)
+        # 11
+        separator_2.grid(row=11, column=0, sticky="ew", pady=10, columnspan=6)
+        # 12
+        label_generated_ssh_key.grid(row=12, column=0, pady=0, sticky="w", columnspan=2,padx=10)
+        # 13
+        self.keys_listbox.grid(row=13, column=0, padx=10, sticky="nsew", columnspan=6)
+        # 14
+        self.key_actions_frame.grid(row=14, column=0, pady=5, columnspan=5)
+        delete_selected_key.grid(row=0, column=0, padx=5,columnspan=2)
+        send_selected_key.grid(row=0, column=3, padx=5, columnspan=2)
+        ####################################
 
     def init_connection(self,host,port,user):
         conn_key = (host,port,user)
@@ -527,7 +530,7 @@ class SSHRedirector:
                                         service = 'WebApp'
                                     code_name = parts[-2];code_int = parts[-1]
                                     total_code = code_name + " " + code_int
-                                    final_code = " ❌"
+                                    final_code = " ❌" if code_int != "301" else '❓'
                                 case _:
                                     total_code = "Protocol non HTTP"
                                     final_code = f'❓'
@@ -701,8 +704,19 @@ class SSHRedirector:
         self.keys_listbox.delete(0, tk.END)
         for path in ssh_keys_summary:
             self.keys_listbox.insert(tk.END, path)
+    
+    def load_configs_ssh(self):
+        """
+        Charge les fichiers JSON existants contenant les profils et les tokens.
+        Met à jour les variables globales `PRESETS` et `TOKENS`.
+        """
+        global SSH_REDIR
+        if os.path.exists(SSH_REDIR_FILE):
+            with open(SSH_REDIR_FILE, "r") as f:
+                SSH_REDIR.update(json.load(f))
+        self.profile_redirect['values'] = list(SSH_REDIR.keys())
 
-    def load_profile_ssh(self):
+    def load_profile_ssh(self, event=None):
         name = self.profile_redirect_var.get()
         config = SSH_REDIR.get(name, {})
         self.host_entry_ssh.delete(0, tk.END)
@@ -727,16 +741,88 @@ class SSHRedirector:
         }
         with open(SSH_REDIR_FILE, "w") as f:
             json.dump(SSH_REDIR, f, indent=2)
-        self.profile_redirect_var['values'] = list(SSH_REDIR.keys())
+        self.profile_redirect['values'] = list(SSH_REDIR.keys())
         timed_messagebox("Sauvegarde", f"Configuration SSH '{name}' enregistrée.")
 
     def add_config_ssh(self):
         name = simpledialog.askstring("Nouveau token", "Nom du nouveau token :")
         if name and name not in SSH_REDIR:
             SSH_REDIR[name] = {}
-            self.profile_redirect_var['values'] = list(PRESETS.keys())
+            self.profile_redirect['values'] = list(SSH_REDIR.keys())
             self.profile_redirect_var.set(name)
 
+    def delete_profile_ssh(self): #A MODIF
+        name = self.profile_redirect_var.get()
+        if name not in SSH_REDIR:
+            return
+        confirm = messagebox.askyesno("Supprimer", f"Supprimer le profil '{name}' ?")
+        if confirm:
+            del SSH_REDIR[name]
+            self.profile_redirect['values'] = list(PRESETS.keys())
+            self.profile_redirect_var.set('')
+            with open(SSH_REDIR_FILE, "w") as f:
+                json.dump(SSH_REDIR, f, indent=2)
+
+    def rename_profile_ssh(self): #A modif
+        name = self.profile_redirect_var.get()
+        # print(name not in TOKENS)
+        if name not in SSH_REDIR:
+            return
+        new_name = simpledialog.askstring("Renommer le token", "Nouveau nom :", initialvalue=name)
+        if new_name and new_name != name:
+            SSH_REDIR[new_name] = SSH_REDIR.pop(name)
+            self.profile_redirect['values'] = list(TOKENS.keys())
+            self.profile_redirect_var.set(new_name)
+            with open(SSH_REDIR_FILE, "w") as f:
+                json.dump(SSH_REDIR, f, indent=2)
+    
+    def import_profile_ssh(self):
+        """
+        Importe un fichier JSON contenant des tokens.
+        Met à jour la liste des tokens et sauvegarde dans le fichier local.
+        """
+        file_path = filedialog.askopenfilename(title="Importer un fichier de tokens", filetypes=[("Fichiers JSON", "*.json")])
+        if not file_path:
+            return
+        with open(file_path, "r") as f:
+            loaded = json.load(f)
+            SSH_REDIR.update(loaded)
+            self.profile_redirect['values'] = list(TOKENS.keys())
+            imported_names = ', '.join(loaded.keys())
+            with open(SSH_REDIR_FILE, "w") as f_tokens:
+                json.dump(SSH_REDIR, f_tokens, indent=2)
+            messagebox.showinfo("Import", f"Tokens importés : {imported_names}")
+            self.profile_redirect['values'] = list(SSH_REDIR.keys())
+
+    def export_profile_ssh(self):
+        """
+        Exporte le dictionnaire SSH_REDIR (tokens/redirections SSH) vers un fichier JSON choisi par l'utilisateur.
+        """
+        try:
+            if not SSH_REDIR:
+                messagebox.showwarning("Export", "Aucun token/redirection SSH à exporter (SSH_REDIR est vide).")
+                return
+
+            file_path = filedialog.asksaveasfilename(
+                title="Exporter les tokens/redirections SSH",
+                defaultextension=".json",
+                initialfile="cloudflared_ssh_redir.json",
+                filetypes=[("Fichiers JSON", "*.json")]
+            )
+            if not file_path:
+                return
+
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(SSH_REDIR, f, indent=2, ensure_ascii=False)
+
+            # Si tu as timed_messagebox, utilise-le, sinon messagebox classique
+            try:
+                timed_messagebox("Export", f"Tokens SSH exportés vers :\n{file_path}")
+            except NameError:
+                messagebox.showinfo("Export", f"Tokens SSH exportés vers :\n{file_path}")
+
+        except Exception as e:
+            messagebox.showerror("Erreur d'export", f"Impossible d'exporter les tokens SSH :\n{e}")
 
 
     # def test(self):
@@ -799,70 +885,49 @@ class CloudflaredTab:
     def __init__(self, parent, cloudflared_path_var):
         self.frame = ttk.Frame(parent)
         self.cloudflared_path_var = cloudflared_path_var
-
+        # LIGNE 0 
+        # PART PROFILE ##########RAJOUTER EXPORT
         self.profile_var = tk.StringVar(value="Default")
         self.profile_menu = ttk.Combobox(self.frame, textvariable=self.profile_var, state="readonly")
-        self.profile_menu.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
         self.profile_menu.bind("<<ComboboxSelected>>", self.load_profile)
-
         self.import_btn = ttk.Button(self.frame, text="Importer", command=self.import_config)
-        self.import_btn.grid(row=0, column=1, padx=2, sticky='ew')
-
         self.save_btn = ttk.Button(self.frame, text="Sauvegarder", command=self.save_config)
-        self.save_btn.grid(row=0, column=2, padx=(0, 2), sticky='ew')
-
         self.new_profile_btn = ttk.Button(self.frame, text="➕", width=3, command=self.create_new_profile)
-        self.new_profile_btn.grid(row=0, column=3, padx=(0, 5), sticky='ew')
-
         self.rename_profile_btn = ttk.Button(self.frame, text="✏️", width=3, command=self.rename_profile)
-        self.rename_profile_btn.grid(row=0, column=4, padx=(0, 2), sticky='ew')
         self.delete_profile_btn = ttk.Button(self.frame, text="🗑️", width=3, command=self.delete_profile)
-        self.delete_profile_btn.grid(row=0, column=5, padx=(0, 5), sticky='w')
-
-        ttk.Label(self.frame, text="Tokens :").grid(row=0, column=6, sticky="e")
+        self.export_profile_btn = ttk.Button(self.frame) ### A FAIRE
+        #- PART TOKEN ##########RAJOUTER EXPORT
+        tokens_label = ttk.Label(self.frame, text="Tokens :")
         self.token_profile_var = tk.StringVar(value="")
         self.token_menu = ttk.Combobox(self.frame, textvariable=self.token_profile_var, state="readonly")
-        self.token_menu.grid(row=0, column=7, sticky="ew", padx=2)
         self.token_menu.bind("<<ComboboxSelected>>", self.load_token_profile)
-
-        ttk.Button(self.frame, text="Importer", command=self.import_tokens).grid(row=0, column=8, padx=2, sticky='ew')
-        ttk.Button(self.frame, text="Sauvegarder", command=self.save_token).grid(row=0, column=9, padx=2, sticky='ew')
-        ttk.Button(self.frame, text="➕", width=3, command=self.create_new_token_profile).grid(row=0, column=10, padx=(0, 5), sticky='w')
+        self.import_tokens_button = ttk.Button(self.frame, text="Importer", command=self.import_tokens)
+        self.save_tokens_button = ttk.Button(self.frame, text="Sauvegarder", command=self.save_token)
+        self.add_tokens_button = ttk.Button(self.frame, text="➕", width=3, command=self.create_new_token_profile)
         self.rename_token_btn = ttk.Button(self.frame, text="✏️", width=3, command=self.rename_token)
-        self.rename_token_btn.grid(row=0, column=11, padx=(0, 2), sticky='ew')
         self.delete_token_btn = ttk.Button(self.frame, text="🗑️", width=3, command=self.delete_token)
-        self.delete_token_btn.grid(row=0, column=12, padx=(0, 5), sticky='w')
-
-        ttk.Label(self.frame, text="Hostname :").grid(row=1, column=0, sticky="e")
+        self.export_token_btn = ttk.Button(self.frame) # A FAIRE 
+        # Ligne 1 
+        hostname_label = ttk.Label(self.frame, text="Hostname :")
         self.hostname_entry = ttk.Entry(self.frame)
-        self.hostname_entry.grid(row=1, column=1, columnspan=8, sticky="ew", padx=5, pady=5)
-
-        ttk.Label(self.frame, text="Hôte local :").grid(row=2, column=0, sticky="e")
+        # Ligne 2 
+        local_host_label = ttk.Label(self.frame, text="Hôte local :")
         self.host_entry = ttk.Entry(self.frame)
         self.host_entry.insert(0, "127.0.0.1")
-        self.host_entry.grid(row=2, column=1, sticky="ew", padx=5, pady=5)
-
-        ttk.Label(self.frame, text="Port :").grid(row=2, column=2, sticky="e")
+        port_label_ssh = ttk.Label(self.frame, text="Port :")
         self.port_entry = ttk.Entry(self.frame, width=10)
-        self.port_entry.grid(row=2, column=3, sticky="w", padx=5, pady=5)
-
+        # Ligne 3
         self.use_token_var = tk.BooleanVar()
         self.use_token_check = ttk.Checkbutton(self.frame, text="Utiliser un Service Token", variable=self.use_token_var, command=self.toggle_token_fields)
-        self.use_token_check.grid(row=3, columnspan=9, sticky="w", padx=5)
-
-        ttk.Label(self.frame, text="Token ID :").grid(row=4, column=0, sticky="e")
+        # Ligne 4 
+        tokenid_label = ttk.Label(self.frame, text="Token ID :")
         self.token_id_entry = ttk.Entry(self.frame, state="disabled")
-        self.token_id_entry.grid(row=4, column=1, columnspan=8, sticky="ew", padx=5, pady=5)
-
-        ttk.Label(self.frame, text="Token Secret :").grid(row=5, column=0, sticky="e")
+        # Ligne 5
+        token_secret_label = ttk.Label(self.frame, text="Token Secret :")
         self.token_secret_entry = ttk.Entry(self.frame, state="disabled")
-        self.token_secret_entry.grid(row=5, column=1, columnspan=8, sticky="ew", padx=5, pady=5)
-
+        # Ligne 6
         self.launch_button = ttk.Button(self.frame, text="Lancer la connexion", command=self.run_cloudflared)
-        self.launch_button.grid(row=6,column=0, columnspan=9, pady=10)
-
         self.close_button = ttk.Button(self.frame, text="❌ Fermer connexion", command=self.close_connection)
-        self.close_button.grid(row=6,column=1, columnspan=9, pady=5)
 
         for i in range(9):
             match i:
@@ -871,6 +936,42 @@ class CloudflaredTab:
                 case _:
                     # print(i)
                     self.frame.columnconfigure(i, weight=1)
+
+        ################ - GRID - #################
+        # ROW 0
+        self.profile_menu.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+        self.import_btn.grid(row=0, column=1, padx=2, sticky='ew')
+        self.save_btn.grid(row=0, column=2, padx=(0, 2), sticky='ew')
+        self.new_profile_btn.grid(row=0, column=3, padx=(0, 5), sticky='ew')
+        self.rename_profile_btn.grid(row=0, column=4, padx=(0, 2), sticky='ew')
+        self.delete_profile_btn.grid(row=0, column=5, padx=(0, 5), sticky='w')
+        tokens_label.grid(row=0, column=6, sticky="e")
+        self.token_menu.grid(row=0, column=7, sticky="ew", padx=2)
+        self.import_tokens_button.grid(row=0, column=8, padx=2, sticky='ew')
+        self.save_tokens_button.grid(row=0, column=9, padx=2, sticky='ew')
+        self.add_tokens_button.grid(row=0, column=10, padx=(0, 5), sticky='w')
+        self.rename_token_btn.grid(row=0, column=11, padx=(0, 2), sticky='ew')
+        self.delete_token_btn.grid(row=0, column=12, padx=(0, 5), sticky='w')
+        # 1 
+        hostname_label.grid(row=1, column=0, sticky="e")
+        self.hostname_entry.grid(row=1, column=1, columnspan=8, sticky="ew", padx=5, pady=5)
+        # 2
+        local_host_label.grid(row=2, column=0, sticky="e")
+        self.host_entry.grid(row=2, column=1, sticky="ew", padx=5, pady=5)
+        port_label_ssh.grid(row=2, column=2, sticky="e")
+        self.port_entry.grid(row=2, column=3, sticky="w", padx=5, pady=5)
+        # 3
+        self.use_token_check.grid(row=3, columnspan=9, sticky="w", padx=5)
+        # 4 
+        tokenid_label.grid(row=4, column=0, sticky="e")
+        self.token_id_entry.grid(row=4, column=1, columnspan=8, sticky="ew", padx=5, pady=5)
+        # 5
+        token_secret_label.grid(row=5, column=0, sticky="e")
+        self.token_secret_entry.grid(row=5, column=1, columnspan=8, sticky="ew", padx=5, pady=5)
+        # 6
+        self.launch_button.grid(row=6,column=0, columnspan=6, pady=10,padx=(10,5),sticky='ew')
+        self.close_button.grid(row=6,column=6, columnspan=7, pady=5,padx=(5,10),sticky='ew')
+        ############################################
 
     def toggle_token_fields(self):
         """
@@ -1014,7 +1115,64 @@ class CloudflaredTab:
                 json.dump(TOKENS, f_tokens, indent=2)
             messagebox.showinfo("Import", f"Tokens importés : {imported_names}")
             self.token_menu['values'] = list(TOKENS.keys())
-            messagebox.showinfo("Import", "Tokens importés.")
+            
+    def export_profile(self):
+        """
+        Exporte le dictionnaire PRESTS (profils cloudflared) vers un fichier JSON choisi par l'utilisateur.
+        """
+        try:
+            if not PRESETS:
+                messagebox.showwarning("Export", "Aucun profil à exporter (PRESETS est vide).")
+                return
+
+            file_path = filedialog.asksaveasfilename(
+                title="Exporter les profils cloudflared",
+                defaultextension=".json",
+                initialfile="cloudflared_configs.json",
+                filetypes=[("Fichiers JSON", "*.json")]
+            )
+            if not file_path:
+                return
+
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(PRESETS, f, indent=2, ensure_ascii=False)
+
+            try:
+                timed_messagebox("Export", f"Profils exportés vers :\n{file_path}")
+            except NameError:
+                messagebox.showinfo("Export", f"Profils exportés vers :\n{file_path}")
+
+        except Exception as e:
+            messagebox.showerror("Erreur d'export", f"Impossible d'exporter les profils :\n{e}")
+
+    def export_tokens(self):
+        """
+        Exporte le dictionnaire PRESTS (profils cloudflared) vers un fichier JSON choisi par l'utilisateur.
+        """
+        try:
+            if not TOKENS:
+                messagebox.showwarning("Export", "Aucun Tokens à exporter (TOKENS est vide).")
+                return
+
+            file_path = filedialog.asksaveasfilename(
+                title="Exporter les profils cloudflared",
+                defaultextension=".json",
+                initialfile="cloudflared_tokens.json",
+                filetypes=[("Fichiers JSON", "*.json")]
+            )
+            if not file_path:
+                return
+
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(TOKENS, f, indent=2, ensure_ascii=False)
+
+            try:
+                timed_messagebox("Export", f"Profils exportés vers :\n{file_path}")
+            except NameError:
+                messagebox.showinfo("Export", f"Profils exportés vers :\n{file_path}")
+
+        except Exception as e:
+            messagebox.showerror("Erreur d'export", f"Impossible d'exporter les profils :\n{e}")
 
     def close_connection(self):
         if not cloudflared_processes:
@@ -1136,43 +1294,48 @@ class CloudflaredGUI:
         """
         self.root = root
         self.root.title("Gestionnaire Cloudflared TCP Tunnel")
+        # self.root.geometry("900x340")
+        # self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.root.resizable(False, False)
         self.cloudflared_path_var = tk.StringVar()
-
         # Charger les profils AVANT d'ajouter des onglets
         self.load_configs_and_tokens()
         self.load_saved_cloudflared_path()
         self.detect_cloudflared()
-
+        self.tabs,self.tab_count = [],0
+        ## - WIDGET - ##
         self.top_frame = ttk.Frame(root)
-        self.top_frame.pack(fill="x", pady=5)
-
-        ttk.Label(self.top_frame, text="cloudflared :").pack(side="left", padx=5)
+        cloudflared_path_label = ttk.Label(self.top_frame, text="cloudflared :")
         self.path_entry = ttk.Entry(self.top_frame, textvariable=self.cloudflared_path_var, width=50)
-        self.path_entry.pack(side="left", padx=5)
-
-        ttk.Button(self.top_frame, text="Parcourir", command=self.browse_exe).pack(side="left", padx=5)
-        ttk.Button(self.top_frame, text="Téléchargement direct", command=self.download_cloudflared).pack(side="left")
-        ttk.Button(self.top_frame, text="Page Cloudflare", command=self.open_download_page).pack(side="left")
-
+        browse_cloudflared = ttk.Button(self.top_frame, text="Parcourir", command=self.browse_exe)
+        download_cloudflard = ttk.Button(self.top_frame, text="Téléchargement direct", command=self.download_cloudflared)
+        open_web_cloudflared = ttk.Button(self.top_frame, text="Page Cloudflare", command=self.open_download_page)
+        # ONGLETS
         self.tab_control = ttk.Notebook(root)
-        self.tab_control.pack(expand=1, fill="both")
-
+        # BOTTOM FRAME
         self.button_frame = ttk.Frame(root)
-        self.button_frame.pack(pady=5)
-
-        ttk.Button(self.button_frame, text="Nouvel onglet", command=self.add_tab).pack(side="left", padx=5)
-        ttk.Button(self.button_frame, text="Supprimer l'onglet", command=self.remove_current_tab).pack(side="left", padx=5)
+        add_tab = ttk.Button(self.button_frame, text="Nouvel onglet", command=self.add_tab)
+        remove_tab = ttk.Button(self.button_frame, text="Supprimer l'onglet", command=self.remove_current_tab)
         self.redirect_ssh_btn = ttk.Button(self.button_frame, text="🔐 Redirection SSH", command=self.open_ssh_redirector)
-        self.redirect_ssh_btn.pack(side="left", padx=5)
-
-
-        self.tabs = []
-        self.tab_count = 0
-        self.add_tab()
         self.status_label = ttk.Label(root, text="Connexions ouvertes : 0", anchor="e")
-        self.status_label.pack(side="bottom", fill="x", padx=5, pady=2)
-        
         self.status_label.bind("<Button-1>", self.on_status_click)
+        ## - INIT - ##
+        self.add_tab()
+        ########### - GRID - #############
+        self.root.geometry("900x340")
+        self.top_frame.pack(fill="x", pady=5)
+        cloudflared_path_label.pack(side="left", padx=5)
+        self.path_entry.pack(side="left", padx=5)
+        browse_cloudflared.pack(side="left", padx=5)
+        download_cloudflard.pack(side="left")
+        open_web_cloudflared.pack(side="left")
+        self.tab_control.pack(expand=1, fill="both")
+        self.button_frame.pack(pady=5)
+        add_tab.pack(side="left", padx=5)
+        remove_tab.pack(side="left", padx=5)
+        self.redirect_ssh_btn.pack(side="left", padx=5)
+        self.status_label.pack(side="bottom", fill="x", padx=5, pady=2)
+        ####################################
 
     def open_ssh_redirector(self):
         self.redirect_ssh_btn.config(state="disabled")
