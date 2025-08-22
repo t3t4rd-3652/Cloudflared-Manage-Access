@@ -5,7 +5,7 @@ a = Analysis(
     ['CloudflaredManageAccess.py'],
     pathex=[],
     binaries=[],
-    datas=[('cloudflared.ico', '.')],
+    datas=[('ico', 'ico')],
     hiddenimports=['tkinter', 'tkinter.filedialog'],
     hookspath=[],
     hooksconfig={},
@@ -35,5 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['cloudflared.ico'],
+    icon=['ico\\cloudflared.ico'],
 )

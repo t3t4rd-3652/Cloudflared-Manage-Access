@@ -100,22 +100,22 @@ else:
 ## - IMAGE - ##
 dir_ico = resource_path("ico") #DOSSIER IMAGE
 # BOUTON ADD
-add_ico = Image.open(r"ico\add.png")
+add_ico = Image.open(fr"{dir_ico}\add.png")
 add_ico = add_ico.resize((15, 15))       
 # BOUTON DELETE
-delete_ico = Image.open(r"ico\delete.png")
+delete_ico = Image.open(fr"{dir_ico}\delete.png")
 delete_ico = delete_ico.resize((15, 15))
 # BOUTON EDIT
-edit_ico = Image.open(r"ico\edit.png")
+edit_ico = Image.open(fr"{dir_ico}\edit.png")
 edit_ico = edit_ico.resize((15, 15))
 # BOUTON EXPORT
-export_ico = Image.open(r"ico\export.png")
+export_ico = Image.open(fr"{dir_ico}\export.png")
 export_ico = export_ico.resize((15, 15))
 # BOUTON IMPORT
-import_ico = Image.open(r"ico\import.png")
+import_ico = Image.open(fr"{dir_ico}\import.png")
 import_ico = import_ico.resize((15, 15))
 # BOUTON SAVE
-save_ico = Image.open(r"ico\save.png")
+save_ico = Image.open(fr"{dir_ico}\save.png")
 save_ico = save_ico.resize((15, 15))
 
 ################################################
@@ -181,6 +181,7 @@ def cleanup_ssh_tunnels():
 
 def timed_messagebox(title, message, duration=8000):
     top = tk.Toplevel()
+    top.iconbitmap(project_ico)
     top.title(title)
     top.geometry("400x100")
     top.resizable(False, False)
@@ -219,6 +220,7 @@ class SSHRedirector:
         self.export_ico = ImageTk.PhotoImage(export_ico,(10,10))
         self.import_ico = ImageTk.PhotoImage(import_ico,(10,10))
         # - FENETRE ROOT
+        self.top.iconbitmap(project_ico)
         self.top.title("Redirection SSH")
         self.top.geometry("420x630")
         self.top.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -518,6 +520,10 @@ class SSHRedirector:
                                             final_code = ' ❓'
                                         case "301":
                                             final_code = ' ❓'
+                                        case '400':
+                                            if parts[2] == '-':
+                                                service = 'WebApp'
+                                            final_code = ' ❓'
                                         case _:
                                             if parts[2] == '-':
                                                 service = 'WebApp'
@@ -530,8 +536,9 @@ class SSHRedirector:
                                         service = 'WebApp'
                                     code_name = parts[-2];code_int = parts[-1]
                                     total_code = code_name + " " + code_int
-                                    final_code = " ❌" if code_int != "301" else '❓'
+                                    final_code = " ❌" if code_int != "301" else '❓'# if code_int == '400' else '❓'
                                 case _:
+
                                     total_code = "Protocol non HTTP"
                                     final_code = f'❓'
                             self.ports_info.append((protocol,port_ssh,service,final_code,total_code))
@@ -885,28 +892,36 @@ class CloudflaredTab:
     def __init__(self, parent, cloudflared_path_var):
         self.frame = ttk.Frame(parent)
         self.cloudflared_path_var = cloudflared_path_var
+        self.add_ico = ImageTk.PhotoImage(add_ico,(10,10))
+        self.save_ico = ImageTk.PhotoImage(save_ico,(10,10))
+        self.delete_ico = ImageTk.PhotoImage(delete_ico,(10,10))
+        self.edit_ico = ImageTk.PhotoImage(edit_ico,(10,10))
+        self.export_ico = ImageTk.PhotoImage(export_ico,(10,10))
+        self.import_ico = ImageTk.PhotoImage(import_ico,(10,10))
         # LIGNE 0 
         # PART PROFILE ##########RAJOUTER EXPORT
+        self.profile_frame = ttk.Frame(self.frame)
         self.profile_var = tk.StringVar(value="Default")
-        self.profile_menu = ttk.Combobox(self.frame, textvariable=self.profile_var, state="readonly")
+        self.profile_menu = ttk.Combobox(self.profile_frame, textvariable=self.profile_var, state="readonly")
         self.profile_menu.bind("<<ComboboxSelected>>", self.load_profile)
-        self.import_btn = ttk.Button(self.frame, text="Importer", command=self.import_config)
-        self.save_btn = ttk.Button(self.frame, text="Sauvegarder", command=self.save_config)
-        self.new_profile_btn = ttk.Button(self.frame, text="➕", width=3, command=self.create_new_profile)
-        self.rename_profile_btn = ttk.Button(self.frame, text="✏️", width=3, command=self.rename_profile)
-        self.delete_profile_btn = ttk.Button(self.frame, text="🗑️", width=3, command=self.delete_profile)
-        self.export_profile_btn = ttk.Button(self.frame) ### A FAIRE
+        self.import_btn = ttk.Button(self.profile_frame, text="", image=self.import_ico, command=self.import_config)
+        self.save_btn = ttk.Button(self.profile_frame, text="", image=self.save_ico, command=self.save_config)
+        self.new_profile_btn = ttk.Button(self.profile_frame, text="", image=self.add_ico, width=3, command=self.create_new_profile)
+        self.rename_profile_btn = ttk.Button(self.profile_frame, text="", image=self.edit_ico, width=3, command=self.rename_profile)
+        self.delete_profile_btn = ttk.Button(self.profile_frame, text="", image=self.delete_ico, width=3, command=self.delete_profile)
+        self.export_profile_btn = ttk.Button(self.profile_frame, image=self.export_ico) ### A FAIRE
         #- PART TOKEN ##########RAJOUTER EXPORT
-        tokens_label = ttk.Label(self.frame, text="Tokens :")
+        self.tokens_frame = ttk.Frame(self.frame)
+        tokens_label = ttk.Label(self.tokens_frame, text="Tokens :")
         self.token_profile_var = tk.StringVar(value="")
-        self.token_menu = ttk.Combobox(self.frame, textvariable=self.token_profile_var, state="readonly")
+        self.token_menu = ttk.Combobox(self.tokens_frame, textvariable=self.token_profile_var, state="readonly")
         self.token_menu.bind("<<ComboboxSelected>>", self.load_token_profile)
-        self.import_tokens_button = ttk.Button(self.frame, text="Importer", command=self.import_tokens)
-        self.save_tokens_button = ttk.Button(self.frame, text="Sauvegarder", command=self.save_token)
-        self.add_tokens_button = ttk.Button(self.frame, text="➕", width=3, command=self.create_new_token_profile)
-        self.rename_token_btn = ttk.Button(self.frame, text="✏️", width=3, command=self.rename_token)
-        self.delete_token_btn = ttk.Button(self.frame, text="🗑️", width=3, command=self.delete_token)
-        self.export_token_btn = ttk.Button(self.frame) # A FAIRE 
+        self.import_tokens_button = ttk.Button(self.tokens_frame, text="", image=self.import_ico, command=self.import_tokens)
+        self.save_tokens_button = ttk.Button(self.tokens_frame, text="", image=self.save_ico, command=self.save_token)
+        self.add_tokens_button = ttk.Button(self.tokens_frame, text="", image=self.add_ico, width=3, command=self.create_new_token_profile)
+        self.rename_token_btn = ttk.Button(self.tokens_frame, text="", image=self.edit_ico, width=3, command=self.rename_token)
+        self.delete_token_btn = ttk.Button(self.tokens_frame, text="", image=self.delete_ico, width=3, command=self.delete_token)
+        self.export_token_btn = ttk.Button(self.tokens_frame) # A FAIRE 
         # Ligne 1 
         hostname_label = ttk.Label(self.frame, text="Hostname :")
         self.hostname_entry = ttk.Entry(self.frame)
@@ -939,19 +954,23 @@ class CloudflaredTab:
 
         ################ - GRID - #################
         # ROW 0
+        self.profile_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5,columnspan=4)
+        self.tokens_frame.grid(row=0, column=5, sticky="ew", padx=5, pady=5,columnspan=2)
+        # Profile
         self.profile_menu.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
-        self.import_btn.grid(row=0, column=1, padx=2, sticky='ew')
-        self.save_btn.grid(row=0, column=2, padx=(0, 2), sticky='ew')
-        self.new_profile_btn.grid(row=0, column=3, padx=(0, 5), sticky='ew')
-        self.rename_profile_btn.grid(row=0, column=4, padx=(0, 2), sticky='ew')
-        self.delete_profile_btn.grid(row=0, column=5, padx=(0, 5), sticky='w')
+        self.new_profile_btn.grid(row=0, column=1, padx=(5, 2), sticky='w')
+        self.save_btn.grid(row=0, column=2, padx=(2, 2), sticky='w')
+        self.rename_profile_btn.grid(row=0, column=3, padx=(2, 2), sticky='w')
+        self.import_btn.grid(row=0, column=4, padx=2, sticky='w')
+        self.delete_profile_btn.grid(row=0, column=5, padx=(2, 5), sticky='w')
+        # Tokens
         tokens_label.grid(row=0, column=6, sticky="e")
         self.token_menu.grid(row=0, column=7, sticky="ew", padx=2)
-        self.import_tokens_button.grid(row=0, column=8, padx=2, sticky='ew')
-        self.save_tokens_button.grid(row=0, column=9, padx=2, sticky='ew')
-        self.add_tokens_button.grid(row=0, column=10, padx=(0, 5), sticky='w')
-        self.rename_token_btn.grid(row=0, column=11, padx=(0, 2), sticky='ew')
-        self.delete_token_btn.grid(row=0, column=12, padx=(0, 5), sticky='w')
+        self.add_tokens_button.grid(row=0, column=8, padx=(5, 2), sticky='w')
+        self.save_tokens_button.grid(row=0, column=9, padx=2, sticky='w')
+        self.rename_token_btn.grid(row=0, column=10, padx=(2, 2), sticky='w')
+        self.import_tokens_button.grid(row=0, column=11, padx=2, sticky='w')
+        self.delete_token_btn.grid(row=0, column=12, padx=(2, 5), sticky='w')
         # 1 
         hostname_label.grid(row=1, column=0, sticky="e")
         self.hostname_entry.grid(row=1, column=1, columnspan=8, sticky="ew", padx=5, pady=5)
@@ -1294,7 +1313,7 @@ class CloudflaredGUI:
         """
         self.root = root
         self.root.title("Gestionnaire Cloudflared TCP Tunnel")
-        # self.root.geometry("900x340")
+        # self.root.geometry("700x1000")
         # self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.resizable(False, False)
         self.cloudflared_path_var = tk.StringVar()
@@ -1308,7 +1327,7 @@ class CloudflaredGUI:
         cloudflared_path_label = ttk.Label(self.top_frame, text="cloudflared :")
         self.path_entry = ttk.Entry(self.top_frame, textvariable=self.cloudflared_path_var, width=50)
         browse_cloudflared = ttk.Button(self.top_frame, text="Parcourir", command=self.browse_exe)
-        download_cloudflard = ttk.Button(self.top_frame, text="Téléchargement direct", command=self.download_cloudflared)
+        download_cloudflard = ttk.Button(self.top_frame, text="Téléchargement", command=self.download_cloudflared)
         open_web_cloudflared = ttk.Button(self.top_frame, text="Page Cloudflare", command=self.open_download_page)
         # ONGLETS
         self.tab_control = ttk.Notebook(root)
@@ -1326,7 +1345,7 @@ class CloudflaredGUI:
         self.top_frame.pack(fill="x", pady=5)
         cloudflared_path_label.pack(side="left", padx=5)
         self.path_entry.pack(side="left", padx=5)
-        browse_cloudflared.pack(side="left", padx=5)
+        browse_cloudflared.pack(side="left", padx=(5,0))
         download_cloudflard.pack(side="left")
         open_web_cloudflared.pack(side="left")
         self.tab_control.pack(expand=1, fill="both")
@@ -1336,6 +1355,7 @@ class CloudflaredGUI:
         self.redirect_ssh_btn.pack(side="left", padx=5)
         self.status_label.pack(side="bottom", fill="x", padx=5, pady=2)
         ####################################
+        self.root.geometry("700x360")
 
     def open_ssh_redirector(self):
         self.redirect_ssh_btn.config(state="disabled")
@@ -1366,8 +1386,9 @@ class CloudflaredGUI:
                 pass
         try:
             dialog = tk.Toplevel()
+            dialog.iconbitmap(project_ico)
             dialog.title("Fermer une connexion")
-            dialog.geometry("500x260")
+            dialog.geometry("400x260")
             dialog.resizable(False, False)
             ttk.Label(dialog, text="Sélectionnez une connexion à fermer :").pack(pady=10)
             listbox = tk.Listbox(dialog, width=80)
@@ -1506,6 +1527,7 @@ class CloudflaredGUI:
         if len(self.tabs) <= 1:
             messagebox.showinfo("Impossible", "Impossible de supprimer le dernier onglet.")
             return
+        self.tab_count -= 1
         current = self.tab_control.index(self.tab_control.select())
         self.tab_control.forget(current)
         del self.tabs[current]
@@ -1557,9 +1579,9 @@ class Tooltip:
             self.tooltip_window = None
 
 atexit.register(cleanup)
-
+project_ico = resource_path(fr"{dir_ico}\cloudflared.ico")
 if __name__ == "__main__":
     root = tk.Tk()
-    root.iconbitmap(resource_path(r"ico\cloudflared.ico"))
+    root.iconbitmap(project_ico)
     app = CloudflaredGUI(root)
     root.mainloop()
