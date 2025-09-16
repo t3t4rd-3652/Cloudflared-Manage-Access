@@ -66,6 +66,7 @@ cloudflared_processes = []
 connection_labels = []
 active_ssh_tunnels = []
 ssh_keys_summary = []
+tokens_choosing = []
 
 CONFIG_FILE = os.path.join(APPDATA_DIR, "cloudflared_configs.json")
 TOKENS_FILE = os.path.join(APPDATA_DIR, "cloudflared_tokens.json")
@@ -910,7 +911,7 @@ class CloudflaredTab:
         self.rename_profile_btn = ttk.Button(self.profile_frame, text="", image=self.edit_ico, width=3, command=self.rename_profile)
         self.delete_profile_btn = ttk.Button(self.profile_frame, text="", image=self.delete_ico, width=3, command=self.delete_profile)
         self.export_profile_btn = ttk.Button(self.profile_frame, image=self.export_ico) ### A FAIRE
-        #- PART TOKEN ##########RAJOUTER EXPORT
+        #- PART TOKEN ########## - RAJOUTER EXPORT
         self.tokens_frame = ttk.Frame(self.frame)
         tokens_label = ttk.Label(self.tokens_frame, text="Tokens :")
         self.token_profile_var = tk.StringVar(value="")
@@ -1200,6 +1201,7 @@ class CloudflaredTab:
 
         def confirm_and_close(index):
             proc = cloudflared_processes.pop(index)
+            tokens_choosing.pop(index)
             if '--hostname' in proc.args:
                 hostname_index = proc.args.index('--hostname') + 1
                 hostname = proc.args[hostname_index]
@@ -1218,15 +1220,25 @@ class CloudflaredTab:
         else:
             dialog = tk.Toplevel()
             dialog.title("Fermer une connexion")
-            dialog.geometry("500x260")
+            dialog.geometry("400x280")
             dialog.resizable(False, False)
             ttk.Label(dialog, text="Sélectionnez une connexion à fermer :").pack(pady=10)
             listbox = tk.Listbox(dialog, width=80)
             listbox.pack(padx=10, pady=5, fill="both", expand=True)
             for i, p in enumerate(cloudflared_processes):
                 hostname = next((arg for j, arg in enumerate(p.args) if p.args[j-1] == '--hostname'), f"Connexion {i}")
-                listbox.insert(tk.END, f"{hostname}")
+                url = next((arg for j, arg in enumerate(p.args) if p.args[j-1] == '--url'), f"Connexion {i}")
+                try:
+                    token_ = next((arg for j, arg in enumerate(p.args) if p.args[j-1] == '--service-token-id'))
+                    # print(token_)
+                    if token_:
+                        # token_name = hostname.split(".")[0]
+                        token_name = tokens_choosing[i]
+                        token = f"| Token: {token_name}"
+                except:
+                    token = ""
 
+                listbox.insert(tk.END, f"{hostname} → {url} {token} ")
             def on_select():
                 selected = listbox.curselection()
                 if selected:
@@ -1277,10 +1289,14 @@ class CloudflaredTab:
         if self.use_token_var.get():
             token_id = self.token_id_entry.get().strip()
             token_secret = self.token_secret_entry.get().strip()
+            # print(self.token_menu.get())
+            tokens_choosing.append(self.token_menu.get())
             if not token_id or not token_secret:
                 messagebox.showerror("Erreur", "Token ID et Secret doivent être renseignés.")
                 return
             cmd += ["--service-token-id", token_id, "--service-token-secret", token_secret]
+        else:
+            tokens_choosing.append('')
 
         try:
             startupinfo = None
@@ -1290,6 +1306,9 @@ class CloudflaredTab:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
 
             cloudflared_processes.append(proc)
+            ## Rajout token actuel dans une variable global 
+
+        
             try:
                 _, stderr = proc.communicate(timeout=1)
                 if b"address already in use" in stderr:
@@ -1371,6 +1390,7 @@ class CloudflaredGUI:
     def on_status_click(self, event):
         def confirm_and_close_V2(index):
             proc = cloudflared_processes.pop(index)
+            tokens_choosing.pop(index)
             if '--hostname' in proc.args:
                 hostname_index = proc.args.index('--hostname') + 1
                 hostname = proc.args[hostname_index]
@@ -1388,7 +1408,7 @@ class CloudflaredGUI:
             dialog = tk.Toplevel()
             dialog.iconbitmap(project_ico)
             dialog.title("Fermer une connexion")
-            dialog.geometry("400x260")
+            dialog.geometry("400x280")
             dialog.resizable(False, False)
             ttk.Label(dialog, text="Sélectionnez une connexion à fermer :").pack(pady=10)
             listbox = tk.Listbox(dialog, width=80)
@@ -1396,12 +1416,14 @@ class CloudflaredGUI:
             for i, p in enumerate(cloudflared_processes):
                 hostname = next((arg for j, arg in enumerate(p.args) if p.args[j-1] == '--hostname'), f"Connexion {i}")
                 url = next((arg for j, arg in enumerate(p.args) if p.args[j-1] == '--url'), f"Connexion {i}")
+
                 try:
                     token_ = next((arg for j, arg in enumerate(p.args) if p.args[j-1] == '--service-token-id'))
                     # print(token_)
                     if token_:
-                        token_name = hostname.split(".")[0]
-                        token = f"| Token sélectionné: {token_name}"
+                        # token_name = hostname.split(".")[0]
+                        token_name = tokens_choosing[i]
+                        token = f"| Token: {token_name}"
                 except:
                     token = ""
                 listbox.insert(tk.END, f"{hostname} → {url} {token} ")
