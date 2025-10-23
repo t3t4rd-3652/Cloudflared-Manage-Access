@@ -29,7 +29,7 @@ Le .exe est également disponible dans \dist
 
 > 📚 Compilation
 
->> python -m PyInstaller --onefile --windowed --hidden-import=tkinter --hidden-import=tkinter.filedialog --icon=cloudflared.ico --add-data "cloudflared.ico;." CloudflaredManageAccess.py 
+>> python -m PyInstaller --onefile --windowed --hidden-import=tkinter --hidden-import=tkinter.filedialog --icon=ico/cloudflared.ico --add-data "ico;ico" CloudflaredManageAccess.py
 
 📦 Dépendances
 Python >= 3.13.5
