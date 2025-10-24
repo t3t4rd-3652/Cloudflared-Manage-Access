@@ -7,7 +7,7 @@ CMA est une interface graphique portable (Tkinter) pour simplifier la gestion de
 
 📂 Sélection manuelle du binaire cloudflared.exe si nécessaire
 
-🌐 Connexion rapide à un hostname via --url local
+🏃‍♂️ Connexion rapide à un hostname via --url local
 
 🔐 Support des Service Token ID / Secret
 
@@ -19,7 +19,9 @@ CMA est une interface graphique portable (Tkinter) pour simplifier la gestion de
 
 🧳 100 % portable : aucune installation nécessaire, les fichiers restent locaux
 
-Permet également de faire la gestion ainsi que la redirection de ports via une connexion SSH.
+🔄 Permet également de faire la gestion ainsi que la redirection de ports via une connexion SSH.
+
+🌐 Prend en charge l'application de proxy par instance de connexion. 
 
 > 🚀 Exécution via python
 
