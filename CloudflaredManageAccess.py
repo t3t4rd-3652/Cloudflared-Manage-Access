@@ -1549,7 +1549,7 @@ class CloudflaredGUI:
         ## - INIT - ##
         self.add_tab()
         ########### - GRID - #############
-        self.root.geometry("900x340")
+        self.root.geometry("900x360")
         self.top_frame.pack(fill="x", pady=5)
         cloudflared_path_label.pack(side="left", padx=5)
         self.path_entry.pack(side="left", padx=5)
@@ -1563,7 +1563,7 @@ class CloudflaredGUI:
         self.redirect_ssh_btn.pack(side="left", padx=5)
         self.status_label.pack(side="bottom", fill="x", padx=5, pady=2)
         ####################################
-        self.root.geometry("700x400")
+        self.root.geometry("700x440")
 
     def open_ssh_redirector(self):
         self.redirect_ssh_btn.config(state="disabled")
