@@ -602,6 +602,7 @@ class SSHRedirector:
                     proc = subprocess.Popen(cmd, startupinfo=startupinfo)
                     active_ssh_tunnels.append((f"{user}:{remote_port} → localhost:{local_port} {user}@{host}:{port}", proc))
                     self.refresh_connection_list()
+                    # print(cmd)
                     messagebox.showinfo("Tunnel actif", f"""L'adresse localhost:{local_port} redirige le port {remote_port}\nde la connexion {user}@{host}:{port}""")
                 except Exception as e:
                     messagebox.showerror("Erreur de tunnel", str(e))
@@ -1469,7 +1470,7 @@ class CloudflaredTab:
                     #fr"& 'C:\Program Files (x86)\cloudflared\cloudflared.exe' access tcp --hostname '{hostname}' --url '{host}:{port}'"
         else:
             ps_cmd_base = []
-        ps_cmd_base += [fr"'{path}' access tcp --hostname '{hostname}' --url '{host}:{port}'"]
+        ps_cmd_base += [fr"{path} access tcp --hostname '{hostname}' --url '{host}:{port}'"]
 
         if self.use_token_var.get():
             token_id = self.token_id_entry.get().strip()
