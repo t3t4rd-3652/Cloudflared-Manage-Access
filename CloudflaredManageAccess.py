@@ -183,13 +183,18 @@ def cleanup_ssh_tunnels():
             print("ERROR CLEANUP PASSWORD:", e)
 
 def timed_messagebox(title, message, duration=8000):
+    def on_closing(parent):
+        parent.destroy()
+
     top = tk.Toplevel()
     top.iconbitmap(project_ico)
     top.title(title)
     top.geometry("400x100")
+    top.protocol("WM_DELETE_WINDOW", lambda parent=top:on_closing(parent))
     top.resizable(False, False)
     tk.Label(top, text=message, wraplength=380, justify="left").pack(padx=10, pady=10)
-    top.after(duration, top.destroy)
+    top.after(duration, lambda parent=top: on_closing(parent))
+
     top.attributes('-topmost', True)
     top.grab_set()
 
@@ -224,7 +229,7 @@ class SSHRedirector:
         # - FENETRE ROOT
         self.top.iconbitmap(project_ico)
         self.top.title("Redirection SSH")
-        self.top.geometry("420x630")
+        self.top.geometry("420x660")
         self.top.protocol("WM_DELETE_WINDOW", self.on_close)
         self.top.resizable(False, False)
         # Configuration du grid global
@@ -345,7 +350,7 @@ class SSHRedirector:
         conn_key = (host,port,user)
         if conn_key in active_paramiko_connections:
             password,transport,client = active_paramiko_connections[conn_key]
-            print(f"[INFO] Réutilisation connexion: {host}:{port} ({user})")
+            # print(f"[INFO] Réutilisation connexion: {host}:{port} ({user})")
             if transport.is_active():
                 pass
             else:
@@ -636,14 +641,14 @@ class SSHRedirector:
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sock.bind(('127.0.0.1', local_port))
                     sock.listen(100)
-                    print(f"[Tunnel] Écoute sur 127.0.0.1:{local_port} vers {remote_host}:{remote_port} (distant)")
+                    # print(f"[Tunnel] Écoute sur 127.0.0.1:{local_port} vers {remote_host}:{remote_port} (distant)")
                     while not stop_event.is_set():
                         try:
                             sock.settimeout(1)  # permet de vérifier stop_event régulièrement
                             client_sock, addr = sock.accept()
                         except socket.timeout:
                             continue
-                        print(f"[Tunnel] Connexion reçue depuis {addr}")
+                        # print(f"[Tunnel] Connexion reçue depuis {addr}")
                         try:
                             chan = transport.open_channel(
                                 "direct-tcpip",
@@ -865,7 +870,7 @@ def parse_cloudflared_proc(proc):
     return {"hostname": hostname, "url": url, "token_id": token_id, "raw": joined}
 
 
-def terminate_process_tree(proc, timeout=5):
+def terminate_process_tree(proc, timeout=1):
     """
     Tente de terminer proprement un process et ses enfants.
     Sur Windows utilise taskkill /F /T si disponible (proc.pid exists), sinon proc.terminate/kill.
@@ -1373,7 +1378,7 @@ class CloudflaredTab:
             timed_messagebox("Erreur", "Aucune connexion active à fermer.")
             return
 
-        def confirm_and_close(index):
+        def confirm_and_close(index,flag=True):
             proc = cloudflared_processes.pop(index)
             try:
                 tokens_choosing.pop(index)
@@ -1382,19 +1387,20 @@ class CloudflaredTab:
 
             meta = parse_cloudflared_proc(proc)
             hostname = meta.get("hostname") or "UNKNOWN"
-            timed_messagebox("Connexion fermée", f"Connexion {hostname} arrêtée.")
             try:
                 terminate_process_tree(proc)
             except Exception:
                 pass
             update_connection_status()
-            try:
-                dialog.destroy()
-            except Exception:
-                pass
+            if flag == True:
+                try:
+                    dialog.destroy()
+                except Exception:
+                    pass
+            timed_messagebox("Connexion fermée", f"Connexion {hostname} arrêtée.")
 
         if len(cloudflared_processes) == 1:
-            confirm_and_close(0)
+            confirm_and_close(index=0,flag=False)
         else:
             dialog = tk.Toplevel()
             dialog.title("Fermer une connexion")
@@ -1419,7 +1425,7 @@ class CloudflaredTab:
             def on_select():
                 selected = listbox.curselection()
                 if selected:
-                    confirm_and_close(selected[0])
+                    confirm_and_close(index=selected[0])
 
             ttk.Button(dialog, text="Fermer la connexion sélectionnée", command=on_select).pack(pady=10)
             dialog.attributes('-topmost', True)
@@ -1449,7 +1455,7 @@ class CloudflaredTab:
                 timed_messagebox("Erreur", f"Une connexion est déjà active sur le port {self.port_entry.get()}. Veuillez en choisir un autre.")
                 return
 
-        path = self.cloudflared_path_var.get()
+        path = Path(self.cloudflared_path_var.get())
         if not path or not os.path.isfile(path):
             timed_messagebox("Erreur", "Chemin vers cloudflared non valide.")
             return
@@ -1493,7 +1499,7 @@ class CloudflaredTab:
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                
             ps_cmd = " ".join(ps_cmd_base)
-            print(ps_cmd)
+            # print(ps_cmd)
             cmd = ["powershell.exe", "-NoProfile", "-Command", ps_cmd]
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
             cloudflared_processes.append(proc)
