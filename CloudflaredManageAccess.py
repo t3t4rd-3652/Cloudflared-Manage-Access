@@ -1472,11 +1472,11 @@ class CloudflaredTab:
                 messagebox.showerror("Erreur", "Le Proxy doit être renseigné.")
                 return
         # cmd = [path, "access", "tcp", "--hostname", hostname, "--url", f"{host}:{port}"]
-            ps_cmd_base = [fr"$env:HTTP_PROXY='http://{proxy}';", fr"$env:HTTPS_PROXY='http://{proxy}';", fr"$env:ALL_PROXY='http://{proxy}';", "&"]
+            ps_cmd_base = [fr"$env:HTTP_PROXY='http://{proxy}';", fr"$env:HTTPS_PROXY='http://{proxy}';", fr"$env:ALL_PROXY='http://{proxy}';"]
                     #fr"& 'C:\Program Files (x86)\cloudflared\cloudflared.exe' access tcp --hostname '{hostname}' --url '{host}:{port}'"
         else:
             ps_cmd_base = []
-        ps_cmd_base += [fr"{path} access tcp --hostname '{hostname}' --url '{host}:{port}'"]
+        ps_cmd_base += [fr"& '{path}' access tcp --hostname '{hostname}' --url '{host}:{port}'"]
 
         if self.use_token_var.get():
             token_id = self.token_id_entry.get().strip()
@@ -1499,7 +1499,7 @@ class CloudflaredTab:
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                
             ps_cmd = " ".join(ps_cmd_base)
-            # print(ps_cmd)
+            print(ps_cmd)
             cmd = ["powershell.exe", "-NoProfile", "-Command", ps_cmd]
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
             cloudflared_processes.append(proc)
