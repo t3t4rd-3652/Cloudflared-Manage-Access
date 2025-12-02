@@ -500,7 +500,7 @@ class SSHRedirector:
                     stdin, stdout, stderr = client.exec_command("ports-report")
                     # print('ports-report')
                 except Exception as e:
-                    print(e)             
+                    print(e)          
                     messagebox.showwarning("Le binaire ports-report n'est pas disponible sur le serveur, veuillez l'installer.")
                     stdin, stdout, stderr = client.exec_command("ss -tuln | grep LISTEN")
 
@@ -884,7 +884,19 @@ def terminate_process_tree(proc, timeout=1):
         if platform.system() == 'Windows' and pid:
             try:
                 # /T = terminate child processes, /F = force
-                subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+                
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    startupinfo=startupinfo,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    timeout=timeout
+                )
+                # subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 # give it a moment
                 time.sleep(0.2)
                 if proc.poll() is None:
@@ -1483,7 +1495,7 @@ class CloudflaredTab:
             token_secret = self.token_secret_entry.get().strip()
             # print(self.token_menu.get())
             tokens_choosing.append(self.token_menu.get())
-            # print(ps_cmd)
+            # print(ps_cmd_base)
             if not token_id or not token_secret:
                 messagebox.showerror("Erreur", "Token ID et Secret doivent être renseignés.")
                 return
@@ -1499,7 +1511,7 @@ class CloudflaredTab:
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                
             ps_cmd = " ".join(ps_cmd_base)
-            print(ps_cmd)
+            # print(ps_cmd)
             cmd = ["powershell.exe", "-NoProfile", "-Command", ps_cmd]
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
             cloudflared_processes.append(proc)
