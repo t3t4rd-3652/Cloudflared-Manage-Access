@@ -27,7 +27,7 @@ CMA est une interface graphique portable (Tkinter) pour simplifier la gestion de
 
 >> python CloudflaredManageAccess.py
 
-Le .exe est également disponible dans \dist
+Le .exe est également disponible dans \dist ou dans les releases.
 
 > 📚 Compilation
 
@@ -36,4 +36,4 @@ Le .exe est également disponible dans \dist
 📦 Dépendances
 Python >= 3.13.5
 
-Aucun package externe requis (Tkinter est natif)
+Package externe : Paramiko/PIL(pillow) 
