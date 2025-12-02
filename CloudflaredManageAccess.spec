@@ -2,10 +2,10 @@
 
 
 a = Analysis(
-    ['CloudflaredManageAccess.py'],
+    ['C:/Users/a920634/Documents/Travaux/Cloudflared-Tunnel-Manager/CloudflaredManageAccess.py'],
     pathex=[],
     binaries=[],
-    datas=[('ico', 'ico')],
+    datas=[('C:\\Users\\a920634\\AppData\\Local\\Programs\\Python\\Python314\\tcl\\tcl8', 'tcl8'), ('C:\\Users\\a920634\\AppData\\Local\\Programs\\Python\\Python314\\tcl\\tcl8.6', 'tcl8.6'), ('C:\\Users\\a920634\\AppData\\Local\\Programs\\Python\\Python314\\tcl\\tk8.6', 'tk8.6'), ('C:/Users/a920634/Documents/Travaux/Cloudflared-Tunnel-Manager/ico', 'ico')],
     hiddenimports=['tkinter', 'tkinter.filedialog'],
     hookspath=[],
     hooksconfig={},
@@ -35,5 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['ico\\cloudflared.ico'],
+    icon=['C:\\Users\\a920634\\Documents\\Travaux\\Cloudflared-Tunnel-Manager\\ico\\cloudflared.ico'],
 )

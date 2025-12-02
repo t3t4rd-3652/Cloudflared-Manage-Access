@@ -1,0 +1,1 @@
+python.exe -m PyInstaller --onefile --windowed --noconfirm --name=CloudflaredManageAccess --icon=ico/cloudflared.ico --log-level=INFO --hidden-import=tkinter --hidden-import=tkinter.filedialog --add-data=ico:ico CloudflaredManageAccess.py
