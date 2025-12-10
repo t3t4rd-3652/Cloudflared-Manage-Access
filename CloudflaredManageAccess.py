@@ -514,23 +514,26 @@ class SSHRedirector:
                             protocol = parts[0]
                             port_ssh = parts[1]
                             service = parts[2]
+                            # print(parts)
                             match len(parts):
                                 case 5:
                                     code_name = parts[3];code_int = parts[4]
                                     total_code = code_name + " " + code_int
                                     match code_int:
                                         case '200':
+                                            if parts[2] == '-':
+                                                service = 'WebApp'
                                             final_code = code_name + f' ✅'
                                         case '-':
                                             final_code = ' ❓'; total_code = "Protocol non HTTP"
                                         case "302":
-                                            final_code = ' ❓'
+                                            final_code = code_name + ' ❓'
                                         case "301":
-                                            final_code = ' ❓'
+                                            final_code = code_name + ' ❓'
                                         case '400':
                                             if parts[2] == '-':
                                                 service = 'WebApp'
-                                            final_code = ' ❓'
+                                            final_code = code_name + ' ❌'
                                         case _:
                                             if parts[2] == '-':
                                                 service = 'WebApp'
@@ -543,9 +546,8 @@ class SSHRedirector:
                                         service = 'WebApp'
                                     code_name = parts[-2];code_int = parts[-1]
                                     total_code = code_name + " " + code_int
-                                    final_code = " ❌" if code_int != "301" else '❓'# if code_int == '400' else '❓'
+                                    final_code = code_name + f' ✅' if code_int == "200" else code_name + " ❌" if code_int == '404' else  code_name +'❓'# if code_int == '400' else '❓'
                                 case _:
-
                                     total_code = "Protocol non HTTP"
                                     final_code = f'❓'
                             self.ports_info.append((protocol,port_ssh,service,final_code,total_code))
@@ -574,6 +576,8 @@ class SSHRedirector:
             messagebox.showwarning("Aucun port sélectionné", "Veuillez sélectionner un port distant à rediriger.")
             return
         selected_text = self.ports_listbox.get(selected[0])
+        protocol_base = selected_text.split(" ")[-2]
+        protocol = 'http://' if protocol_base == 'HTTP' else 'https://' if protocol_base == 'HTTPS' else ""
         remote_port = selected_text.split()[1].strip("()")
         local_port = self.local_port_entry.get().strip()
         if not local_port.isdigit():
@@ -605,7 +609,7 @@ class SSHRedirector:
                         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
                     proc = subprocess.Popen(cmd, startupinfo=startupinfo)
-                    active_ssh_tunnels.append((f"{user}:{remote_port} → localhost:{local_port} {user}@{host}:{port}", proc))
+                    active_ssh_tunnels.append((f"{protocol}{user}:{remote_port} → {protocol}localhost:{local_port} {user}@{host}:{port}", proc))
                     self.refresh_connection_list()
                     # print(cmd)
                     messagebox.showinfo("Tunnel actif", f"""L'adresse localhost:{local_port} redirige le port {remote_port}\nde la connexion {user}@{host}:{port}""")
@@ -672,7 +676,7 @@ class SSHRedirector:
                 daemon=True)
             t.start()
 
-            active_ssh_tunnels.append((f"{user}:{remote_port} → localhost:{local_port} {user}@{host}:{port}", client,stop_event))
+            active_ssh_tunnels.append((f"{protocol}{user}:{remote_port} → {protocol}localhost:{local_port} {user}@{host}:{port}", client,stop_event))
             # print(active_ssh_tunnels)
             self.refresh_connection_list()
             messagebox.showinfo("Tunnel actif", f"""L'adresse localhost:{local_port} redirige le port {remote_port}\nde la connexion {user}@{host}:{port}""")
@@ -706,10 +710,15 @@ class SSHRedirector:
 
     def open_redir_web(self):
         try:
-            part_url = active_ssh_tunnels[self.conn_listbox.curselection()[0]][0].split(" ")[2]
+            try:
+                protocol = active_ssh_tunnels[self.conn_listbox.curselection()[0]][0].split(' ')[0].split('://')[0]
+                part_http = "https://" if protocol == 'https' else "http://"
+            except:
+                part_http = "http://"
+            part_url = active_ssh_tunnels[self.conn_listbox.curselection()[0]][0].split(" ")[2].split("://")[1]
             # print(active_ssh_tunnels[self.conn_listbox.curselection()[0]][0].split(" ")[2])
-            part_http = "http://"
             url = part_http + part_url
+            # print(part_http, part_url)
             webbrowser.open(url)
         except Exception as e:
             messagebox.showinfo(f"La page web n'a pas pu être ouverte: {e}")
@@ -1509,14 +1518,12 @@ class CloudflaredTab:
             if platform.system() == "Windows":
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-               
             ps_cmd = " ".join(ps_cmd_base)
             # print(ps_cmd)
             cmd = ["powershell.exe", "-NoProfile", "-Command", ps_cmd]
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
             cloudflared_processes.append(proc)
             ## Rajout token actuel dans une variable global 
-        
             try:
                 _, stderr = proc.communicate(timeout=1)
                 if b"address already in use" in stderr:
