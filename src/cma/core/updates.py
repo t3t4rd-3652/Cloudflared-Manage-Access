@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from cma import REPO_URL, __version__
-from cma.core.cloudflared.binary import USER_AGENT, DownloadError, ReleaseAsset, is_newer
+from cma.core.cloudflared.binary import USER_AGENT, DownloadError, ReleaseAsset, is_newer, powershell_env
 from cma.i18n import tr
 from cma.paths import is_frozen, portable_data_dir
 
@@ -209,7 +209,7 @@ def signature_is_acceptable(path: Path) -> tuple[bool, str]:
             capture_output=True,
             text=True,
             timeout=30,
-            env={**os.environ, "CMA_VERIFY_PATH": str(path)},
+            env=powershell_env(CMA_VERIFY_PATH=str(path)),
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -238,7 +238,7 @@ def launch_installer(installer: Path, *, relaunch: bool = True, wait_pid: int | 
         "Start-Process -FilePath $env:CMA_INSTALLER -ArgumentList $env:CMA_INSTALLER_ARGS"
     )
     env = {
-        **os.environ,
+        **powershell_env(),
         "CMA_WAIT_PID": str(wait_pid if wait_pid is not None else os.getpid()),
         "CMA_INSTALLER": args[0],
         "CMA_INSTALLER_ARGS": " ".join(args[1:]),

@@ -201,6 +201,17 @@ def _release_from_json(data: dict[str, Any]) -> ReleaseInfo:
     )
 
 
+def powershell_env(**extra: str) -> dict[str, str]:
+    """Environnement de Windows PowerShell 5.1 sans PSModulePath hérité.
+
+    Lancé depuis PowerShell 7, powershell.exe hérite d'un PSModulePath qui pointe vers les modules de la
+    version 7 : il ne charge plus Microsoft.PowerShell.Security, et Get-AuthenticodeSignature n'existe plus.
+    """
+    env = {k: v for k, v in os.environ.items() if k.upper() != "PSMODULEPATH"}
+    env.update(extra)
+    return env
+
+
 def verify_authenticode(path: Path) -> tuple[bool, str]:
     """Windows : signature Authenticode valide et émise pour Cloudflare. Le chemin passe par l'environnement."""
     if sys.platform != "win32":
@@ -213,7 +224,7 @@ def verify_authenticode(path: Path) -> tuple[bool, str]:
     try:
         result = subprocess.run(
             ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
-            env={**os.environ, "CMA_VERIFY_PATH": str(path)},
+            env=powershell_env(CMA_VERIFY_PATH=str(path)),
             capture_output=True,
             timeout=60,
             creationflags=subprocess.CREATE_NO_WINDOW,
