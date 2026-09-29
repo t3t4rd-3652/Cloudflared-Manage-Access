@@ -1,0 +1,215 @@
+"""Démarrage de l'interface graphique : instance unique, coffre, migration, moteur, thème, fenêtre, zone de notification."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import logging
+import sys
+import time
+from typing import Any
+
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
+
+from cma import APP_ID, APP_NAME, __version__
+from cma.context import create_context
+from cma.core.cloudflared.binary import read_version
+from cma.core.commands import execute
+from cma.core.engine import Engine
+from cma.core.instance import InstanceLock, IpcServer, send_command
+from cma.core.secrets import (
+    EncryptedFileSecretStore,
+    MemorySecretStore,
+    SecretStore,
+    open_secret_store,
+    system_keyring,
+)
+from cma.i18n import set_language, tr
+from cma.logging_setup import attach_bus, install_excepthooks, setup_logging
+from cma.paths import AppPaths, resolve_paths
+from cma.ui.bridge import EngineBridge, GuiPrompter, TaskRunner
+from cma.ui.context import GuiContext
+from cma.ui.icons import app_icon
+from cma.ui.theme import ThemeManager
+
+log = logging.getLogger(__name__)
+
+
+def _open_secret_store(paths: AppPaths) -> SecretStore:
+    if system_keyring() is not None:
+        return open_secret_store()
+    from cma.core.crypto import WrongPassphraseError
+    from cma.ui.dialogs.misc import choose_secret_store
+
+    while True:
+        passphrase = choose_secret_store(None, paths.encrypted_secrets_file)
+        if passphrase is None:
+            return MemorySecretStore(reason="choix de l'utilisateur")
+        try:
+            return EncryptedFileSecretStore(paths.encrypted_secrets_file, passphrase)
+        except WrongPassphraseError:
+            QMessageBox.warning(None, tr("Coffre chiffré"), tr("Phrase de passe incorrecte."))
+
+
+class FreezeDetector:
+    """Mode debug : signale dans le journal tout blocage du thread de l'interface de plus de 50 ms."""
+
+    def __init__(self, interval_ms: int = 20, threshold_ms: int = 50) -> None:
+        self._interval = interval_ms
+        self._threshold = threshold_ms
+        self._last = time.monotonic()
+        self._timer = QTimer()
+        self._timer.timeout.connect(self._check)
+        self._timer.start(interval_ms)
+
+    def _check(self) -> None:
+        now = time.monotonic()
+        lag = (now - self._last) * 1000 - self._interval
+        if lag > self._threshold:
+            log.warning("Interface bloquée pendant %d ms", lag)
+        self._last = now
+
+
+def run_gui(args: argparse.Namespace) -> int:
+    started = time.monotonic()
+    paths = resolve_paths(getattr(args, "data_dir", None))
+    paths.ensure()
+    debug = bool(getattr(args, "debug", False))
+    setup_logging(paths, "DEBUG" if debug else "INFO")
+    log.info("Démarrage de %s %s (Python %s)", APP_NAME, __version__, sys.version.split()[0])
+
+    lock = InstanceLock(paths.lock_file)
+    if not lock.acquire():
+        if send_command(paths, {"cmd": "show"}, timeout=5) is not None:
+            log.info("Une instance tourne déjà : fenêtre ramenée au premier plan")
+            return 0
+        app = QApplication.instance() or QApplication(sys.argv)
+        QMessageBox.warning(
+            None,
+            APP_NAME,
+            tr("L'application est déjà ouverte mais ne répond pas. Fermez-la, puis réessayez."),
+        )
+        return 1
+
+    if sys.platform == "win32":
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
+    app = QApplication.instance() or QApplication(sys.argv)
+    assert isinstance(app, QApplication)
+    app.setApplicationName(APP_NAME)
+    app.setApplicationVersion(__version__)
+    app.setOrganizationName("t3t4rd-3652")
+    app.setWindowIcon(app_icon())
+    app.setQuitOnLastWindowClosed(False)
+
+    theme = ThemeManager(app)
+    secrets = _open_secret_store(paths)
+    prompter = GuiPrompter()
+    core = create_context(paths, prompter, secrets=secrets)
+    settings = core.store.snapshot().settings
+    set_language(settings.language)
+    theme.set_theme(settings.theme)
+
+    engine = Engine()
+    engine.start()
+    runner = TaskRunner(engine)
+    bridge = EngineBridge(core.bus)
+    core.store.add_listener(bridge.config_changed.emit)
+    attach_bus(core.bus)
+    install_excepthooks(lambda text: bridge.fatal_error.emit(text))
+    ctx = GuiContext(
+        core=core, engine=engine, runner=runner, bridge=bridge, theme=theme, prompter=prompter, debug=debug
+    )
+
+    from cma.ui.main_window import MainWindow
+    from cma.ui.tray import Tray
+
+    window = MainWindow(ctx)
+    prompter.parent_provider = lambda: window if window.isVisible() else None
+    tray: Tray | None = None
+    if QSystemTrayIcon.isSystemTrayAvailable():
+        tray = Tray(ctx, window)
+        tray.show()
+        window.tray_notify = tray.notify
+        window.tray_available = True
+
+    def handle_ipc(message: dict[str, Any]) -> dict[str, Any]:
+        if message.get("cmd") == "show":
+            bridge.show_requested.emit()
+            return {"ok": True}
+        if message.get("cmd") == "quit":
+            bridge.quit_requested.emit()
+            return {"ok": True}
+        return engine.run_sync(execute(core.manager, message), timeout=150)
+
+    bridge.show_requested.connect(window.bring_to_front)
+
+    def quit_now() -> None:
+        window.quitting = True
+        window.save_window_state()
+        app.quit()
+
+    bridge.quit_requested.connect(quit_now)
+    ipc = IpcServer(paths, handle_ipc)
+    try:
+        ipc.start()
+    except OSError as exc:
+        log.warning("Canal local indisponible : %s", exc)
+
+    minimized = bool(getattr(args, "minimized", False)) or settings.start_minimized
+    if not (minimized and tray is not None):
+        window.show()
+
+    for warning in core.warnings:
+        window.notify("warning", warning)
+    if core.migration is not None:
+        from cma.ui.dialogs.misc import show_migration_report
+
+        QTimer.singleShot(300, lambda: show_migration_report(ctx, window, core.migration))  # type: ignore[arg-type]
+    elif (
+        not settings.onboarding_done
+        and not core.store.snapshot().cloudflare_profiles
+        and not core.store.snapshot().ssh_profiles
+    ):
+        from cma.ui.dialogs.onboarding import OnboardingWizard
+
+        def onboarding() -> None:
+            OnboardingWizard(window, ctx, None).exec()
+            ctx.update_config(lambda c: setattr(c.settings, "onboarding_done", True))
+
+        QTimer.singleShot(300, onboarding)
+
+    # Tâches de fond au démarrage : sessions déjà ouvertes, cloudflared, profils à démarrer, mises à jour.
+    async def list_sessions() -> Any:
+        return core.manager.list_sessions()
+
+    runner.run(list_sessions(), window.dashboard.load_sessions)
+    binary = core.manager.cloudflared_path()
+    if binary is None:
+        window.set_cloudflared_status(tr("cloudflared introuvable : voir Paramètres"))
+    else:
+        runner.run(read_version(binary), lambda v: window.set_cloudflared_status(f"cloudflared {v or '?'}"))
+    runner.run(core.manager.start_auto_profiles())
+    if settings.check_updates:
+        window.settings.check_cloudflared_release(quiet=True)
+        window.settings.check_cma_update(quiet=True)
+    detector = FreezeDetector() if debug else None
+    log.info("Interface prête en %.0f ms", (time.monotonic() - started) * 1000)
+
+    exit_code = app.exec()
+
+    log.info("Arrêt : fermeture des sessions")
+    runner.close()
+    del detector
+    ipc.stop()
+    try:
+        engine.run_sync(asyncio.wait_for(core.manager.shutdown(), 15), timeout=20)
+    except Exception:
+        log.exception("Arrêt incomplet des sessions")
+    engine.stop()
+    bridge.close()
+    lock.release()
+    log.info("Arrêt terminé")
+    return exit_code

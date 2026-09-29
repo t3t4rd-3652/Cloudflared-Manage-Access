@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Build Windows
+    runs-on: windows-latest
+    env:
+      SIGNING_CERT_BASE64: ${{ secrets.SIGNING_CERT_BASE64 }}
+      SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - name: Vérifier que le tag correspond à la version
+        shell: bash
+        run: |
+          version=$(uv run python -c "import cma; print(cma.__version__)")
+          test "v${version}" = "${GITHUB_REF_NAME}" || { echo "Tag ${GITHUB_REF_NAME} ≠ version ${version}"; exit 1; }
+      - name: Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Build de l'application (onedir)
+        run: uv run python packaging/build.py --stage app
+      - name: Signature des exécutables (si un certificat est configuré)
+        if: ${{ env.SIGNING_CERT_BASE64 != '' }}
+        shell: pwsh
+        run: ./packaging/sign.ps1 dist/CloudflaredManageAccess/*.exe
+      - name: Zip portable et installeur
+        run: uv run python packaging/build.py --stage package
+      - name: Signature de l'installeur (si un certificat est configuré)
+        if: ${{ env.SIGNING_CERT_BASE64 != '' }}
+        shell: pwsh
+        run: ./packaging/sign.ps1 dist/*-setup.exe
+      - name: Empreintes SHA-256
+        run: uv run python packaging/build.py --stage sums
+      - name: Notes de version tirées du CHANGELOG
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {found=1; next} found && /^## \[/ {exit} found {print}' CHANGELOG.md > notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: notes.md
+          files: |
+            dist/CloudflaredManageAccess-*-portable.zip
+            dist/CloudflaredManageAccess-*-setup.exe
+            dist/SHA256SUMS.txt

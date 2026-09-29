@@ -19,6 +19,11 @@ import select
 from PIL import Image,ImageTk
 import signal
 import time
+import re
+import tempfile
+import shlex
+
+VERSION = "1.4.1"
 #################################
 def resource_path(relative_path):
     """
@@ -56,23 +61,105 @@ def get_user_dir():
     else:
         return os.path.join(Path.home(), ".config", "CloudflaredManager")
 
+################ - JSON - ######################
+
+STARTUP_WARNINGS = []
+
+
+def read_json(path):
+    """Lit un fichier JSON en UTF-8, avec repli cp1252 pour les fichiers écrits par les anciennes versions."""
+    last_error = None
+    for encoding in ("utf-8-sig", "cp1252"):
+        try:
+            with open(path, "r", encoding=encoding) as f:
+                return json.load(f)
+        except UnicodeDecodeError as e:
+            last_error = e
+    raise last_error
+
+
+def write_json(path, data):
+    """Écrit un fichier JSON en UTF-8 de façon atomique : fichier temporaire, puis remplacement."""
+    directory = os.path.dirname(os.path.abspath(path))
+    fd, tmp_path = tempfile.mkstemp(prefix=".tmp-", suffix=".json", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def load_config_file(path):
+    """
+    Charge un fichier de configuration {nom: {...}}.
+    Un fichier illisible est mis de côté en .bak au lieu d'empêcher le démarrage.
+    """
+    if not os.path.exists(path):
+        return {}
+    try:
+        data = read_json(path)
+        if not isinstance(data, dict) or not all(isinstance(v, dict) for v in data.values()):
+            raise ValueError("structure inattendue")
+        return data
+    except Exception as e:
+        backup = f"{path}.{time.strftime('%Y%m%d-%H%M%S')}.bak"
+        try:
+            os.replace(path, backup)
+        except OSError:
+            backup = path
+        STARTUP_WARNINGS.append(
+            f"{os.path.basename(path)} est illisible ({e}).\nIl a été mis de côté sous {os.path.basename(backup)}."
+        )
+        return {}
+
+
+def load_import_file(file_path):
+    """Lit un fichier importé et vérifie qu'il a la forme {nom: {...}}. Lève ValueError sinon."""
+    data = read_json(file_path)
+    if not isinstance(data, dict) or not all(isinstance(v, dict) for v in data.values()):
+        raise ValueError("Le fichier doit contenir un objet JSON de la forme {\"nom\": {...}}.")
+    return data
+
 ################ - VARIABLES - ######################
 
 APPDATA_DIR = get_appdata_dir()
 os.makedirs(APPDATA_DIR, exist_ok=True)
 SSH_KEY_DIR = Path(APPDATA_DIR) / "ssh_keys"
 SSH_KEY_DIR.mkdir(parents=True, exist_ok=True)
+LOG_DIR = os.path.join(APPDATA_DIR, "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
 
 active_paramiko_connections = {}
+# Chaque connexion cloudflared est un dict : proc, hostname, url, token_name, log_path.
 cloudflared_processes = []
-connection_labels = []
 active_ssh_tunnels = []
 ssh_keys_summary = []
-tokens_choosing = []
 
 CONFIG_FILE = os.path.join(APPDATA_DIR, "cloudflared_configs.json")
 TOKENS_FILE = os.path.join(APPDATA_DIR, "cloudflared_tokens.json")
 SSH_REDIR_FILE = os.path.join(APPDATA_DIR, "cloudflared_ssh_redir.json")
+
+
+def prune_old_logs(max_age_days=7):
+    """Supprime les journaux cloudflared de plus de max_age_days jours."""
+    limit = time.time() - max_age_days * 86400
+    for name in os.listdir(LOG_DIR):
+        full = os.path.join(LOG_DIR, name)
+        try:
+            if name.startswith("cloudflared-") and os.path.getmtime(full) < limit:
+                os.remove(full)
+        except OSError:
+            pass
+
+
+prune_old_logs()
 
 # print(CONFIG_FILE,TOKENS_FILE)
 if os.path.isfile(CONFIG_FILE):
@@ -102,55 +189,32 @@ else:
 
 ## - IMAGE - ##
 dir_ico = resource_path("ico") #DOSSIER IMAGE
-# BOUTON ADD
-add_ico = Image.open(fr"{dir_ico}\add.png")
-add_ico = add_ico.resize((15, 15))       
-# BOUTON DELETE
-delete_ico = Image.open(fr"{dir_ico}\delete.png")
-delete_ico = delete_ico.resize((15, 15))
-# BOUTON EDIT
-edit_ico = Image.open(fr"{dir_ico}\edit.png")
-edit_ico = edit_ico.resize((15, 15))
-# BOUTON EXPORT
-export_ico = Image.open(fr"{dir_ico}\export.png")
-export_ico = export_ico.resize((15, 15))
-# BOUTON IMPORT
-import_ico = Image.open(fr"{dir_ico}\import.png")
-import_ico = import_ico.resize((15, 15))
-# BOUTON SAVE
-save_ico = Image.open(fr"{dir_ico}\save.png")
-save_ico = save_ico.resize((15, 15))
+
+
+def load_icon(name, size=15):
+    return Image.open(os.path.join(dir_ico, name)).resize((size, size))
+
+
+add_ico = load_icon("add.png")
+delete_ico = load_icon("delete.png")
+edit_ico = load_icon("edit.png")
+export_ico = load_icon("export.png")
+import_ico = load_icon("import.png")
+save_ico = load_icon("save.png")
+project_ico = os.path.join(dir_ico, "cloudflared.ico")
+
+
+def set_window_icon(window):
+    """Applique l'icône du projet ; iconbitmap(.ico) n'existe que sous Windows."""
+    try:
+        if platform.system() == "Windows":
+            window.iconbitmap(project_ico)
+        else:
+            window.iconphoto(False, ImageTk.PhotoImage(Image.open(project_ico)))
+    except Exception:
+        pass
 
 ################################################
-
-def forward_tunnel(local_port, remote_host, remote_port, transport):
-    """Écoute sur local_port et transfère vers remote_port via transport Paramiko."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.bind(('localhost', local_port))
-    sock.listen(1)
-    try:
-        while True:
-            client_socket, addr = sock.accept()
-            chan = transport.open_channel(
-                "direct-tcpip",
-                (remote_host, remote_port),
-                addr
-            )
-            threading.Thread(target=transfer, args=(client_socket, chan), daemon=True).start()
-    except Exception as e:
-        print(f"[Tunnel fermé] {e}")
-    finally:
-        sock.close()
-
-def transfer(src, dst):
-    """Transfert bidirectionnel de données entre deux sockets."""
-    while True:
-        data = src.recv(1024)
-        if not data:
-            break
-        dst.send(data)
-    src.close()
-    dst.close()
 
 def load_existing_ssh_keys():
     if SSH_KEY_DIR.exists():
@@ -187,7 +251,7 @@ def timed_messagebox(title, message, duration=8000):
         parent.destroy()
 
     top = tk.Toplevel()
-    top.iconbitmap(project_ico)
+    set_window_icon(top)
     top.title(title)
     top.geometry("400x100")
     top.protocol("WM_DELETE_WINDOW", lambda parent=top:on_closing(parent))
@@ -199,17 +263,86 @@ def timed_messagebox(title, message, duration=8000):
     top.grab_set()
 
 
+def prune_dead_connections():
+    """Retire de la liste les cloudflared qui se sont arrêtés d'eux-mêmes."""
+    for entry in list(cloudflared_processes):
+        if entry["proc"].poll() is not None:
+            cloudflared_processes.remove(entry)
+
+
 def update_connection_status():
-    status_text = f"Connexions ouvertes : {len(cloudflared_processes)}"
-    if hasattr(app, 'status_label'):
-        app.status_label.config(text=status_text)
+    prune_dead_connections()
+    status_text = (f"Connexions ouvertes : {len(cloudflared_processes)} Cloudflare · "
+                   f"{len(active_ssh_tunnels)} SSH  (cliquer pour fermer)")
+    gui = globals().get("app")
+    if gui is not None and hasattr(gui, 'status_label'):
+        gui.status_label.config(text=status_text)
+
+
+def terminate_process(proc, timeout=3):
+    """Arrête un processus lancé directement (plus de PowerShell intermédiaire, donc pas d'arbre à tuer)."""
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        proc.terminate()
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+            proc.wait(timeout=timeout)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def describe_connection(entry):
+    token = f" | Token : {entry['token_name']}" if entry.get("token_name") else ""
+    return f"{entry['hostname']} → {entry['url']}{token}"
+
+
+def close_cloudflared_connection(entry):
+    if entry in cloudflared_processes:
+        cloudflared_processes.remove(entry)
+    terminate_process(entry["proc"])
+    update_connection_status()
+    timed_messagebox("Connexion fermée", f"Connexion {entry['hostname']} arrêtée.")
+
+
+def show_close_dialog():
+    """Boîte de sélection de la connexion cloudflared à fermer."""
+    prune_dead_connections()
+    if not cloudflared_processes:
+        timed_messagebox("Erreur", "Aucune connexion active à fermer.")
+        return
+    dialog = tk.Toplevel()
+    set_window_icon(dialog)
+    dialog.title("Fermer une connexion")
+    dialog.geometry("460x280")
+    dialog.resizable(False, False)
+    ttk.Label(dialog, text="Sélectionnez une connexion à fermer :").pack(pady=10)
+    listbox = tk.Listbox(dialog, width=80)
+    listbox.pack(padx=10, pady=5, fill="both", expand=True)
+    entries = list(cloudflared_processes)
+    for entry in entries:
+        listbox.insert(tk.END, describe_connection(entry))
+
+    def on_select():
+        selected = listbox.curselection()
+        if selected:
+            dialog.destroy()
+            close_cloudflared_connection(entries[selected[0]])
+
+    ttk.Button(dialog, text="Fermer la connexion sélectionnée", command=on_select).pack(pady=10)
+    dialog.attributes('-topmost', True)
+    dialog.grab_set()
 
 
 def cleanup():
-    # Terminate remaining cloudflared processes cleanly
-    for proc in list(cloudflared_processes):
+    # Arrête proprement les cloudflared encore actifs
+    for entry in list(cloudflared_processes):
         try:
-            terminate_process_tree(proc)
+            terminate_process(entry["proc"])
         except Exception as e:
             print("cleanup error:", e)
 
@@ -227,7 +360,7 @@ class SSHRedirector:
         self.export_ico = ImageTk.PhotoImage(export_ico,(10,10))
         self.import_ico = ImageTk.PhotoImage(import_ico,(10,10))
         # - FENETRE ROOT
-        self.top.iconbitmap(project_ico)
+        set_window_icon(self.top)
         self.top.title("Redirection SSH")
         self.top.geometry("420x660")
         self.top.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -296,6 +429,8 @@ class SSHRedirector:
         # - FUNCTION - INIT - #
         self.refresh_connection_list()
         self.refresh_key_list()
+        if self.profile_redirect_var.get() in SSH_REDIR:
+            self.load_profile_ssh()
         ########### - GRID - #############
         #ROW 0
         self.profile_redirect.grid(row=0, column=0, sticky="ew", padx=(10,5), pady=(7,2),columnspan=2)
@@ -386,6 +521,13 @@ class SSHRedirector:
             active_paramiko_connections[conn_key] = (password,transport,client)
         return client
 
+    def read_ssh_port(self):
+        value = self.port_entry_ssh.get().strip() or "22"
+        if not value.isdigit() or not 0 < int(value) < 65536:
+            messagebox.showerror("Port invalide", "Le port SSH doit être un nombre entre 1 et 65535.")
+            return None
+        return int(value)
+
     def on_motion(self, tooltip, listbox, event):
         idx = listbox.nearest(event.y)
         if 0 <= idx < listbox.size():
@@ -433,11 +575,23 @@ class SSHRedirector:
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         password = simpledialog.askstring("Mot de passe SSH", f"Mot de passe pour {username}@{host}:{port}", show='*')
+        if password is None:
+            return
+        # Une seule commande, exécutée jusqu'au bout : crée ~/.ssh si besoin et n'ajoute la clé que si elle manque.
+        quoted = shlex.quote(pubkey)
+        command = (
+            "umask 077 && mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys"
+            " && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys"
+            f" && (grep -qxF {quoted} ~/.ssh/authorized_keys || printf '%s\\n' {quoted} >> ~/.ssh/authorized_keys)"
+        )
         try:
             ssh.connect(hostname=host, port=port, username=username, password=password)
-            ssh.exec_command("mkdir -p ~/.ssh && chmod 700 ~/.ssh")
-            ssh.exec_command(f'echo "{pubkey}" >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys')
+            _, stdout, stderr = ssh.exec_command(command)
+            status = stdout.channel.recv_exit_status()
+            error_text = stderr.read().decode("utf-8", "replace").strip()
             ssh.close()
+            if status != 0:
+                raise RuntimeError(error_text or f"code de retour {status}")
             messagebox.showinfo("Succès", "Clé SSH copiée avec succès.")
         except Exception as e:
             messagebox.showerror("Erreur SSH", str(e))
@@ -449,7 +603,9 @@ class SSHRedirector:
         key_path = Path(self.keys_listbox.get(selected[0]))
         key_name = key_path.name
         host = self.host_entry_ssh.get().strip()
-        port = int(self.port_entry_ssh.get().strip())
+        port = self.read_ssh_port()
+        if port is None:
+            return
         user = self.user_entry_ssh.get().strip()
         self.send_ssh_key_to_server(host, port, user, key_name)
 
@@ -471,7 +627,9 @@ class SSHRedirector:
 
     def list_ports(self):
         host = self.host_entry_ssh.get().strip()
-        port = int(self.port_entry_ssh.get().strip())
+        port = self.read_ssh_port()
+        if port is None:
+            return
         user = self.user_entry_ssh.get().strip()
         try:
             if self.var_check.get() == 0:
@@ -496,15 +654,14 @@ class SSHRedirector:
                 client = self.init_connection(host, port, user)
 
             if client:
-                try:
-                    stdin, stdout, stderr = client.exec_command("ports-report")
-                    # print('ports-report')
-                except Exception as e:
-                    print(e)          
-                    messagebox.showwarning("Le binaire ports-report n'est pas disponible sur le serveur, veuillez l'installer.")
-                    stdin, stdout, stderr = client.exec_command("ss -tuln | grep LISTEN")
-
+                stdin, stdout, stderr = client.exec_command("ports-report")
                 output = stdout.readlines()
+                if stdout.channel.recv_exit_status() == 127:
+                    messagebox.showwarning(
+                        "ports-report absent",
+                        "Le script ports-report n'est pas installé sur le serveur.\n"
+                        "Installez-le avec server/install.sh (voir docs/SERVEUR.md).")
+                    return
                 self.ports_listbox.delete(0, tk.END)
                 self.ports_info = []
                 try:
@@ -539,14 +696,15 @@ class SSHRedirector:
                                                 service = 'WebApp'
                                             final_code = code_name + f' ❌'
                                 case 4:
-                                    total_code = "HTTP Access Denied"
-                                    final_code = " ❌"
+                                    # "tcp PORT NOM -" : service sans réponse HTTP
+                                    total_code = "Protocole non HTTP"
+                                    final_code = " ❓"
                                 case 6:
                                     if service == 'http-alt':
                                         service = 'WebApp'
                                     code_name = parts[-2];code_int = parts[-1]
                                     total_code = code_name + " " + code_int
-                                    final_code = code_name + f' ✅' if code_int == "200" else code_name + " ❌" if code_int == '404' else  code_name +'❓'# if code_int == '400' else '❓'
+                                    final_code = code_name + ' ✅' if code_int == "200" else code_name + " ❌" if code_int == '404' else code_name + ' ❓'
                                 case _:
                                     total_code = "Protocol non HTTP"
                                     final_code = f'❓'
@@ -569,7 +727,9 @@ class SSHRedirector:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 return s.connect_ex(('localhost', port)) == 0
         host = self.host_entry_ssh.get().strip()
-        port = int(self.port_entry_ssh.get().strip())
+        port = self.read_ssh_port()
+        if port is None:
+            return
         user = self.user_entry_ssh.get().strip()
         selected = self.ports_listbox.curselection()
         if not selected:
@@ -601,14 +761,12 @@ class SSHRedirector:
                     return
                 
                 cmd = ["ssh", "-i", str(key_file), "-p", str(port), "-N",
+                        "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
+                        "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=30",
                         "-L", f"{local_port}:localhost:{remote_port}", f"{user}@{host}"]
                 try:
-                    startupinfo = None
-                    if platform.system() == "Windows":
-                        startupinfo = subprocess.STARTUPINFO()
-                        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-                    proc = subprocess.Popen(cmd, startupinfo=startupinfo)
+                    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if platform.system() == "Windows" else {}
+                    proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, **kwargs)
                     active_ssh_tunnels.append((f"{protocol}{user}:{remote_port} → {protocol}localhost:{local_port} {user}@{host}:{port}", proc))
                     self.refresh_connection_list()
                     # print(cmd)
@@ -618,7 +776,13 @@ class SSHRedirector:
 
 
         else:
-            client = self.init_connection(host,port,user)
+            try:
+                client = self.init_connection(host, port, user)
+            except Exception as e:
+                messagebox.showerror("Connexion SSH impossible", str(e))
+                return
+            if client is None:
+                return
             transport = client.get_transport()
 
             def handler(chan, sock):
@@ -709,35 +873,26 @@ class SSHRedirector:
         messagebox.showinfo("Connexion fermée", f"Connexion {label} arrêtée.")
 
     def open_redir_web(self):
+        selected = self.conn_listbox.curselection()
+        if not selected:
+            return
+        label = active_ssh_tunnels[selected[0]][0]
+        scheme_match = re.match(r"^(https?)://", label)
+        scheme = scheme_match.group(1) if scheme_match else "http"
+        port_match = re.search(r"localhost:(\d+)", label)
+        if not port_match:
+            messagebox.showerror("Erreur", "Impossible de déterminer le port local de ce tunnel.")
+            return
+        url = f"{scheme}://localhost:{port_match.group(1)}"
         try:
-            try:
-                protocol = active_ssh_tunnels[self.conn_listbox.curselection()[0]][0].split(' ')[0].split('://')[0]
-                part_http = "https://" if protocol == 'https' else "http://"
-            except:
-                part_http = "http://"
-            part_url = active_ssh_tunnels[self.conn_listbox.curselection()[0]][0].split(" ")[2].split("://")[1]
-            # print(active_ssh_tunnels[self.conn_listbox.curselection()[0]][0].split(" ")[2])
-            url = part_http + part_url
-            # print(part_http, part_url)
             webbrowser.open(url)
         except Exception as e:
-            messagebox.showinfo(f"La page web n'a pas pu être ouverte: {e}")
-        # webbrowser.open()
+            messagebox.showerror("Erreur", f"La page web n'a pas pu être ouverte : {e}")
 
-    def refresh_key_list(self):
-        self.keys_listbox.delete(0, tk.END)
-        for path in ssh_keys_summary:
-            self.keys_listbox.insert(tk.END, path)
-    
     def load_configs_ssh(self):
-        """
-        Charge les fichiers JSON existants contenant les profils et les tokens.
-        Met à jour les variables globales `PRESETS` et `TOKENS`.
-        """
+        """Charge les profils de redirection SSH et met à jour la liste déroulante."""
         global SSH_REDIR
-        if os.path.exists(SSH_REDIR_FILE):
-            with open(SSH_REDIR_FILE, "r") as f:
-                SSH_REDIR.update(json.load(f))
+        SSH_REDIR.update(load_config_file(SSH_REDIR_FILE))
         self.profile_redirect['values'] = list(SSH_REDIR.keys())
 
     def load_profile_ssh(self, event=None):
@@ -746,205 +901,86 @@ class SSHRedirector:
         self.host_entry_ssh.delete(0, tk.END)
         self.host_entry_ssh.insert(0, config.get("host", "localhost"))
         self.port_entry_ssh.delete(0, tk.END)
-        self.port_entry_ssh.insert(0, config.get("port", ""))
+        self.port_entry_ssh.insert(0, config.get("port", "22"))
         self.user_entry_ssh.delete(0, tk.END)
         self.user_entry_ssh.insert(0, config.get("user", ""))
 
+    def save_ssh_profiles(self):
+        write_json(SSH_REDIR_FILE, SSH_REDIR)
+        self.profile_redirect['values'] = list(SSH_REDIR.keys())
+
     def save_config_ssh(self):
-        """
-        Sauvegarde le profil de connexion courant dans le fichier JSON de configuration.
-        Affiche une boîte d'information à la fin.
-        """
+        """Sauvegarde le profil SSH courant dans le fichier JSON."""
         name = self.profile_redirect_var.get()
         if not name:
             return
         SSH_REDIR[name] = {
-            "host": self.host_entry_ssh.get(),
-            "port": self.port_entry_ssh.get(),
-            "user": self.user_entry_ssh.get(),
+            "host": self.host_entry_ssh.get().strip(),
+            "port": self.port_entry_ssh.get().strip(),
+            "user": self.user_entry_ssh.get().strip(),
         }
-        with open(SSH_REDIR_FILE, "w") as f:
-            json.dump(SSH_REDIR, f, indent=2)
-        self.profile_redirect['values'] = list(SSH_REDIR.keys())
-        timed_messagebox("Sauvegarde", f"Configuration SSH '{name}' enregistrée.")
+        self.save_ssh_profiles()
+        timed_messagebox("Sauvegarde", f"Profil SSH '{name}' enregistré.")
 
     def add_config_ssh(self):
-        name = simpledialog.askstring("Nouveau token", "Nom du nouveau token :")
+        name = simpledialog.askstring("Nouveau profil SSH", "Nom du nouveau profil SSH :")
         if name and name not in SSH_REDIR:
             SSH_REDIR[name] = {}
             self.profile_redirect['values'] = list(SSH_REDIR.keys())
             self.profile_redirect_var.set(name)
 
-    def delete_profile_ssh(self): #A MODIF
+    def delete_profile_ssh(self):
         name = self.profile_redirect_var.get()
         if name not in SSH_REDIR:
             return
-        confirm = messagebox.askyesno("Supprimer", f"Supprimer le profil '{name}' ?")
-        if confirm:
+        if messagebox.askyesno("Supprimer", f"Supprimer le profil SSH '{name}' ?"):
             del SSH_REDIR[name]
-            self.profile_redirect['values'] = list(PRESETS.keys())
             self.profile_redirect_var.set('')
-            with open(SSH_REDIR_FILE, "w") as f:
-                json.dump(SSH_REDIR, f, indent=2)
+            self.save_ssh_profiles()
 
-    def rename_profile_ssh(self): #A modif
+    def rename_profile_ssh(self):
         name = self.profile_redirect_var.get()
-        # print(name not in TOKENS)
         if name not in SSH_REDIR:
             return
-        new_name = simpledialog.askstring("Renommer le token", "Nouveau nom :", initialvalue=name)
+        new_name = simpledialog.askstring("Renommer le profil SSH", "Nouveau nom :", initialvalue=name)
         if new_name and new_name != name:
             SSH_REDIR[new_name] = SSH_REDIR.pop(name)
-            self.profile_redirect['values'] = list(TOKENS.keys())
             self.profile_redirect_var.set(new_name)
-            with open(SSH_REDIR_FILE, "w") as f:
-                json.dump(SSH_REDIR, f, indent=2)
-    
+            self.save_ssh_profiles()
+
     def import_profile_ssh(self):
-        """
-        Importe un fichier JSON contenant des tokens.
-        Met à jour la liste des tokens et sauvegarde dans le fichier local.
-        """
-        file_path = filedialog.askopenfilename(title="Importer un fichier de tokens", filetypes=[("Fichiers JSON", "*.json")])
+        """Importe un fichier JSON de profils SSH et l'ajoute aux profils locaux."""
+        file_path = filedialog.askopenfilename(title="Importer des profils SSH", filetypes=[("Fichiers JSON", "*.json")])
         if not file_path:
             return
-        with open(file_path, "r") as f:
-            loaded = json.load(f)
-            SSH_REDIR.update(loaded)
-            self.profile_redirect['values'] = list(TOKENS.keys())
-            imported_names = ', '.join(loaded.keys())
-            with open(SSH_REDIR_FILE, "w") as f_tokens:
-                json.dump(SSH_REDIR, f_tokens, indent=2)
-            messagebox.showinfo("Import", f"Tokens importés : {imported_names}")
-            self.profile_redirect['values'] = list(SSH_REDIR.keys())
+        try:
+            loaded = load_import_file(file_path)
+        except Exception as e:
+            messagebox.showerror("Import impossible", str(e))
+            return
+        SSH_REDIR.update(loaded)
+        self.save_ssh_profiles()
+        messagebox.showinfo("Import", f"Profils SSH importés : {', '.join(loaded.keys())}")
 
     def export_profile_ssh(self):
-        """
-        Exporte le dictionnaire SSH_REDIR (tokens/redirections SSH) vers un fichier JSON choisi par l'utilisateur.
-        """
+        """Exporte les profils SSH vers un fichier JSON choisi par l'utilisateur."""
+        if not SSH_REDIR:
+            messagebox.showwarning("Export", "Aucun profil SSH à exporter.")
+            return
+        file_path = filedialog.asksaveasfilename(
+            title="Exporter les profils SSH",
+            defaultextension=".json",
+            initialfile="cloudflared_ssh_redir.json",
+            filetypes=[("Fichiers JSON", "*.json")]
+        )
+        if not file_path:
+            return
         try:
-            if not SSH_REDIR:
-                messagebox.showwarning("Export", "Aucun token/redirection SSH à exporter (SSH_REDIR est vide).")
-                return
-
-            file_path = filedialog.asksaveasfilename(
-                title="Exporter les tokens/redirections SSH",
-                defaultextension=".json",
-                initialfile="cloudflared_ssh_redir.json",
-                filetypes=[("Fichiers JSON", "*.json")]
-            )
-            if not file_path:
-                return
-
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(SSH_REDIR, f, indent=2, ensure_ascii=False)
-
-            # Si tu as timed_messagebox, utilise-le, sinon messagebox classique
-            try:
-                timed_messagebox("Export", f"Tokens SSH exportés vers :\n{file_path}")
-            except NameError:
-                messagebox.showinfo("Export", f"Tokens SSH exportés vers :\n{file_path}")
-
+            write_json(file_path, SSH_REDIR)
+            timed_messagebox("Export", f"Profils SSH exportés vers :\n{file_path}")
         except Exception as e:
-            messagebox.showerror("Erreur d'export", f"Impossible d'exporter les tokens SSH :\n{e}")
+            messagebox.showerror("Erreur d'export", f"Impossible d'exporter les profils SSH :\n{e}")
 
-
-import re
-def parse_cloudflared_proc(proc):
-    """
-    Retourne dict {hostname,url,token_id,raw} en extrayant les flags --hostname --url --service-token-id
-    depuis proc.args. Gère le cas où l'appel est un seul string PowerShell (comme dans votre exemple).
-    """
-    cmd_args = proc.args if hasattr(proc, "args") else []
-    # Normaliser en string unique pour recherche (sûr même si certains éléments sont déjà concaténés)
-    try:
-        joined = " ".join([str(a) for a in cmd_args if a is not None])
-    except Exception:
-        joined = str(cmd_args)
-
-    def find_flag(joined_str, flag):
-        # Cherche --flag 'val' ou --flag "val" ou --flag val
-        pattern = rf"{re.escape(flag)}\s+'([^']*)'|{re.escape(flag)}\s+\"([^\"]*)\"|{re.escape(flag)}\s+([^'\"]\S*)"
-        m = re.search(pattern, joined_str)
-        if not m:
-            return None
-        for g in m.groups():
-            if g:
-                return g
-        return None
-
-    hostname = find_flag(joined, "--hostname")
-    url = find_flag(joined, "--url")
-    token_id = find_flag(joined, "--service-token-id")
-    return {"hostname": hostname, "url": url, "token_id": token_id, "raw": joined}
-
-
-def terminate_process_tree(proc, timeout=1):
-    """
-    Tente de terminer proprement un process et ses enfants.
-    Sur Windows utilise taskkill /F /T si disponible (proc.pid exists), sinon proc.terminate/kill.
-    Sur Unix tente os.killpg pour la process group.
-    """
-    if proc is None:
-        return
-    try:
-        pid = getattr(proc, 'pid', None)
-        # Windows: use taskkill to ensure PowerShell launched child is killed
-        if platform.system() == 'Windows' and pid:
-            try:
-                # /T = terminate child processes, /F = force
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = subprocess.SW_HIDE
-                
-                subprocess.run(
-                    ["taskkill", "/PID", str(pid), "/T", "/F"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    startupinfo=startupinfo,
-                    creationflags=subprocess.CREATE_NO_WINDOW,
-                    timeout=timeout
-                )
-                # subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                # give it a moment
-                time.sleep(0.2)
-                if proc.poll() is None:
-                    proc.kill()
-            except Exception:
-                try:
-                    proc.terminate()
-                except Exception:
-                    proc.kill()
-        else:
-            # POSIX: send SIGTERM to process group if possible
-            try:
-                pgid = os.getpgid(pid) if pid else None
-                if pgid:
-                    os.killpg(pgid, signal.SIGTERM)
-                else:
-                    proc.terminate()
-                # wait
-                try:
-                    proc.wait(timeout=timeout)
-                except subprocess.TimeoutExpired:
-                    try:
-                        if pgid:
-                            os.killpg(pgid, signal.SIGKILL)
-                        else:
-                            proc.kill()
-                    except Exception:
-                        pass
-            except Exception:
-                # fallback
-                try:
-                    proc.terminate()
-                except Exception:
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
-    except Exception as e:
-        print("terminate_process_tree error:", e)
 
 
 
@@ -958,8 +994,7 @@ class CloudflaredTab:
             PRESETS[new_name] = PRESETS.pop(name)
             self.profile_menu['values'] = list(PRESETS.keys())
             self.profile_var.set(new_name)
-            with open(CONFIG_FILE, "w") as f:
-                json.dump(PRESETS, f, indent=2)
+            write_json(CONFIG_FILE, PRESETS)
 
     def delete_profile(self):
         name = self.profile_var.get()
@@ -970,8 +1005,7 @@ class CloudflaredTab:
             del PRESETS[name]
             self.profile_menu['values'] = list(PRESETS.keys())
             self.profile_var.set('')
-            with open(CONFIG_FILE, "w") as f:
-                json.dump(PRESETS, f, indent=2)
+            write_json(CONFIG_FILE, PRESETS)
 
     def rename_token(self):
         name = self.token_profile_var.get()
@@ -983,8 +1017,7 @@ class CloudflaredTab:
             TOKENS[new_name] = TOKENS.pop(name)
             self.token_menu['values'] = list(TOKENS.keys())
             self.token_profile_var.set(new_name)
-            with open(TOKENS_FILE, "w") as f:
-                json.dump(TOKENS, f, indent=2)
+            write_json(TOKENS_FILE, TOKENS)
 
     def delete_token(self):
         name = self.token_profile_var.get()
@@ -995,8 +1028,7 @@ class CloudflaredTab:
             del TOKENS[name]
             self.token_menu['values'] = list(TOKENS.keys())
             self.token_profile_var.set('')
-            with open(TOKENS_FILE, "w") as f:
-                json.dump(TOKENS, f, indent=2)
+            write_json(TOKENS_FILE, TOKENS)
                 
     def __init__(self, parent, cloudflared_path_var):
         self.frame = ttk.Frame(parent)
@@ -1018,7 +1050,7 @@ class CloudflaredTab:
         self.new_profile_btn = ttk.Button(self.profile_frame, text="", image=self.add_ico, width=3, command=self.create_new_profile)
         self.rename_profile_btn = ttk.Button(self.profile_frame, text="", image=self.edit_ico, width=3, command=self.rename_profile)
         self.delete_profile_btn = ttk.Button(self.profile_frame, text="", image=self.delete_ico, width=3, command=self.delete_profile)
-        self.export_profile_btn = ttk.Button(self.profile_frame, image=self.export_ico) ### A FAIRE
+        self.export_profile_btn = ttk.Button(self.profile_frame, image=self.export_ico, width=3, command=self.export_profile)
         #- PART TOKEN ########## - RAJOUTER EXPORT
         self.tokens_frame = ttk.Frame(self.frame)
         tokens_label = ttk.Label(self.tokens_frame, text="Tokens :")
@@ -1030,7 +1062,7 @@ class CloudflaredTab:
         self.add_tokens_button = ttk.Button(self.tokens_frame, text="", image=self.add_ico, width=3, command=self.create_new_token_profile)
         self.rename_token_btn = ttk.Button(self.tokens_frame, text="", image=self.edit_ico, width=3, command=self.rename_token)
         self.delete_token_btn = ttk.Button(self.tokens_frame, text="", image=self.delete_ico, width=3, command=self.delete_token)
-        self.export_token_btn = ttk.Button(self.tokens_frame) # A FAIRE 
+        self.export_token_btn = ttk.Button(self.tokens_frame, image=self.export_ico, width=3, command=self.export_tokens)
         # Ligne 1 
         hostname_label = ttk.Label(self.frame, text="Hostname :")
         self.hostname_entry = ttk.Entry(self.frame)
@@ -1077,7 +1109,8 @@ class CloudflaredTab:
         self.save_btn.grid(row=0, column=2, padx=(2, 2), sticky='w')
         self.rename_profile_btn.grid(row=0, column=3, padx=(2, 2), sticky='w')
         self.import_btn.grid(row=0, column=4, padx=2, sticky='w')
-        self.delete_profile_btn.grid(row=0, column=5, padx=(2, 5), sticky='w')
+        self.export_profile_btn.grid(row=0, column=5, padx=2, sticky='w')
+        self.delete_profile_btn.grid(row=0, column=6, padx=(2, 5), sticky='w')
         # Tokens
         tokens_label.grid(row=0, column=6, sticky="e")
         self.token_menu.grid(row=0, column=7, sticky="ew", padx=2)
@@ -1085,7 +1118,8 @@ class CloudflaredTab:
         self.save_tokens_button.grid(row=0, column=9, padx=2, sticky='w')
         self.rename_token_btn.grid(row=0, column=10, padx=(2, 2), sticky='w')
         self.import_tokens_button.grid(row=0, column=11, padx=2, sticky='w')
-        self.delete_token_btn.grid(row=0, column=12, padx=(2, 5), sticky='w')
+        self.export_token_btn.grid(row=0, column=12, padx=2, sticky='w')
+        self.delete_token_btn.grid(row=0, column=13, padx=(2, 5), sticky='w')
         # 1 
         hostname_label.grid(row=1, column=0, sticky="e")
         self.hostname_entry.grid(row=1, column=1, columnspan=8, sticky="ew", padx=5, pady=5)
@@ -1223,8 +1257,7 @@ class CloudflaredTab:
             "token_secret": self.token_secret_entry.get(),
             "proxy": self.proxy_entry.get()
         }
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(PRESETS, f, indent=2)
+        write_json(CONFIG_FILE, PRESETS)
         self.profile_menu['values'] = list(PRESETS.keys())
         timed_messagebox("Sauvegarde", f"Configuration '{name}' enregistrée.")
 
@@ -1240,230 +1273,104 @@ class CloudflaredTab:
             "token_id": self.token_id_entry.get(),
             "token_secret": self.token_secret_entry.get()
         }
-        with open(TOKENS_FILE, "w") as f:
-            json.dump(TOKENS, f, indent=2)
+        write_json(TOKENS_FILE, TOKENS)
         self.token_menu['values'] = list(TOKENS.keys())
         timed_messagebox("Sauvegarde", f"Token '{name}' enregistré.")
 
     def import_config(self):
-        """
-        Importe un fichier JSON contenant des profils de configuration cloudflared.
-        Met à jour la liste des profils et sauvegarde dans le fichier local.
-        """
+        """Importe un fichier JSON de profils cloudflared et l'ajoute aux profils locaux."""
         file_path = filedialog.askopenfilename(title="Importer un fichier de profils", filetypes=[("Fichiers JSON", "*.json")])
         if not file_path:
             return
-        with open(file_path, "r") as f:
-            loaded = json.load(f)
-            PRESETS.update(loaded)
-            self.profile_menu['values'] = list(PRESETS.keys())
-            imported_names = ', '.join(loaded.keys())
-            with open(CONFIG_FILE, "w") as f_config:
-                json.dump(PRESETS, f_config, indent=2)
-            timed_messagebox("Import", f"Configurations importées : {imported_names}")
-            self.profile_menu['values'] = list(PRESETS.keys())
-            messagebox.showinfo("Import", "Configurations importées.")
+        try:
+            loaded = load_import_file(file_path)
+        except Exception as e:
+            messagebox.showerror("Import impossible", str(e))
+            return
+        PRESETS.update(loaded)
+        write_json(CONFIG_FILE, PRESETS)
+        self.profile_menu['values'] = list(PRESETS.keys())
+        messagebox.showinfo("Import", f"Profils importés : {', '.join(loaded.keys())}")
 
     def import_tokens(self):
-        """
-        Importe un fichier JSON contenant des tokens.
-        Met à jour la liste des tokens et sauvegarde dans le fichier local.
-        """
+        """Importe un fichier JSON de tokens et l'ajoute aux tokens locaux."""
         file_path = filedialog.askopenfilename(title="Importer un fichier de tokens", filetypes=[("Fichiers JSON", "*.json")])
         if not file_path:
             return
-        with open(file_path, "r") as f:
-            loaded = json.load(f)
-            TOKENS.update(loaded)
-            self.token_menu['values'] = list(TOKENS.keys())
-            imported_names = ', '.join(loaded.keys())
-            with open(TOKENS_FILE, "w") as f_tokens:
-                json.dump(TOKENS, f_tokens, indent=2)
-            messagebox.showinfo("Import", f"Tokens importés : {imported_names}")
-            self.token_menu['values'] = list(TOKENS.keys())
-            
-    def export_profile(self):
-        """
-        Exporte le dictionnaire PRESTS (profils cloudflared) vers un fichier JSON choisi par l'utilisateur.
-        """
         try:
-            if not PRESETS:
-                messagebox.showwarning("Export", "Aucun profil à exporter (PRESETS est vide).")
-                return
-
-            file_path = filedialog.asksaveasfilename(
-                title="Exporter les profils cloudflared",
-                defaultextension=".json",
-                initialfile="cloudflared_configs.json",
-                filetypes=[("Fichiers JSON", "*.json")]
-            )
-            if not file_path:
-                return
-
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(PRESETS, f, indent=2, ensure_ascii=False)
-
-            try:
-                timed_messagebox("Export", f"Profils exportés vers :\n{file_path}")
-            except NameError:
-                messagebox.showinfo("Export", f"Profils exportés vers :\n{file_path}")
-
+            loaded = load_import_file(file_path)
         except Exception as e:
-            messagebox.showerror("Erreur d'export", f"Impossible d'exporter les profils :\n{e}")
+            messagebox.showerror("Import impossible", str(e))
+            return
+        TOKENS.update(loaded)
+        write_json(TOKENS_FILE, TOKENS)
+        self.token_menu['values'] = list(TOKENS.keys())
+        messagebox.showinfo("Import", f"Tokens importés : {', '.join(loaded.keys())}")
+
+    def export_json(self, data, title, initialfile, warning=None):
+        if not data:
+            messagebox.showwarning("Export", "Rien à exporter.")
+            return
+        if warning and not messagebox.askyesno("Export", warning):
+            return
+        file_path = filedialog.asksaveasfilename(
+            title=title, defaultextension=".json", initialfile=initialfile,
+            filetypes=[("Fichiers JSON", "*.json")])
+        if not file_path:
+            return
+        try:
+            write_json(file_path, data)
+            timed_messagebox("Export", f"Export enregistré :\n{file_path}")
+        except Exception as e:
+            messagebox.showerror("Erreur d'export", f"Impossible d'exporter :\n{e}")
+
+    def export_profile(self):
+        """Exporte les profils cloudflared vers un fichier JSON."""
+        self.export_json(
+            PRESETS, "Exporter les profils cloudflared", "cloudflared_configs.json",
+            "Les profils qui utilisent un service token contiennent son secret.\n"
+            "Le fichier exporté contiendra ces secrets en clair. Continuer ?")
 
     def export_tokens(self):
-        """
-        Exporte le dictionnaire PRESTS (profils cloudflared) vers un fichier JSON choisi par l'utilisateur.
-        """
-        try:
-            if not TOKENS:
-                messagebox.showwarning("Export", "Aucun Tokens à exporter (TOKENS est vide).")
-                return
+        """Exporte les tokens vers un fichier JSON."""
+        self.export_json(
+            TOKENS, "Exporter les tokens", "cloudflared_tokens.json",
+            "Le fichier exporté contiendra les secrets des tokens en clair. Continuer ?")
 
-            file_path = filedialog.asksaveasfilename(
-                title="Exporter les profils cloudflared",
-                defaultextension=".json",
-                initialfile="cloudflared_tokens.json",
-                filetypes=[("Fichiers JSON", "*.json")]
-            )
-            if not file_path:
-                return
-
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(TOKENS, f, indent=2, ensure_ascii=False)
-
-            try:
-                timed_messagebox("Export", f"Profils exportés vers :\n{file_path}")
-            except NameError:
-                messagebox.showinfo("Export", f"Profils exportés vers :\n{file_path}")
-
-        except Exception as e:
-            messagebox.showerror("Erreur d'export", f"Impossible d'exporter les profils :\n{e}")
-
-    # def close_connection(self):
-    #     if not cloudflared_processes:
-    #         timed_messagebox("Erreur", "Aucune connexion active à fermer.")
-    #         return
-
-    #     def confirm_and_close(index):
-    #         proc = cloudflared_processes.pop(index)
-    #         tokens_choosing.pop(index)
-    #         if '--hostname' in proc.args:
-    #             hostname_index = proc.args.index('--hostname') + 1
-    #             hostname = proc.args[hostname_index]
-    #             # print(f"Hostname : {hostname}")
-    #             timed_messagebox("Connexion fermée", f"Connexion {hostname} arrêtée.")
-    #         else:
-    #             timed_messagebox("Connexion fermée", f"Connexion UNKNOWN arrêtée.")
-    #         proc.terminate()
-    #         update_connection_status()
-    #         try:
-    #             dialog.destroy()
-    #         except Exception as e:
-    #             pass
-    #     if len(cloudflared_processes) == 1:
-    #         confirm_and_close(0)
-    #     else:
-    #         dialog = tk.Toplevel()
-    #         dialog.title("Fermer une connexion")
-    #         dialog.geometry("400x280")
-    #         dialog.resizable(False, False)
-    #         ttk.Label(dialog, text="Sélectionnez une connexion à fermer :").pack(pady=10)
-    #         listbox = tk.Listbox(dialog, width=80)
-    #         listbox.pack(padx=10, pady=5, fill="both", expand=True)
-    #         for i, p in enumerate(cloudflared_processes):
-    #             hostname = next((arg for j, arg in enumerate(p.args) if p.args[j-1] == '--hostname'), f"Connexion {i}")
-    #             url = next((arg for j, arg in enumerate(p.args) if p.args[j-1] == '--url'), f"Connexion {i}")
-    #             try:
-    #                 token_ = next((arg for j, arg in enumerate(p.args) if p.args[j-1] == '--service-token-id'))
-    #                 # print(token_)
-    #                 if token_:
-    #                     # token_name = hostname.split(".")[0]
-    #                     token_name = tokens_choosing[i]
-    #                     token = f"| Token: {token_name}"
-    #             except:
-    #                 token = ""
-
-    #             listbox.insert(tk.END, f"{hostname} → {url} {token} ")
-    #         def on_select():
-    #             selected = listbox.curselection()
-    #             if selected:
-    #                 confirm_and_close(selected[0])
-
-    #         ttk.Button(dialog, text="Fermer la connexion sélectionnée", command=on_select).pack(pady=10)
-    #         dialog.attributes('-topmost', True)
-    #         dialog.grab_set()
-    #     update_connection_status()
     def close_connection(self):
+        prune_dead_connections()
         if not cloudflared_processes:
             timed_messagebox("Erreur", "Aucune connexion active à fermer.")
-            return
-
-        def confirm_and_close(index,flag=True):
-            proc = cloudflared_processes.pop(index)
-            try:
-                tokens_choosing.pop(index)
-            except Exception:
-                pass
-
-            meta = parse_cloudflared_proc(proc)
-            hostname = meta.get("hostname") or "UNKNOWN"
-            try:
-                terminate_process_tree(proc)
-            except Exception:
-                pass
-            update_connection_status()
-            if flag == True:
-                try:
-                    dialog.destroy()
-                except Exception:
-                    pass
-            timed_messagebox("Connexion fermée", f"Connexion {hostname} arrêtée.")
-
-        if len(cloudflared_processes) == 1:
-            confirm_and_close(index=0,flag=False)
+        elif len(cloudflared_processes) == 1:
+            close_cloudflared_connection(cloudflared_processes[0])
         else:
-            dialog = tk.Toplevel()
-            dialog.title("Fermer une connexion")
-            dialog.geometry("400x280")
-            dialog.resizable(False, False)
-            ttk.Label(dialog, text="Sélectionnez une connexion à fermer :").pack(pady=10)
-            listbox = tk.Listbox(dialog, width=80)
-            listbox.pack(padx=10, pady=5, fill="both", expand=True)
-            for i, p in enumerate(cloudflared_processes):
-                meta = parse_cloudflared_proc(p)
-                hostname = meta.get("hostname") or f"Connexion {i}"
-                url = meta.get("url") or f"Connexion {i}"
-                token = ""
-                try:
-                    if meta.get("token_id"):
-                        token_name = tokens_choosing[i] if i < len(tokens_choosing) else ""
-                        token = f"| Token: {token_name}"
-                except Exception:
-                    token = ""
-                listbox.insert(tk.END, f"{hostname} → {url} {token} ")
-
-            def on_select():
-                selected = listbox.curselection()
-                if selected:
-                    confirm_and_close(index=selected[0])
-
-            ttk.Button(dialog, text="Fermer la connexion sélectionnée", command=on_select).pack(pady=10)
-            dialog.attributes('-topmost', True)
-            dialog.grab_set()
-        update_connection_status()
+            show_close_dialog()
 
     def run_cloudflared(self):
         """
-        Lance la commande cloudflared avec les paramètres fournis par l'utilisateur.
-        Gère l'utilisation ou non d'un token.
-        Affiche une boîte de dialogue en cas d’erreur ou de succès.
+        Lance cloudflared access tcp directement, sans shell intermédiaire.
+        Le proxy et le service token passent par des variables d'environnement :
+        rien n'est interprété par un shell et le secret n'apparaît pas dans la ligne de commande.
         """
-        import socket
+        hostname = self.hostname_entry.get().strip()
         host = self.host_entry.get().strip() or "127.0.0.1"
         port = self.port_entry.get().strip()
-        if not port.isdigit():
+        if not hostname or not port:
+            messagebox.showerror("Erreur", "Hostname et Port doivent être renseignés.")
+            return
+        if not port.isdigit() or not 0 < int(port) < 65536:
             timed_messagebox("Erreur", "Le port spécifié n'est pas valide.")
+            return
+        url = f"{host}:{port}"
+
+        path = self.cloudflared_path_var.get().strip()
+        if not path or not os.path.isfile(path):
+            timed_messagebox("Erreur", "Chemin vers cloudflared non valide.")
+            return
+
+        prune_dead_connections()
+        if any(entry["url"] == url for entry in cloudflared_processes):
+            timed_messagebox("Erreur", f"Une connexion est déjà active sur {url}. Veuillez choisir un autre port.")
             return
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
@@ -1471,71 +1378,71 @@ class CloudflaredTab:
             except OSError:
                 timed_messagebox("Port utilisé", f"Le port {port} est déjà utilisé localement. Veuillez en choisir un autre.")
                 return
-        for proc in cloudflared_processes:
-            if proc.args and f"--url '{self.host_entry.get()}:{self.port_entry.get()}'" in ' '.join(proc.args):
-                timed_messagebox("Erreur", f"Une connexion est déjà active sur le port {self.port_entry.get()}. Veuillez en choisir un autre.")
-                return
 
-        path = Path(self.cloudflared_path_var.get())
-        if not path or not os.path.isfile(path):
-            timed_messagebox("Erreur", "Chemin vers cloudflared non valide.")
-            return
-
-        hostname = self.hostname_entry.get().strip()
-        host = self.host_entry.get().strip() or "127.0.0.1"
-        port = self.port_entry.get().strip()
-        if not hostname or not port:
-            messagebox.showerror("Erreur", "Hostname et Port doivent être renseignés.")
-            return
+        env = os.environ.copy()
+        for var in ("TUNNEL_SERVICE_TOKEN_ID", "TUNNEL_SERVICE_TOKEN_SECRET"):
+            env.pop(var, None)
         if self.use_proxy_var.get():
             proxy = self.proxy_entry.get().strip()
             if not proxy:
                 messagebox.showerror("Erreur", "Le Proxy doit être renseigné.")
                 return
-        # cmd = [path, "access", "tcp", "--hostname", hostname, "--url", f"{host}:{port}"]
-            ps_cmd_base = [fr"$env:HTTP_PROXY='http://{proxy}';", fr"$env:HTTPS_PROXY='http://{proxy}';", fr"$env:ALL_PROXY='http://{proxy}';"]
-                    #fr"& 'C:\Program Files (x86)\cloudflared\cloudflared.exe' access tcp --hostname '{hostname}' --url '{host}:{port}'"
-        else:
-            ps_cmd_base = []
-        ps_cmd_base += [fr"& '{path}' access tcp --hostname '{hostname}' --url '{host}:{port}'"]
+            proxy_url = proxy if "://" in proxy else f"http://{proxy}"
+            for var in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+                env[var] = proxy_url
 
+        token_name = ""
         if self.use_token_var.get():
             token_id = self.token_id_entry.get().strip()
             token_secret = self.token_secret_entry.get().strip()
-            # print(self.token_menu.get())
-            tokens_choosing.append(self.token_menu.get())
-            # print(ps_cmd_base)
             if not token_id or not token_secret:
                 messagebox.showerror("Erreur", "Token ID et Secret doivent être renseignés.")
                 return
-            ps_cmd_base += ["--service-token-id", token_id, "--service-token-secret", token_secret]
-            # cmd += ["--service-token-id", token_id, "--service-token-secret", token_secret]
-        else:
-            tokens_choosing.append('')
+            env["TUNNEL_SERVICE_TOKEN_ID"] = token_id
+            env["TUNNEL_SERVICE_TOKEN_SECRET"] = token_secret
+            token_name = self.token_menu.get() or "saisi à la main"
 
+        cmd = [path, "access", "tcp", "--hostname", hostname, "--url", url]
+        log_path = os.path.join(LOG_DIR, f"cloudflared-{time.strftime('%Y%m%d-%H%M%S')}-{port}.log")
+        kwargs = {}
+        if platform.system() == "Windows":
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        else:
+            kwargs["start_new_session"] = True
         try:
-            startupinfo = None
-            if platform.system() == "Windows":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            ps_cmd = " ".join(ps_cmd_base)
-            # print(ps_cmd)
-            cmd = ["powershell.exe", "-NoProfile", "-Command", ps_cmd]
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo)
-            cloudflared_processes.append(proc)
-            ## Rajout token actuel dans une variable global 
-            try:
-                _, stderr = proc.communicate(timeout=1)
-                if b"address already in use" in stderr:
-                    timed_messagebox("Port utilisé", f"Le port {port} est déjà utilisé. Veuillez en choisir un autre.")
-                    proc.terminate()
-                    return
-            except subprocess.TimeoutExpired:
-                pass
-            timed_messagebox("Succès", f"Connexion vers {hostname} lancée.")
-            update_connection_status()
+            with open(log_path, "ab") as log_file:
+                proc = subprocess.Popen(cmd, env=env, stdin=subprocess.DEVNULL,
+                                        stdout=log_file, stderr=subprocess.STDOUT, **kwargs)
         except Exception as e:
             messagebox.showerror("Erreur", f"Échec d'exécution : {e}")
+            return
+
+        entry = {"proc": proc, "hostname": hostname, "url": url, "token_name": token_name, "log_path": log_path}
+        cloudflared_processes.append(entry)
+        update_connection_status()
+        # Vérification différée : l'interface n'est jamais bloquée.
+        self.frame.after(1500, lambda: self.check_started(entry))
+
+    def check_started(self, entry):
+        proc = entry["proc"]
+        if proc.poll() is None:
+            timed_messagebox("Succès", f"Connexion vers {entry['hostname']} lancée.")
+            return
+        if entry in cloudflared_processes:
+            cloudflared_processes.remove(entry)
+        update_connection_status()
+        try:
+            with open(entry["log_path"], "r", encoding="utf-8", errors="replace") as f:
+                tail = f.read()[-2000:]
+        except OSError:
+            tail = ""
+        lowered = tail.lower()
+        if "address already in use" in lowered or "only one usage of each socket address" in lowered:
+            message = f"Le port {entry['url']} est déjà utilisé. Veuillez en choisir un autre."
+        else:
+            last_lines = "\n".join(tail.strip().splitlines()[-3:])
+            message = f"cloudflared s'est arrêté (code {proc.returncode}).\n\n{last_lines}"
+        messagebox.showerror("Échec de la connexion", message)
 
 class CloudflaredGUI:
     def __init__(self, root):  # Main GUI initialization
@@ -1546,10 +1453,9 @@ class CloudflaredGUI:
             root (tk.Tk): Fenêtre principale Tkinter.
         """
         self.root = root
-        self.root.title("Gestionnaire Cloudflared TCP Tunnel")
-        # self.root.geometry("700x1000")
-        # self.root.protocol("WM_DELETE_WINDOW", self.on_close)
-        self.root.resizable(False, False)
+        self.root.title(f"Gestionnaire Cloudflared TCP Tunnel v{VERSION}")
+        self.root.resizable(True, True)
+        self.root.minsize(760, 440)
         self.cloudflared_path_var = tk.StringVar()
         # Charger les profils AVANT d'ajouter des onglets
         self.load_configs_and_tokens()
@@ -1589,7 +1495,8 @@ class CloudflaredGUI:
         self.redirect_ssh_btn.pack(side="left", padx=5)
         self.status_label.pack(side="bottom", fill="x", padx=5, pady=2)
         ####################################
-        self.root.geometry("700x440")
+        self.root.geometry("760x440")
+        self.root.after(2000, self.poll_processes)
 
     def open_ssh_redirector(self):
         self.redirect_ssh_btn.config(state="disabled")
@@ -1602,109 +1509,13 @@ class CloudflaredGUI:
         win.top.destroy()
         self.redirect_ssh_btn.config(state="normal")
 
-    # def on_status_click(self, event):
-    #     def confirm_and_close_V2(index):
-    #         proc = cloudflared_processes.pop(index)
-    #         tokens_choosing.pop(index)
-    #         if '--hostname' in proc.args:
-    #             hostname_index = proc.args.index('--hostname') + 1
-    #             hostname = proc.args[hostname_index]
-    #             # print(f"Hostname : {hostname}")
-    #             timed_messagebox("Connexion fermée", f"Connexion {hostname} arrêtée.")
-    #         else:
-    #             timed_messagebox("Connexion fermée", f"Connexion UNKNOWN arrêtée.")
-    #         proc.terminate()
-    #         update_connection_status()
-    #         try:
-    #             dialog.destroy()
-    #         except Exception as e:
-    #             pass
-    #     try:
-    #         dialog = tk.Toplevel()
-    #         dialog.iconbitmap(project_ico)
-    #         dialog.title("Fermer une connexion")
-    #         dialog.geometry("400x280")
-    #         dialog.resizable(False, False)
-    #         ttk.Label(dialog, text="Sélectionnez une connexion à fermer :").pack(pady=10)
-    #         listbox = tk.Listbox(dialog, width=80)
-    #         listbox.pack(padx=10, pady=5, fill="both", expand=True)
-    #         for i, p in enumerate(cloudflared_processes):
-    #             hostname = next((arg for j, arg in enumerate(p.args) if p.args[j-1] == '--hostname'), f"Connexion {i}")
-    #             url = next((arg for j, arg in enumerate(p.args) if p.args[j-1] == '--url'), f"Connexion {i}")
-
-    #             try:
-    #                 token_ = next((arg for j, arg in enumerate(p.args) if p.args[j-1] == '--service-token-id'))
-    #                 # print(token_)
-    #                 if token_:
-    #                     # token_name = hostname.split(".")[0]
-    #                     token_name = tokens_choosing[i]
-    #                     token = f"| Token: {token_name}"
-    #             except:
-    #                 token = ""
-    #             listbox.insert(tk.END, f"{hostname} → {url} {token} ")
-
-    #         def on_select():
-    #             selected = listbox.curselection()
-    #             if selected:
-    #                 confirm_and_close_V2(selected[0])
-
-    #         ttk.Button(dialog, text="Fermer la connexion sélectionnée", command=on_select).pack(pady=10)
-    #         dialog.attributes('-topmost', True)
-    #         dialog.grab_set()
-    #     except Exception as e:
-    #         messagebox.showerror("Erreur lors de la supression: ", e)
     def on_status_click(self, event):
-        def confirm_and_close_V2(index):
-            proc = cloudflared_processes.pop(index)
-            try:
-                tokens_choosing.pop(index)
-            except Exception:
-                pass
-            meta = parse_cloudflared_proc(proc)
-            hostname = meta.get("hostname") or "UNKNOWN"
-            timed_messagebox("Connexion fermée", f"Connexion {hostname} arrêtée.")
-            try:
-                terminate_process_tree(proc)
-            except Exception:
-                pass
-            update_connection_status()
-            try:
-                dialog.destroy()
-            except Exception:
-                pass
+        show_close_dialog()
 
-        try:
-            dialog = tk.Toplevel()
-            dialog.iconbitmap(project_ico)
-            dialog.title("Fermer une connexion")
-            dialog.geometry("400x280")
-            dialog.resizable(False, False)
-            ttk.Label(dialog, text="Sélectionnez une connexion à fermer :").pack(pady=10)
-            listbox = tk.Listbox(dialog, width=80)
-            listbox.pack(padx=10, pady=5, fill="both", expand=True)
-            for i, p in enumerate(cloudflared_processes):
-                meta = parse_cloudflared_proc(p)
-                hostname = meta.get("hostname") or f"Connexion {i}"
-                url = meta.get("url") or f"Connexion {i}"
-                token = ""
-                try:
-                    if meta.get("token_id"):
-                        token_name = tokens_choosing[i] if i < len(tokens_choosing) else ""
-                        token = f"| Token: {token_name}"
-                except Exception:
-                    token = ""
-                listbox.insert(tk.END, f"{hostname} → {url} {token} ")
-
-            def on_select():
-                selected = listbox.curselection()
-                if selected:
-                    confirm_and_close_V2(selected[0])
-
-            ttk.Button(dialog, text="Fermer la connexion sélectionnée", command=on_select).pack(pady=10)
-            dialog.attributes('-topmost', True)
-            dialog.grab_set()
-        except Exception as e:
-            messagebox.showerror("Erreur lors de la supression: ", e)
+    def poll_processes(self):
+        """Met à jour le compteur : un cloudflared arrêté de lui-même n'est plus compté."""
+        update_connection_status()
+        self.root.after(2000, self.poll_processes)
 
     def detect_cloudflared(self):
         """
@@ -1756,39 +1567,22 @@ class CloudflaredGUI:
             messagebox.showerror("Erreur de téléchargement", f"Impossible de télécharger : {e}")
 
     def load_configs_and_tokens(self):
-        """
-        Charge les fichiers JSON existants contenant les profils et les tokens.
-        Met à jour les variables globales `PRESETS` et `TOKENS`.
-        """
-        global PRESETS, TOKENS
-        if os.path.exists(CONFIG_FILE):
-            with open(CONFIG_FILE, "r") as f:
-                PRESETS.update(json.load(f))
-        if os.path.exists(TOKENS_FILE):
-            with open(TOKENS_FILE, "r") as f:
-                TOKENS.update(json.load(f))
+        """Charge les profils et les tokens dans `PRESETS` et `TOKENS`."""
+        PRESETS.update(load_config_file(CONFIG_FILE))
+        TOKENS.update(load_config_file(TOKENS_FILE))
 
     def save_cloudflared_path(self, path):
-        """
-        Sauvegarde le chemin vers cloudflared dans un fichier JSON.
-
-        Args:
-            path (str): Chemin absolu vers l’exécutable cloudflared.
-        """
-        save_file = os.path.join(APPDATA_DIR, "cloudflared_path.json")
-        with open(save_file, "w") as f:
-            json.dump({"path": path}, f)
+        """Sauvegarde le chemin vers cloudflared."""
+        write_json(os.path.join(APPDATA_DIR, "cloudflared_path.json"), {"path": path})
 
     def load_saved_cloudflared_path(self):
-        """
-        Charge le chemin précédemment sauvegardé vers cloudflared depuis le fichier JSON.
-        """
+        """Charge le chemin précédemment sauvegardé vers cloudflared."""
         save_file = os.path.join(APPDATA_DIR, "cloudflared_path.json")
-        # print(save_file)
         if os.path.exists(save_file):
-            with open(save_file, "r") as f:
-                data = json.load(f)
-                self.cloudflared_path_var.set(data.get("path", ""))
+            try:
+                self.cloudflared_path_var.set(read_json(save_file).get("path", ""))
+            except Exception:
+                pass
 
     def open_download_page(self):
         """
@@ -1816,7 +1610,6 @@ class CloudflaredGUI:
         if len(self.tabs) <= 1:
             messagebox.showinfo("Impossible", "Impossible de supprimer le dernier onglet.")
             return
-        self.tab_count -= 1
         current = self.tab_control.index(self.tab_control.select())
         self.tab_control.forget(current)
         del self.tabs[current]
@@ -1868,9 +1661,10 @@ class Tooltip:
             self.tooltip_window = None
 
 atexit.register(cleanup)
-project_ico = resource_path(fr"{dir_ico}\cloudflared.ico")
 if __name__ == "__main__":
     root = tk.Tk()
-    root.iconbitmap(project_ico)
+    set_window_icon(root)
     app = CloudflaredGUI(root)
+    if STARTUP_WARNINGS:
+        root.after(200, lambda: messagebox.showwarning("Configuration", "\n\n".join(STARTUP_WARNINGS)))
     root.mainloop()

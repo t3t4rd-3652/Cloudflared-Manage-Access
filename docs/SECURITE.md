@@ -1,0 +1,57 @@
+# Sécurité
+
+Ce document décrit ce que CMA protège, comment, et ses limites.
+
+## Ce qui est protégé
+
+| Élément sensible | Protection |
+| --- | --- |
+| Secret des service tokens | Coffre du système (Gestionnaire d'identifiants Windows, Trousseau macOS, Secret Service Linux). Passé à cloudflared par `TUNNEL_SERVICE_TOKEN_SECRET`, jamais en argument. |
+| Mots de passe SSH | Gardés en mémoire le temps de la connexion. Mémorisés dans le coffre seulement si vous le demandez. |
+| Phrases de passe des clés SSH | Gardées en mémoire pour la session. |
+| Clés privées SSH générées | Dossier `ssh_keys` du dossier de données, chiffrables par phrase de passe (bcrypt/OpenSSH). |
+| Configuration `config.json` | Ne contient aucun secret. |
+| Journaux et rapport de diagnostic | Les secrets connus et les motifs habituels (en-tête `Cf-Access-Client-Secret`, `password=`…) sont masqués. |
+| Exports | Secrets exclus par défaut, ou chiffrés par phrase de passe (scrypt, AES-256-GCM). |
+
+## Exécution de cloudflared
+
+- Aucun shell : `cloudflared access tcp --hostname … --url …` est lancé avec une liste d'arguments. Un nom de profil, un hostname ou un proxy ne peuvent donc pas injecter de commande. C'était possible en v1.4.0 via PowerShell.
+- Les variables `TUNNEL_SERVICE_*` héritées de l'environnement sont retirées avant chaque lancement.
+- Le niveau de journal par défaut est `info` : en `debug`, cloudflared affiche les en-têtes, secret compris. CMA les masque, mais mieux vaut éviter ce niveau.
+- Les processus sont rattachés à un Job Object Windows : ils s'arrêtent avec l'application, même en cas de plantage.
+
+## SSH
+
+- **Clés d'hôte vérifiées.** Au premier contact, l'empreinte SHA-256 s'affiche et doit être confirmée. Une clé qui change déclenche un avertissement explicite, avec l'ancienne empreinte. Aucune clé n'est acceptée en silence (la v1 utilisait `AutoAddPolicy`).
+- Les empreintes sont conservées dans le fichier `known_hosts` de l'application (celui de `~/.ssh` est lu en plus). Réglage possible pour écrire dans `~/.ssh/known_hosts`.
+- Pour un SSH qui passe par Cloudflare, l'identité vérifiée est celle du vrai serveur, pas `127.0.0.1` avec un port local variable.
+- Déploiement de clé publique par SFTP : lecture d'`authorized_keys`, ajout seulement si la clé manque, droits 700/600, relecture de contrôle.
+- Les redirections n'écoutent que sur `127.0.0.1`.
+
+## Téléchargement de cloudflared
+
+- Source : l'API des releases GitHub de Cloudflare.
+- Le condensat SHA-256 publié pour le fichier (champ `digest`) est vérifié. Sans condensat, le téléchargement est refusé.
+- Sous Windows, la signature Authenticode doit être valide et émise pour `O="Cloudflare, Inc."`.
+- Le binaire est installé sous un nom versionné, puis sélectionné dans les paramètres.
+
+## Canal local et instance unique
+
+- La ligne de commande parle à l'application par un tube nommé (socket Unix hors Windows), authentifié par une clé aléatoire stockée dans le dossier de données (`ipc.key`).
+- Le canal n'accepte que les commandes `show`, `list`, `status`, `connect`, `disconnect` et `quit`.
+
+## Côté serveur
+
+Voir [SERVEUR.md](SERVEUR.md). Le helper Docker ne donne que les noms et ports des conteneurs, par une règle sudoers limitée à ce seul programme.
+
+## Limites connues
+
+- Sans trousseau système (Linux sans Secret Service), les secrets sont gardés dans un fichier chiffré par phrase de passe, ou seulement en mémoire.
+- Une personne qui a ouvert votre session Windows peut lire vos secrets dans le Gestionnaire d'identifiants, comme pour tout logiciel.
+- Les exécutables ne sont signés que si un certificat de signature est configuré dans la CI.
+
+## Signaler une vulnérabilité
+
+Ouvrez une issue sans détails exploitables en demandant un contact privé, ou utilisez les
+[avis de sécurité GitHub](https://github.com/t3t4rd-3652/Cloudflared-Manage-Access/security/advisories/new).

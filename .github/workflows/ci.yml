@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint et typage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pyright
+
+  tests:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Bibliothèques système de Qt (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libgl1
+      - run: uv sync --locked
+      - name: Tests et couverture
+        run: >
+          uv run pytest -m "not real_cloudflared and not network"
+          -W ignore::pytest.PytestUnraisableExceptionWarning
+          --cov=cma --cov-report=term --cov-report=xml --cov-fail-under=80
+      - name: Couverture du cœur (90 % minimum)
+        run: uv run coverage report --include="src/cma/core/*" --fail-under=90
+
+  server-scripts:
+    name: Scripts serveur
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck -x -S style server/ports-report server/install.sh tests/server/run-in-docker.sh tests/server/*.bats
+      - name: bats (Debian/mawk, Ubuntu, Alpine/busybox)
+        run: bash tests/server/run-in-docker.sh

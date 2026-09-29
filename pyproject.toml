@@ -1,0 +1,138 @@
+[project]
+name = "cloudflared-manage-access"
+dynamic = ["version"]
+description = "Gestionnaire graphique des accès Cloudflare Access (cloudflared access tcp) et des redirections de ports SSH."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE.md"]
+requires-python = ">=3.13"
+authors = [{ name = "t3t4rd-3652" }]
+keywords = ["cloudflare", "cloudflared", "access", "ssh", "tunnel", "port-forwarding"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Win32 (MS Windows)",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: System Administrators",
+    "Natural Language :: French",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Networking",
+]
+dependencies = [
+    "PySide6-Essentials>=6.8",
+    "asyncssh>=2.17",
+    "bcrypt>=4.2",
+    "keyring>=25",
+    "pydantic>=2.8",
+]
+
+[project.urls]
+Homepage = "https://github.com/t3t4rd-3652/Cloudflared-Manage-Access"
+Issues = "https://github.com/t3t4rd-3652/Cloudflared-Manage-Access/issues"
+
+[project.scripts]
+cma = "cma.__main__:main"
+
+[project.gui-scripts]
+cma-gui = "cma.__main__:gui_main"
+
+[dependency-groups]
+bench = [
+    "paramiko>=3.4",
+]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-qt>=4.4",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+    "pyright[nodejs]>=1.1.390",
+    "pyinstaller>=6.11",
+    "pre-commit>=4.6.2",
+]
+
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/cma/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cma"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"server/ports-report" = "cma/resources/ports-report"
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py313"
+src = ["src", "tests"]
+extend-exclude = ["CloudflaredManageAccess.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "PIE", "SIM", "RUF", "ASYNC", "S", "PT", "RET"]
+ignore = [
+    "E501",    # longueur gérée par le formateur
+    "RUF001",  # typographie française (apostrophes, espaces insécables)
+    "RUF002",
+    "RUF003",
+    "S603",    # subprocess sans shell : c'est justement le but
+    "S607",
+    "S311",
+    "S110",
+    "RET504",
+    "S101",    # assert : rétrécissement de types
+    "S104",    # comparaisons à 0.0.0.0, pas des écoutes
+    "ASYNC109",
+    "ASYNC110",  # sondages d'état volontaires
+    "S310",      # urlopen sur une URL https fixe
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S108", "PT011", "PT018", "B017", "ASYNC110", "RUF059"]
+"src/cma/core/models.py" = ["S105"]
+"scripts/**" = ["S101", "S105", "S507"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["cma", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+qt_api = "pyside6"
+addopts = "-ra"
+markers = [
+    "real_cloudflared: nécessite un vrai binaire cloudflared dans le PATH (ignoré en CI)",
+    "network: nécessite un accès Internet",
+]
+
+[tool.coverage.run]
+source = ["cma"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
+[tool.pyright]
+include = ["src"]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.13"
+typeCheckingMode = "standard"
+strict = ["src/cma/core"]
+reportMissingTypeStubs = false
+reportUnnecessaryIsInstance = false

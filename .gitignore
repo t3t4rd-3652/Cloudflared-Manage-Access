@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# Données locales éventuelles (mode portable lancé depuis le dépôt)
+data/
+
+# Éditeurs et système
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

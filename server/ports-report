@@ -1,0 +1,256 @@
+#!/usr/bin/env bash
+# ports-report : liste les ports TCP en écoute sur ce serveur Linux.
+# Utilisé par Cloudflared Manage Access (CMA). Documentation : docs/SERVEUR.md.
+#
+#   ports-report              sortie texte, format historique compatible avec CMA 1.x
+#   ports-report --json       une ligne JSON par port, format utilisé par CMA 2.x
+#   ports-report --version    version du script
+#
+# CMA 2.x n'a pas besoin que ce script soit installé : il l'envoie par l'entrée standard
+# (bash -s -- --json). L'installation (server/install.sh) sert aux anciennes versions et
+# au helper qui donne les noms des conteneurs Docker sans droits docker.
+#
+# Requis : bash >= 4.3, ss (iproute2), awk POSIX (mawk, gawk ou busybox).
+# Facultatif : getent (noms de services), curl (sonde HTTP/HTTPS), docker (noms de conteneurs).
+set -Eeuo pipefail
+
+VERSION="2.0.0"
+DEBUG=${DEBUG:-0}
+[[ "$DEBUG" = "1" ]] && set -x
+trap 'echo "ports-report : erreur à la ligne $LINENO" >&2' ERR
+
+PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export PATH
+LC_ALL=C
+export LC_ALL
+
+HELPER="/usr/local/sbin/ports-report-docker-ps"
+FORMAT="text"
+PROBE_WEB=1
+USE_DEFAULT_EXCLUDES=1
+NPROC=${NPROC:-32}
+EXTRA_EXCLUDES="${PORTS_REPORT_EXCLUDE:-}"
+# 5355 LLMNR, 5357 WSD, 20241 métriques de cloudflared, 45475 exclusion historique.
+DEFAULT_EXCLUDES="5355 5357 20241 45475"
+
+usage() {
+  cat <<'USAGE'
+Usage : ports-report [--json] [--no-web] [--exclude PORT[,PORT...]] [--all] [--version]
+
+  --json       une ligne JSON par port (format de CMA 2.x)
+  --no-web     ne pas sonder les ports en HTTP et HTTPS
+  --exclude    ports supplémentaires à ignorer, séparés par des virgules
+               (aussi possible avec la variable PORTS_REPORT_EXCLUDE)
+  --all        ne pas appliquer les exclusions par défaut (5355, 5357, 20241, 45475)
+  --version    afficher la version
+USAGE
+}
+
+while (($#)); do
+  case "$1" in
+    --json) FORMAT="json" ;;
+    --no-web) PROBE_WEB=0 ;;
+    --exclude) shift; EXTRA_EXCLUDES="${EXTRA_EXCLUDES},${1:-}" ;;
+    --exclude=*) EXTRA_EXCLUDES="${EXTRA_EXCLUDES},${1#*=}" ;;
+    --all) USE_DEFAULT_EXCLUDES=0 ;;
+    --version) echo "ports-report ${VERSION}"; exit 0 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "ports-report : option inconnue : $1" >&2; usage >&2; exit 2 ;;
+  esac
+  shift
+done
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+if ! have ss; then echo "ports-report : 'ss' introuvable (paquet iproute2)." >&2; exit 1; fi
+if ! have awk; then echo "ports-report : 'awk' introuvable." >&2; exit 1; fi
+if ! have mktemp; then echo "ports-report : 'mktemp' introuvable." >&2; exit 1; fi
+if ! have curl; then PROBE_WEB=0; fi
+
+# --- Ports exclus ------------------------------------------------------------
+declare -A EXCLUDED=()
+if ((USE_DEFAULT_EXCLUDES)); then
+  for p in $DEFAULT_EXCLUDES; do EXCLUDED[$p]=1; done
+fi
+IFS=', ' read -r -a extra <<< "${EXTRA_EXCLUDES}"
+for p in ${extra[@]+"${extra[@]}"}; do
+  if [[ "$p" =~ ^[0-9]+$ ]]; then EXCLUDED[$p]=1; fi
+done
+
+# Noms de services que getent ne connaît pas.
+declare -A OVERRIDES=([5201]="iperf3")
+
+# --- Conteneurs Docker (lecture seule) ----------------------------------------
+# Ordre : helper root autorisé par sudoers, sinon docker directement, sinon rien.
+DOCKER_SOURCE="none"
+DOCKER_LINES=""
+if [[ -x "$HELPER" ]] && have sudo && DOCKER_LINES="$(sudo -n "$HELPER" </dev/null 2>/dev/null)"; then
+  DOCKER_SOURCE="helper"
+elif have docker && DOCKER_LINES="$(docker ps --format '{{.Names}} {{.Ports}}' </dev/null 2>/dev/null)"; then
+  DOCKER_SOURCE="docker"
+elif have docker; then
+  DOCKER_SOURCE="denied"
+  DOCKER_LINES=""
+fi
+
+declare -A CONTAINERS=()
+PUBLISHED_RE=':([0-9]+)(-([0-9]+))?->[0-9]+(-[0-9]+)?/tcp'
+while IFS= read -r line; do
+  [[ -n "$line" ]] || continue
+  name="${line%% *}"
+  ports="${line#* }"
+  [[ "$ports" != "$line" ]] || continue
+  IFS=, read -r -a items <<< "$ports"
+  for item in ${items[@]+"${items[@]}"}; do
+    if [[ "$item" =~ $PUBLISHED_RE ]]; then
+      lo="${BASH_REMATCH[1]}"
+      hi="${BASH_REMATCH[3]:-$lo}"
+      for ((p = lo; p <= hi; p++)); do
+        if [[ -z "${CONTAINERS[$p]:-}" ]]; then
+          CONTAINERS[$p]="$name"
+        elif [[ ",${CONTAINERS[$p]}," != *",$name,"* ]]; then
+          CONTAINERS[$p]="${CONTAINERS[$p]},$name"
+        fi
+      done
+    fi
+  done
+done <<< "$DOCKER_LINES"
+
+# --- Ports en écoute ------------------------------------------------------------
+# awk POSIX uniquement (pas de match() à trois arguments) : fonctionne avec mawk et busybox.
+LISTENERS="$(ss -tlnH 2>/dev/null || ss -tln 2>/dev/null || true)"
+
+declare -A BINDS=()
+declare -a ORDER=()
+while read -r port host; do
+  [[ -n "${port:-}" ]] || continue
+  if [[ -n "${EXCLUDED[$port]:-}" ]]; then continue; fi
+  if [[ -z "${BINDS[$port]:-}" ]]; then
+    ORDER+=("$port")
+    BINDS[$port]="$host"
+  elif [[ " ${BINDS[$port]} " != *" $host "* ]]; then
+    BINDS[$port]="${BINDS[$port]} $host"
+  fi
+done < <(printf '%s\n' "$LISTENERS" | awk '
+  $1 == "LISTEN" {
+    addr = $4
+    n = split(addr, parts, ":")
+    port = parts[n]
+    if (port !~ /^[0-9]+$/) next
+    host = substr(addr, 1, length(addr) - length(port) - 1)
+    gsub(/^\[|\]$/, "", host)
+    sub(/%.*$/, "", host)
+    if (host == "*" || host == "") host = "0.0.0.0"
+    print port, host
+  }')
+
+# Adresse à sonder, et que CMA vise pour la redirection.
+probe_host() {
+  local binds="$1" b
+  for b in $binds; do [[ "$b" == "0.0.0.0" ]] && { echo "127.0.0.1"; return 0; }; done
+  for b in $binds; do [[ "$b" == "::" ]] && { echo "[::1]"; return 0; }; done
+  for b in $binds; do [[ "$b" != *:* ]] && { echo "$b"; return 0; }; done
+  local -a list
+  read -r -a list <<< "$binds"
+  echo "[${list[0]}]"
+}
+
+# Affiche "schéma code url" (ex. "https 200 https://127.0.0.1:8443/") ou "- - -".
+check_web() {
+  local host="$1" port="$2" code out eff
+  code="$(curl -k -s -o /dev/null -w '%{http_code}' --connect-timeout 1 --max-time 2 \
+          "https://${host}:${port}/" </dev/null 2>/dev/null || true)"
+  if [[ -n "$code" && "$code" != "000" ]]; then
+    echo "https ${code} https://${host}:${port}/"
+    return 0
+  fi
+  out="$(curl -k -s -o /dev/null -w '%{http_code} %{url_effective}' --connect-timeout 1 --max-time 2 \
+         --max-redirs 3 -L "http://${host}:${port}/" </dev/null 2>/dev/null || true)"
+  code="${out%% *}"
+  eff="${out#* }"
+  if [[ -n "$code" && "$code" != "000" ]]; then
+    if [[ "$eff" == https://* ]]; then echo "https ${code} ${eff}"; else echo "http ${code} ${eff}"; fi
+    return 0
+  fi
+  echo "- - -"
+}
+
+json_str() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  printf '"%s"' "$s"
+}
+
+json_or_null() {
+  if [[ -z "$1" || "$1" == "-" ]]; then printf 'null'; else json_str "$1"; fi
+}
+
+report_line() {
+  local port="$1" binds="$2" service="$3" container="$4" scheme="$5" code="$6" url="$7"
+  if [[ "$FORMAT" == "json" ]]; then
+    local bind_json="" b
+    for b in $binds; do bind_json+="${bind_json:+,}$(json_str "$b")"; done
+    local code_json="null"
+    [[ "$code" =~ ^[0-9]+$ ]] && code_json="$code"
+    printf '{"v":2,"proto":"tcp","port":%s,"bind":[%s],"service":%s,"container":%s,"scheme":%s,"http_code":%s,"final_url":%s}\n' \
+      "$port" "$bind_json" "$(json_or_null "$service")" "$(json_or_null "$container")" \
+      "$(json_or_null "$scheme")" "$code_json" "$(json_or_null "$url")"
+  else
+    local web="-"
+    if [[ "$scheme" != "-" ]]; then web="$(printf '%s' "$scheme" | tr '[:lower:]' '[:upper:]') ${code}"; fi
+    if [[ "$container" != "-" ]]; then
+      printf 'tcp %s %s %s\n' "$port" "$container" "$web"
+    elif [[ "$service" != "-" ]]; then
+      printf 'tcp %s %s - %s\n' "$port" "$service" "$web"
+    else
+      printf 'tcp %s - %s\n' "$port" "$web"
+    fi
+  fi
+}
+
+WORKDIR="$(mktemp -d)"
+cleanup() { rm -rf "$WORKDIR"; }
+trap cleanup EXIT
+
+jobgate() {
+  while (( $(jobs -rp | wc -l) >= NPROC )); do
+    wait -n 2>/dev/null || sleep 0.05
+  done
+}
+
+if [[ "$FORMAT" == "json" ]]; then
+  printf '{"v":2,"meta":{"version":%s,"docker":%s,"web_probe":%s}}\n' \
+    "$(json_str "$VERSION")" "$(json_str "$DOCKER_SOURCE")" "$( ((PROBE_WEB)) && echo true || echo false )"
+fi
+
+for port in ${ORDER[@]+"${ORDER[@]}"}; do
+  binds="${BINDS[$port]}"
+  service="${OVERRIDES[$port]:-}"
+  if [[ -z "$service" ]] && have getent; then
+    service="$({ getent services "${port}/tcp" </dev/null 2>/dev/null || true; } | awk 'NR == 1 { print $1 }')"
+  fi
+  service="${service:--}"
+  container="${CONTAINERS[$port]:--}"
+  host="$(probe_host "$binds")"
+
+  jobgate
+  (
+    trap - EXIT ERR
+    set +e
+    if ((PROBE_WEB)); then
+      read -r scheme code url <<< "$(check_web "$host" "$port")"
+    else
+      scheme="-"; code="-"; url="-"
+    fi
+    report_line "$port" "$binds" "$service" "$container" "$scheme" "$code" "$url" \
+      > "$WORKDIR/$(printf '%05d' "$port")"
+  ) &
+done
+wait
+
+shopt -s nullglob
+results=("$WORKDIR"/*)
+if ((${#results[@]})); then
+  cat "${results[@]}"
+fi
