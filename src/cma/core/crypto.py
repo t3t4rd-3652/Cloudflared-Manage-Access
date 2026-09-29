@@ -11,9 +11,7 @@ import json
 import os
 from typing import Any
 
-from cryptography.exceptions import InvalidTag
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+# cryptography est importé à l'usage : il coûte plusieurs dizaines de millisecondes au démarrage.
 
 _ASSOCIATED_DATA = b"cloudflared-manage-access/v2"
 _SCRYPT_N = 2**15
@@ -34,6 +32,8 @@ def _unb64(text: str) -> bytes:
 
 
 def _derive(passphrase: str, salt: bytes, n: int, r: int, p: int) -> bytes:
+    from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+
     return Scrypt(salt=salt, length=32, n=n, r=r, p=p).derive(passphrase.encode("utf-8"))
 
 
@@ -42,6 +42,8 @@ def encrypt_json(payload: Any, passphrase: str) -> dict[str, Any]:
         raise ValueError("phrase de passe vide")
     salt = os.urandom(16)
     nonce = os.urandom(12)
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
     key = _derive(passphrase, salt, _SCRYPT_N, _SCRYPT_R, _SCRYPT_P)
     data = AESGCM(key).encrypt(
         nonce, json.dumps(payload, ensure_ascii=False).encode("utf-8"), _ASSOCIATED_DATA
@@ -59,6 +61,9 @@ def encrypt_json(payload: Any, passphrase: str) -> dict[str, Any]:
 
 
 def decrypt_json(blob: dict[str, Any], passphrase: str) -> Any:
+    from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
     try:
         if blob.get("cipher") != "aes-256-gcm" or blob.get("kdf") != "scrypt":
             raise WrongPassphraseError("format de chiffrement inconnu")

@@ -38,14 +38,18 @@ Deux règles structurent le code :
 | `src/cma/core/transfer.py` | Import et export, plan de conflits, secrets chiffrés. |
 | `src/cma/core/sessions.py` | Base des sessions : états, journal circulaire, délai de reconnexion. |
 | `src/cma/core/cloudflared/` | Commande sans shell, analyse des journaux, session, binaire et téléchargement vérifié. |
-| `src/cma/core/ssh/` | Connexions asyncssh, clés d'hôte, clés, redirections, découverte de ports. |
+| `src/cma/core/ssh/` | Connexions asyncssh, clés d'hôte, clés, redirections, découverte de ports (Linux et Windows). |
+| `src/cma/core/cfapi.py` | Client de l'API Cloudflare v4 : comptes, zones, tunnels, DNS, Access, service tokens. |
+| `src/cma/core/cfadmin.py` | Relie l'API à la configuration et au coffre : import de profils, tokens, publication. |
+| `src/cma/core/updates.py` | Nouvelles versions de CMA : téléchargement vérifié de l'installeur et installation. |
 | `src/cma/core/manager.py` | Orchestrateur : profils vers sessions, actions exposées à l'interface et à la CLI. |
 | `src/cma/core/engine.py` | Boucle asyncio dans un thread. |
 | `src/cma/core/instance.py` | Verrou d'instance unique et canal de commande local. |
 | `src/cma/platform/` | Job Object Windows, démarrage automatique, lanceurs (terminal, RDP, Compass). |
 | `src/cma/ui/` | Interface : fenêtre, vues, boîtes de dialogue, thème, zone de notification. |
 | `src/cma/i18n.py`, `i18n_en.py` | Traduction (source en français, catalogue anglais vérifié par test). |
-| `server/` | `ports-report` (source unique) et son installeur. |
+| `server/` | `ports-report` (Linux), `ports-report.ps1` (Windows) et l'installeur du helper Docker. |
+| `src/cma/ui/a11y.py` | Noms accessibles déduits des formulaires, et contrôle automatique en test. |
 | `packaging/` | Spec PyInstaller, installeur Inno Setup, script de build et de signature. |
 
 ## Cycle de vie d'une session cloudflared
@@ -82,6 +86,12 @@ mémoire le temps de la session.
 Chaînage par Cloudflare : `SshConnectionManager` demande au `SessionManager` d'ouvrir le tunnel du profil Cloudflare
 (`_cloudflare_bridge`), attend son écoute, puis se connecte à `127.0.0.1:<port>` avec l'identité de clé d'hôte du vrai serveur.
 
+## Démarrage
+
+asyncssh et cryptography coûtent près de 400 ms à l'import et ne servent pas avant la première connexion SSH
+ou le premier export chiffré. Les modules SSH passent donc par un proxy (`cma.core.ssh._lazy`) qui les importe
+au premier usage, et l'application les précharge dans un thread 300 ms après l'affichage de la fenêtre.
+
 ## Threads
 
 | Thread | Contenu |
@@ -89,6 +99,7 @@ Chaînage par Cloudflare : `SshConnectionManager` demande au `SessionManager` d'
 | Principal | Qt : fenêtres, modèles, boîtes de dialogue |
 | `cma-engine` | Boucle asyncio : sessions, SSH, sous-processus, téléchargements (`asyncio.to_thread`) |
 | `cma-ipc` | Canal local : reçoit les commandes de `cma` et les exécute dans le moteur |
+| `cma-warmup` | Préchargement d'asyncssh après l'affichage de la fenêtre |
 
 Les questions du moteur (mot de passe, clé d'hôte) passent par `GuiPrompter` : un signal Qt ouvre la boîte de dialogue
 dans le thread principal, la réponse revient au moteur par `call_soon_threadsafe`.

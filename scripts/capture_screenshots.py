@@ -177,6 +177,41 @@ def demo_sessions(ctx: GuiContext) -> list[SessionInfo]:
     ]
 
 
+def show_demo_cloud(view) -> None:
+    """Compte Cloudflare fictif : deux tunnels, leurs noms d'hôte, applications Access et tokens."""
+    from cma.core.cfadmin import Overview, TunnelView
+    from cma.core.cfapi import AccessApp, Account, IngressRule, RemoteServiceToken, Tunnel, Zone
+
+    account = Account("acc", "Exemple SAS")
+    overview = Overview(
+        account=account,
+        tunnels=[
+            TunnelView(
+                Tunnel("t1", "bureau", "healthy"),
+                [
+                    IngressRule("mongodb.exemple.fr", "tcp://localhost:27017"),
+                    IngressRule("ssh.exemple.fr", "ssh://localhost:22"),
+                    IngressRule("rdp.exemple.fr", "rdp://10.0.0.12:3389"),
+                ],
+            ),
+            TunnelView(
+                Tunnel("t2", "labo", "degraded"),
+                [IngressRule("grafana.lab.exemple.fr", "http://localhost:3000")],
+            ),
+        ],
+        apps=[
+            AccessApp("a1", "MongoDB production", "mongodb.exemple.fr", "self_hosted"),
+            AccessApp("a2", "SSH", "ssh.exemple.fr", "self_hosted"),
+        ],
+        tokens=[RemoteServiceToken("r1", "Production", "8f3c2a1b.access", "2027-09-29T00:00:00Z")],
+        zones=[Zone("z1", "exemple.fr"), Zone("z2", "lab.exemple.fr")],
+    )
+    view.stack.setCurrentIndex(1)
+    view.account.clear()
+    view.account.addItem(account.name, account)
+    view._fill(overview)
+
+
 def main() -> int:
     output = Path(sys.argv[1] if len(sys.argv) > 1 else "docs/captures")
     output.mkdir(parents=True, exist_ok=True)
@@ -240,7 +275,7 @@ def main() -> int:
         window.set_cloudflared_status("cloudflared 2026.9.3")
         window.settings.data_dir.setText(r"C:\Users\<utilisateur>\AppData\Roaming\CloudflaredManager")
         suffix = "sombre" if theme_name == Theme.DARK else "clair"
-        for key in ("dashboard", "profiles", "tokens", "ssh", "logs", "settings"):
+        for key in ("dashboard", "profiles", "tokens", "ssh", "cloud", "logs", "settings"):
             window.show_view(key)
             if key == "profiles":
                 window.profiles.select_profile(
@@ -276,6 +311,8 @@ def main() -> int:
                     datetime.now() - timedelta(minutes=2),
                 )
                 window.ssh.select_profile(nas.id)
+            if key == "cloud":
+                show_demo_cloud(window.cloud)
             for _ in range(5):
                 app.processEvents()
             window.grab().save(str(output / f"{key}-{suffix}.png"))

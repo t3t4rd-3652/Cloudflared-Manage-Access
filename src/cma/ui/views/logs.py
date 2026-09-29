@@ -149,9 +149,11 @@ class LogsView(QWidget):
         layout.addWidget(title(tr("Journaux")))
         toolbar = QHBoxLayout()
         self.source = QComboBox()
+        self.source.setAccessibleName(tr("Filtrer par session"))
         self.source.addItem(tr("Toutes les sources"), None)
         self.source.addItem("CMA", "cma")
         self.level = QComboBox()
+        self.level.setAccessibleName(tr("Filtrer par niveau"))
         for text, value in (
             (tr("Tout, y compris débogage"), 0),
             (tr("Info et plus"), 1),
@@ -173,6 +175,7 @@ class LogsView(QWidget):
         self.model = LogModel()
         self.proxy = LogFilter(self.model)
         self.table = QTableView()
+        self.table.setAccessibleName(tr("Journal"))
         self.table.setModel(self.proxy)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)

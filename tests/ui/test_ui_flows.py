@@ -130,6 +130,8 @@ def test_theme_switch_and_navigation_shortcuts(qtbot, gui):
     ctx.theme.set_theme(Theme.DARK)
     assert ctx.theme.tokens.dark
     qtbot.keyClick(window, Qt.Key.Key_5, Qt.KeyboardModifier.ControlModifier)
+    assert window.current_view_key() == "cloud"
+    qtbot.keyClick(window, Qt.Key.Key_6, Qt.KeyboardModifier.ControlModifier)
     assert window.current_view_key() == "logs"
     qtbot.keyClick(window, Qt.Key.Key_1, Qt.KeyboardModifier.ControlModifier)
     assert window.current_view_key() == "dashboard"

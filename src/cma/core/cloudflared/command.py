@@ -57,6 +57,15 @@ def _base_env(base_env: Mapping[str, str] | None) -> dict[str, str]:
     return env
 
 
+def _with_proxy(env: dict[str, str], proxy: str | None) -> dict[str, str]:
+    """Le proxy du profil remplace celui du système pour toutes les commandes qui sortent sur le réseau."""
+    if proxy:
+        proxy_url = normalize_proxy_url(proxy)
+        for name in PROXY_ENV_VARS:
+            env[name] = proxy_url
+    return env
+
+
 def build_access_tcp(
     binary: str | Path,
     profile: CloudflareProfile,
@@ -90,26 +99,36 @@ def build_access_tcp(
             raise CommandError(tr("Le service token est incomplet (ID ou secret manquant)."))
         env["TUNNEL_SERVICE_TOKEN_ID"] = client_id
         env["TUNNEL_SERVICE_TOKEN_SECRET"] = client_secret
-    if profile.proxy:
-        proxy_url = normalize_proxy_url(profile.proxy)
-        for name in PROXY_ENV_VARS:
-            env[name] = proxy_url
-    return CommandSpec(tuple(args), env)
+    return CommandSpec(tuple(args), _with_proxy(env, profile.proxy))
 
 
 def build_access_login(
-    binary: str | Path, hostname: str, *, base_env: Mapping[str, str] | None = None
+    binary: str | Path,
+    hostname: str,
+    *,
+    proxy: str | None = None,
+    base_env: Mapping[str, str] | None = None,
 ) -> CommandSpec:
     """`cloudflared access login` : authentification Access dans le navigateur, jeton mis en cache par cloudflared."""
-    return CommandSpec((str(binary), "access", "login", f"https://{hostname}"), _base_env(base_env))
+    return CommandSpec(
+        (str(binary), "access", "login", f"https://{hostname}"), _with_proxy(_base_env(base_env), proxy)
+    )
 
 
 def build_access_token(
-    binary: str | Path, hostname: str, *, base_env: Mapping[str, str] | None = None
+    binary: str | Path,
+    hostname: str,
+    *,
+    proxy: str | None = None,
+    base_env: Mapping[str, str] | None = None,
 ) -> CommandSpec:
     """`cloudflared access token` : affiche le jeton en cache, ou échoue s'il n'y en a pas."""
-    return CommandSpec((str(binary), "access", "token", f"-app=https://{hostname}"), _base_env(base_env))
+    return CommandSpec(
+        (str(binary), "access", "token", f"-app=https://{hostname}"), _with_proxy(_base_env(base_env), proxy)
+    )
 
 
-def build_ssh_config(binary: str | Path, hostname: str) -> CommandSpec:
-    return CommandSpec((str(binary), "access", "ssh-config", "--hostname", hostname), _base_env(None))
+def build_ssh_config(binary: str | Path, hostname: str, *, proxy: str | None = None) -> CommandSpec:
+    return CommandSpec(
+        (str(binary), "access", "ssh-config", "--hostname", hostname), _with_proxy(_base_env(None), proxy)
+    )

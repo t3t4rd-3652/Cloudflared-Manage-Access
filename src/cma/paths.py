@@ -125,3 +125,15 @@ def ports_report_script() -> str:
         if candidate.is_file():
             return candidate.read_text(encoding="utf-8").replace("\r\n", "\n")
     raise FileNotFoundError("ports-report introuvable dans les ressources de l'application")
+
+
+def ports_report_windows_script() -> str:
+    """Contenu de ports-report.ps1, la version Windows (PowerShell) de ports-report."""
+    candidates = [
+        resource_path("ports-report.ps1"),
+        Path(__file__).resolve().parents[2] / "server" / "ports-report.ps1",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.read_text(encoding="utf-8-sig").replace("\r\n", "\n")
+    raise FileNotFoundError("ports-report.ps1 introuvable dans les ressources de l'application")

@@ -52,6 +52,14 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\CloudflaredManageAccess.exe"; Description: "{cm:LaunchProgram,Cloudflared Manage Access}"; Flags: nowait postinstall skipifsilent
+; Mise à jour automatique lancée par CMA (/SILENT /RELAUNCH=1) : relance de l'application.
+Filename: "{app}\CloudflaredManageAccess.exe"; Flags: nowait; Check: ShouldRelaunch
 
 [UninstallRun]
 Filename: "{app}\cma.exe"; Parameters: "quit"; Flags: runhidden; RunOnceId: "QuitCMA"
+
+[Code]
+function ShouldRelaunch: Boolean;
+begin
+  Result := ExpandConstant('{param:relaunch|0}') = '1';
+end;

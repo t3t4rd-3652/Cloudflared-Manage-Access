@@ -15,9 +15,12 @@ import sys
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import asyncssh
+if TYPE_CHECKING:
+    import asyncssh
+else:
+    from cma.core.ssh._lazy import asyncssh
 
 from cma.i18n import tr
 

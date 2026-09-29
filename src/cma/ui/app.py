@@ -25,9 +25,11 @@ from cma.core.secrets import (
     open_secret_store,
     system_keyring,
 )
+from cma.core.ssh._lazy import warm_up as warm_up_ssh
 from cma.i18n import set_language, tr
 from cma.logging_setup import attach_bus, install_excepthooks, setup_logging
 from cma.paths import AppPaths, resolve_paths
+from cma.ui.a11y import install as install_accessibility
 from cma.ui.bridge import EngineBridge, GuiPrompter, TaskRunner
 from cma.ui.context import GuiContext
 from cma.ui.icons import app_icon
@@ -104,6 +106,7 @@ def run_gui(args: argparse.Namespace) -> int:
     app.setWindowIcon(app_icon())
     app.setQuitOnLastWindowClosed(False)
 
+    accessibility = install_accessibility(app)  # noqa: F841 (garde le filtre en vie)
     theme = ThemeManager(app)
     secrets = _open_secret_store(paths)
     prompter = GuiPrompter()
@@ -197,6 +200,8 @@ def run_gui(args: argparse.Namespace) -> int:
         window.settings.check_cma_update(quiet=True)
     detector = FreezeDetector() if debug else None
     log.info("Interface prête en %.0f ms", (time.monotonic() - started) * 1000)
+    # asyncssh n'est pas importé au démarrage : on le précharge une fois la fenêtre affichée.
+    QTimer.singleShot(300, warm_up_ssh)
 
     exit_code = app.exec()
 

@@ -13,14 +13,19 @@ La v1.4.1 corrigée reste disponible à la racine, et la v2.0.0 vit dans `src/cm
 
 | Indicateur | v1.4.0 | v2.0.0 mesurée | Cible |
 |---|---|---|---|
-| Délai avant fenêtre utilisable | 4,3 à 5,4 s (exe onefile) | ≈ 1,1 s depuis les sources, ≈ 1,3 s en exe | < 1,5 s |
+| Délai avant fenêtre utilisable | 4,3 à 5,4 s (exe onefile) | ≈ 0,87 s depuis les sources, ≈ 0,75 s en exe à chaud (asyncssh chargé après l'affichage) | < 1,5 s |
 | Surcoût par connexion cloudflared | ≈ 0,9 s de PowerShell + 1 s d'attente | aucun processus intermédiaire | aucun |
 | Débit d'un tunnel SSH (banc local) | 6,2 Mio/s | 67,5 Mio/s | limité par le réseau |
-| Distribution | exe onefile de 25,2 Mo | dossier de 95,4 Mo, zip portable de 46,7 Mo, installeur de 30 Mo | taille mesurée |
+| Distribution | exe onefile de 25,2 Mo | dossier de 85,4 Mo, zip portable de 39,6 Mo, installeur de 26,5 Mo | taille mesurée |
 | RAM au repos de l'application | non mesurée | 140 Mo en mémoire de travail, 90 Mo privés | — |
-| Tests automatisés | 0 | 222 tests Python, 20 tests bats par image (3 images) | — |
-| Couverture | 0 % | 87 % au global, 90 % sur `core/` | 80 % et 90 % |
+| Tests automatisés | 0 | 251 tests Python, 20 tests bats par image (3 images) | — |
+| Couverture | 0 % | 89 % au global, 90 % sur `core/` | 80 % et 90 % |
 | Gel de l'interface | plusieurs secondes | aucune entrée-sortie dans le thread de l'interface, détecteur à 50 ms en mode debug | < 50 ms |
+
+Ajouts faits après le plan, à la suite de la revue du 29/09/2026 : vue « Compte Cloudflare » (API : tunnels,
+DNS, Access, service tokens), découverte des ports sur serveurs Windows, mise à jour automatique de la version
+installée, audit d'accessibilité automatisé, proxy du profil pour `access login`, SBOM, manifestes winget, audit
+des dépendances et tests contre le vrai cloudflared en CI.
 
 Écarts assumés par rapport au plan :
 
@@ -30,6 +35,8 @@ La v1.4.1 corrigée reste disponible à la racine, et la v2.0.0 vit dans `src/cm
 - **Signature du code.** Optionnelle : la CI signe seulement si un certificat est fourni en secret.
 - **Rendu haute densité.** Vérifié par captures à 125 %, 150 % et 200 % (`QT_SCALE_FACTOR`), pas sur plusieurs écrans physiques.
 - **Dépendances de la v1.** `requirements-v1.txt` plutôt que `requirements.txt`, pour ne pas le confondre avec la v2.
+- **Nuitka.** Non retenu : le mode onedir de PyInstaller démarre déjà en moins d'une seconde, et Nuitka changerait
+  toute la chaîne de build pour un gain incertain. Les deux exécutables embarquent chacun leur archive Python (4,9 Mo).
 
 ---
 

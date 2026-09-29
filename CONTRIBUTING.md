@@ -31,6 +31,7 @@ La CI exige au moins 80 % de couverture au global et 90 % sur `cma.core`.
 ## Conventions
 
 - Identifiants en anglais. Textes d'interface, docstrings et commentaires en français.
+- Chaque contrôle interactif doit avoir un nom accessible : un libellé de formulaire suffit, sinon `setAccessibleName`. `tests/ui/test_accessibility.py` le vérifie.
 - Tout texte affiché passe par `tr("…")`, avec un texte littéral. Ajoutez sa traduction dans `src/cma/i18n_en.py` : `tests/unit/test_i18n.py` échoue sinon.
 - `cma.core` n'importe jamais Qt. L'interface ne fait aucune entrée-sortie : elle passe par `GuiContext.run`.
 - Aucun secret dans un argument de processus, un journal ou `config.json`.

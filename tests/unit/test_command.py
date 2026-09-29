@@ -98,3 +98,18 @@ def test_login_command():
         "login",
         "https://app.exemple.fr",
     )
+
+
+def test_access_commands_use_the_profile_proxy():
+    from cma.core.cloudflared.command import build_access_token, build_ssh_config
+
+    system = {"HTTPS_PROXY": "http://systeme:8080", "TUNNEL_SERVICE_TOKEN_SECRET": "fuite"}
+    login = build_access_login("cf", "app.exemple.fr", proxy="proxy.corp:3128", base_env=system)
+    assert login.env["HTTPS_PROXY"] == "http://proxy.corp:3128"
+    assert login.env["https_proxy"] == "http://proxy.corp:3128"
+    assert "TUNNEL_SERVICE_TOKEN_SECRET" not in login.env
+    token = build_access_token("cf", "app.exemple.fr", proxy="socks5://p:1080", base_env=system)
+    assert token.env["ALL_PROXY"] == "socks5://p:1080"
+    without = build_access_token("cf", "app.exemple.fr", base_env=system)
+    assert without.env["HTTPS_PROXY"] == "http://systeme:8080"
+    assert build_ssh_config("cf", "h", proxy="p:1").env["HTTP_PROXY"] == "http://p:1"

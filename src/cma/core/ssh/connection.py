@@ -14,9 +14,12 @@ import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import asyncssh
+if TYPE_CHECKING:
+    import asyncssh
+else:
+    from cma.core.ssh._lazy import asyncssh
 
 from cma.core.events import EventBus, SshConnectionChanged
 from cma.core.models import KnownHostsMode, Settings, SshAuthMode, SshProfile

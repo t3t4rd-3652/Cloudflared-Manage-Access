@@ -19,10 +19,20 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --locked
       - name: Vérifier que le tag correspond à la version
+        id: meta
         shell: bash
         run: |
           version=$(uv run python -c "import cma; print(cma.__version__)")
-          test "v${version}" = "${GITHUB_REF_NAME}" || { echo "Tag ${GITHUB_REF_NAME} ≠ version ${version}"; exit 1; }
+          tag="${GITHUB_REF_NAME#v}"
+          # Un tag de préversion (v2.0.0-rc.1) publie la même version, marquée « préversion ».
+          test "${tag%%-*}" = "${version}" || { echo "Tag ${GITHUB_REF_NAME} ≠ version ${version}"; exit 1; }
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          if [ "${tag}" != "${version}" ]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
+      - name: Audit des dépendances (vulnérabilités connues)
+        shell: bash
+        run: |
+          uv export --locked --no-dev --no-emit-project --format requirements-txt -o requirements-release.txt
+          uvx pip-audit --disable-pip --require-hashes -r requirements-release.txt
       - name: Inno Setup
         run: choco install innosetup --no-progress -y
       - name: Build de l'application (onedir)
@@ -37,17 +47,34 @@ jobs:
         if: ${{ env.SIGNING_CERT_BASE64 != '' }}
         shell: pwsh
         run: ./packaging/sign.ps1 dist/*-setup.exe
+      - name: Inventaire des composants (SBOM CycloneDX)
+        shell: bash
+        run: >
+          uvx --from cyclonedx-bom cyclonedx-py requirements requirements-release.txt
+          --output-format JSON
+          --output-file "dist/CloudflaredManageAccess-${{ steps.meta.outputs.version }}-sbom.cdx.json"
       - name: Empreintes SHA-256
         run: uv run python packaging/build.py --stage sums
+      - name: Manifestes winget
+        shell: bash
+        run: |
+          version="${{ steps.meta.outputs.version }}"
+          installer="CloudflaredManageAccess-${version}-setup.exe"
+          uv run python packaging/winget.py --installer "dist/${installer}" \
+            --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${installer}"
+          (cd dist/winget && 7z a -tzip "../winget-manifests-${version}.zip" manifests > /dev/null)
       - name: Notes de version tirées du CHANGELOG
         shell: bash
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          version="${{ steps.meta.outputs.version }}"
           awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {found=1; next} found && /^## \[/ {exit} found {print}' CHANGELOG.md > notes.md
       - uses: softprops/action-gh-release@v2
         with:
           body_path: notes.md
+          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
           files: |
             dist/CloudflaredManageAccess-*-portable.zip
             dist/CloudflaredManageAccess-*-setup.exe
+            dist/CloudflaredManageAccess-*-sbom.cdx.json
+            dist/winget-manifests-*.zip
             dist/SHA256SUMS.txt

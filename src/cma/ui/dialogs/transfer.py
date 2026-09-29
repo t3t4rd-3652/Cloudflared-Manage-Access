@@ -62,6 +62,7 @@ class ImportDialog(QDialog):
             )
         )
         self.table = QTableWidget(len(plan.items), 4)
+        self.table.setAccessibleName(tr("Éléments à importer"))
         self.table.setHorizontalHeaderLabels([tr("Type"), tr("Nom"), tr("Conflit"), tr("Action")])
         self.table.verticalHeader().hide()
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -165,6 +166,7 @@ class ExportDialog(QDialog):
             )
         )
         self.tree = QTreeWidget()
+        self.tree.setAccessibleName(tr("Éléments à exporter"))
         self.tree.setHeaderHidden(True)
         self._items: list[tuple[QTreeWidgetItem, str, str]] = []
         for kind, heading, entries in (

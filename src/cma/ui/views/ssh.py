@@ -151,6 +151,7 @@ class PortsTab(QWidget):
         self.proxy.setFilterKeyColumn(-1)
         self.filter.textChanged.connect(self.proxy.setFilterFixedString)
         self.table = QTableView()
+        self.table.setAccessibleName(tr("Ports distants"))
         self.table.setModel(self.proxy)
         self.table.setSortingEnabled(True)
         self.table.sortByColumn(0, Qt.SortOrder.AscendingOrder)
@@ -183,6 +184,8 @@ class PortsTab(QWidget):
             if result.mode == "script"
             else "ss"
         )
+        if result.os == "windows":
+            mode += " · Windows"
         self.status.setText(
             tr("{n} port(s) · {mode} · il y a {ago}").format(n=len(result.ports), mode=mode, ago=since(when))
         )
@@ -235,6 +238,7 @@ class ForwardsTab(QWidget):
         toolbar.addStretch()
         layout.addLayout(toolbar)
         self.table = QTableWidget(0, len(headers))
+        self.table.setAccessibleName(tr("Redirections enregistrées"))
         self.table.setHorizontalHeaderLabels(headers)
         self.table.verticalHeader().hide()
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -460,6 +464,7 @@ class SettingsTab(QWidget):
         layout.addLayout(via_form)
         layout.addWidget(title(tr("Notes"), "SectionTitle"))
         self.notes = QPlainTextEdit()
+        self.notes.setAccessibleName(tr("Notes"))
         self.notes.setMaximumHeight(80)
         layout.addWidget(self.notes)
         known = button(tr("Empreintes des serveurs…"), "fingerprint")
@@ -815,6 +820,7 @@ class SshView(QWidget):
                 ("key", tr("Clés SSH…"), self._manage_keys),
                 ("trash", tr("Supprimer (Suppr)"), self.delete),
             ],
+            name=tr("Serveurs SSH"),
         )
         self.list.selected.connect(self._on_select)
         splitter.addWidget(self.list)

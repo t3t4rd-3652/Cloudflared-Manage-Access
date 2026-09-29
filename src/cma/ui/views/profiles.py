@@ -198,6 +198,7 @@ class CloudflareEditor(QWidget):
         form_layout.addWidget(self.auto_reconnect)
         form_layout.addWidget(title(tr("Notes"), "SectionTitle"))
         self.notes = QPlainTextEdit()
+        self.notes.setAccessibleName(tr("Notes"))
         self.notes.setMaximumHeight(80)
         form_layout.addWidget(self.notes)
         form_layout.addStretch()
@@ -526,6 +527,7 @@ class CloudflareProfilesView(QWidget):
                 ("trash", tr("Supprimer (Suppr)"), self.delete),
             ],
             group_actions=self._group_actions,
+            name=tr("Profils Cloudflare"),
         )
         self.list.selected.connect(self._on_select)
         splitter.addWidget(self.list)

@@ -11,8 +11,12 @@ import logging
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import asyncssh
+if TYPE_CHECKING:
+    import asyncssh
+else:
+    from cma.core.ssh._lazy import asyncssh
 
 log = logging.getLogger(__name__)
 

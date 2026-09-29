@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from cma.core.cfadmin import CloudflareAdmin
 from cma.core.cloudflared.binary import detect as detect_cloudflared
 from cma.core.cloudflared.command import (
     CommandError,
@@ -77,6 +78,9 @@ class SessionManager:
             cloudflare_bridge=self._cloudflare_bridge,
             on_password_remembered=self._mark_password_remembered,
         )
+        self.cloudflare = CloudflareAdmin(
+            store, secrets, lambda preferred, avoid: self.suggest_local_port(preferred, avoid=avoid)
+        )
 
     # --- Consultation ------------------------------------------------------------------
 
@@ -98,13 +102,15 @@ class SessionManager:
     def used_local_ports(self) -> set[int]:
         return {s.local_port for s in self.sessions.values() if s.state.active}
 
-    def suggest_local_port(self, preferred: int | None = None, host: str = "127.0.0.1") -> int | None:
+    def suggest_local_port(
+        self, preferred: int | None = None, host: str = "127.0.0.1", avoid: set[int] | None = None
+    ) -> int | None:
         settings = self.store.snapshot().settings
         return find_free_port(
             host,
             preferred=preferred,
             port_range=(settings.auto_port_min, settings.auto_port_max),
-            avoid=self.used_local_ports(),
+            avoid=self.used_local_ports() | (avoid or set()),
         )
 
     def _check_port_conflict(self, port: int, ignore: Session | None = None) -> None:
@@ -252,7 +258,9 @@ class SessionManager:
         binary = self.cloudflared_path()
         if profile is None or binary is None or not profile.hostname:
             raise ManagerError(tr("Profil incomplet ou cloudflared introuvable."))
-        output = await self._run_cloudflared(build_access_login(binary, profile.hostname), timeout=300)
+        output = await self._run_cloudflared(
+            build_access_login(binary, profile.hostname, proxy=profile.proxy), timeout=300
+        )
         return output
 
     async def access_token_valid(self, profile_id: str) -> bool:
@@ -265,7 +273,9 @@ class SessionManager:
         if profile is None or binary is None or not profile.hostname:
             raise ManagerError(tr("Profil incomplet ou cloudflared introuvable."))
         try:
-            output = await self._run_cloudflared(build_access_token(binary, profile.hostname), timeout=30)
+            output = await self._run_cloudflared(
+                build_access_token(binary, profile.hostname, proxy=profile.proxy), timeout=30
+            )
         except ManagerError:
             return False
         return bool(output.strip())
@@ -307,7 +317,9 @@ class SessionManager:
         binary = self.cloudflared_path()
         if profile is None or binary is None or not profile.hostname:
             raise ManagerError(tr("Profil incomplet ou cloudflared introuvable."))
-        return await self._run_cloudflared(build_ssh_config(binary, profile.hostname), timeout=30)
+        return await self._run_cloudflared(
+            build_ssh_config(binary, profile.hostname, proxy=profile.proxy), timeout=30
+        )
 
     async def _run_cloudflared(self, spec: CommandSpec, timeout: float) -> str:
         kwargs: dict[str, Any] = {}

@@ -16,6 +16,7 @@ datas = [
     (str(SRC / "cma" / "resources" / "icons"), "cma/resources/icons"),
     (str(SRC / "cma" / "resources" / "app-icon.svg"), "cma/resources"),
     (str(ROOT / "server" / "ports-report"), "cma/resources"),
+    (str(ROOT / "server" / "ports-report.ps1"), "cma/resources"),
 ]
 
 # Modules Qt jamais utilisés : on les écarte pour alléger la distribution.
@@ -38,6 +39,20 @@ excludes = [
     "PySide6.QtDBus",
     "PySide6.QtUiTools",
     "PySide6.QtNetwork",
+    # Modules standard ou outils jamais utilisés à l'exécution.
+    "setuptools",
+    "pkg_resources",
+    "unittest",
+    "pydoc",
+    "doctest",
+    "bz2",
+    "_bz2",
+    "lzma",
+    "_lzma",
+    "compression.zstd",
+    "_zstd",
+    "http.server",
+    "xmlrpc",
 ]
 
 hiddenimports = ["keyring.backends.Windows", "cma.i18n_en"]
@@ -51,7 +66,7 @@ def analysis(script):
         hiddenimports=hiddenimports,
         excludes=excludes,
         noarchive=False,
-        optimize=0,
+        optimize=2,  # sans docstrings ni assertions : archive plus petite, dans chacun des deux exécutables
     )
 
 

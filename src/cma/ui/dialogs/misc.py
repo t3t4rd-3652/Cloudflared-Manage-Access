@@ -151,6 +151,7 @@ class KnownHostsDialog(QDialog):
         self.file = ctx.manager.ssh.known_hosts()
         layout.addWidget(label(tr("Fichier : {path}").format(path=self.file.path), "muted", selectable=True))
         self.table = QTableWidget(0, 3)
+        self.table.setAccessibleName(tr("Serveurs de confiance"))
         self.table.setHorizontalHeaderLabels([tr("Serveur"), tr("Type"), tr("Empreinte SHA-256")])
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.table.verticalHeader().hide()
@@ -208,6 +209,7 @@ class KeysDialog(QDialog):
             )
         )
         self.table = QTableWidget(0, 5)
+        self.table.setAccessibleName(tr("Clés SSH"))
         self.table.setHorizontalHeaderLabels(
             [tr("Nom"), tr("Type"), tr("Empreinte"), tr("Origine"), tr("Chiffrée")]
         )

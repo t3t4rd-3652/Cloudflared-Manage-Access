@@ -1,23 +1,39 @@
 """Découverte des ports en écoute sur un serveur SSH, sans rien installer dessus.
 
-Le script ports-report est envoyé par l'entrée standard (`bash -s -- --json`) : le serveur exécute
-toujours la version livrée avec l'application. Sans bash, on se rabat sur `ss -tln`.
+Le système distant est d'abord identifié par une commande qui répond différemment selon le shell :
+`echo %OS% $env:OS` affiche « Windows_NT » sous cmd.exe et sous PowerShell, jamais sous un shell Unix.
+
+- Linux : ports-report est envoyé par l'entrée standard (`bash -s -- --json`). Sans bash, repli sur `ss -tln`.
+- Windows (OpenSSH Server) : ports-report.ps1 est envoyé à PowerShell par l'entrée standard.
+
+Dans les deux cas, le serveur exécute toujours la version livrée avec l'application.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import unicodedata
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import asyncssh
+if TYPE_CHECKING:
+    import asyncssh
+else:
+    from cma.core.ssh._lazy import asyncssh
 
 from cma.core.models import guess_service_type
 from cma.i18n import tr
-from cma.paths import ports_report_script
+from cma.paths import ports_report_script, ports_report_windows_script
 
 log = logging.getLogger(__name__)
+
+
+OS_PROBE = "echo %OS% $env:OS"
+# Aucun « $ » : la commande reste identique que le shell par défaut soit cmd.exe ou PowerShell.
+WINDOWS_COMMAND = (
+    'powershell -NoProfile -NonInteractive -Command "& {[Console]::In.ReadToEnd() | Invoke-Expression}"'
+)
 
 
 class DiscoveryError(RuntimeError):
@@ -67,6 +83,7 @@ class DiscoveryResult:
     web_probe: bool = True
     mode: str = "script"
     warnings: list[str] = field(default_factory=list[str])
+    os: str = "linux"
 
 
 def parse_ndjson(text: str) -> DiscoveryResult:
@@ -112,6 +129,7 @@ def parse_ndjson(text: str) -> DiscoveryResult:
         docker=docker,
         web_probe=bool(meta.get("web_probe", True)),
         warnings=warnings,
+        os=str(meta.get("os") or "linux"),
     )
 
 
@@ -135,9 +153,49 @@ def parse_ss(text: str) -> list[RemotePort]:
     return [RemotePort(port=port, bind=tuple(hosts)) for port, hosts in sorted(binds.items())]
 
 
+async def remote_os(conn: asyncssh.SSHClientConnection) -> str:
+    """« windows » ou « unix », d'après la réponse du shell par défaut du compte."""
+    try:
+        result = await conn.run(OS_PROBE, check=False, timeout=20)
+    except asyncssh.TimeoutError:
+        return "unix"
+    return "windows" if "Windows_NT" in str(result.stdout or "") else "unix"
+
+
+def windows_payload(script: str) -> str:
+    """Script PowerShell prêt à passer par l'entrée standard : sans commentaires ni caractère non ASCII.
+
+    PowerShell lit l'entrée standard dans la page de code OEM du serveur : un accent dans un commentaire
+    arriverait déformé. Les lignes de commentaire (PowerShell « # », C# « // ») sont donc retirées.
+    """
+    kept = [line for line in script.splitlines() if not line.lstrip().startswith(("#", "//"))]
+    text = unicodedata.normalize("NFKD", "\n".join(kept) + "\n")
+    return text.encode("ascii", "ignore").decode("ascii")
+
+
+async def _discover_windows(
+    conn: asyncssh.SSHClientConnection, *, timeout: float, probe_web: bool
+) -> DiscoveryResult:
+    script = ("" if probe_web else "$CmaNoWeb = $true\n") + windows_payload(ports_report_windows_script())
+    try:
+        result = await conn.run(WINDOWS_COMMAND, input=script, check=False, timeout=timeout)
+    except asyncssh.TimeoutError as exc:
+        raise DiscoveryError(tr("La découverte des ports a dépassé {s} s.").format(s=int(timeout))) from exc
+    stdout = str(result.stdout or "")
+    if '"v":2' in stdout:
+        return parse_ndjson(stdout)
+    raise DiscoveryError(
+        tr("ports-report.ps1 a échoué (code {code}) : {error}").format(
+            code=result.exit_status, error=str(result.stderr or "").strip()[-500:] or "-"
+        )
+    )
+
+
 async def discover(
     conn: asyncssh.SSHClientConnection, *, timeout: float = 90, probe_web: bool = True
 ) -> DiscoveryResult:
+    if await remote_os(conn) == "windows":
+        return await _discover_windows(conn, timeout=timeout, probe_web=probe_web)
     args = "--json" if probe_web else "--json --no-web"
     script = ports_report_script()
     try:

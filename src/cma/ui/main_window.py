@@ -24,8 +24,10 @@ from cma import APP_NAME, __version__
 from cma.core.events import Notification
 from cma.core.sessions import SessionInfo, SessionState
 from cma.i18n import tr
+from cma.ui.a11y import apply_accessible_names
 from cma.ui.context import GuiContext
 from cma.ui.icons import app_icon, icon
+from cma.ui.views.cloud import CloudView
 from cma.ui.views.dashboard import DashboardView
 from cma.ui.views.logs import LogsView
 from cma.ui.views.profiles import CloudflareProfilesView
@@ -72,6 +74,7 @@ class MainWindow(QMainWindow):
         brand.addWidget(heading, 1)
         side.addLayout(brand)
         self.nav = QListWidget()
+        self.nav.setAccessibleName(tr("Navigation"))
         self.nav.setObjectName("SidebarList")
         self.nav.setIconSize(QSize(20, 20))
         self.nav.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -98,6 +101,7 @@ class MainWindow(QMainWindow):
         self.profiles = CloudflareProfilesView(ctx, lambda: self.show_view("tokens"))
         self.tokens = TokensView(ctx, self.open_profile)
         self.ssh = SshView(ctx)
+        self.cloud = CloudView(ctx)
         self.logs = LogsView(ctx)
         self.settings = SettingsView(ctx)
         self.views: dict[str, QWidget] = {}
@@ -106,6 +110,7 @@ class MainWindow(QMainWindow):
             ("profiles", tr("Profils Cloudflare"), "cloud", self.profiles),
             ("tokens", tr("Service tokens"), "key", self.tokens),
             ("ssh", tr("Redirections SSH"), "server", self.ssh),
+            ("cloud", tr("Compte Cloudflare"), "cloud-cog", self.cloud),
             ("logs", tr("Journaux"), "list-details", self.logs),
             ("settings", tr("Paramètres"), "settings", self.settings),
         ):
@@ -156,6 +161,7 @@ class MainWindow(QMainWindow):
         )
         self.nav.setCurrentRow(start)
         self._update_status()
+        apply_accessible_names(self)
 
     # --- Navigation ----------------------------------------------------------------------------
 
@@ -287,6 +293,10 @@ class MainWindow(QMainWindow):
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
+        self.quit_now()
+
+    def quit_now(self) -> None:
+        """Ferme l'application sans question (sessions arrêtées par l'arrêt du moteur)."""
         self.quitting = True
         self.save_window_state()
         self.quit_requested.emit()

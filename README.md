@@ -67,11 +67,22 @@ Voir [Migration depuis la v1](#migration-depuis-la-v1).
 
 ![Redirections SSH](docs/captures/ssh-clair.png)
 
-- Liste des ports en écoute sur le serveur, avec service, conteneur Docker et statut HTTP, **sans rien installer** sur le serveur.
+- Liste des ports en écoute sur le serveur, avec service, conteneur Docker et statut HTTP, **sans rien installer** sur le serveur. Linux et Windows (OpenSSH Server) sont reconnus automatiquement.
 - Redirections enregistrées, démarrées d'un clic, avec compteurs de connexions et d'octets.
 - Authentification par mot de passe (mémorisable dans le coffre), par clé (générée ici, avec phrase de passe) ou par agent SSH.
 - Vérification de la clé d'hôte au premier contact, avec son empreinte SHA-256.
 - Passage par un profil Cloudflare pour les serveurs SSH publiés par Access.
+
+### Compte Cloudflare
+
+![Compte Cloudflare](docs/captures/cloud-clair.png)
+
+Avec un jeton d'API Cloudflare, CMA gère aussi le côté serveur :
+
+- Tunnels du compte et noms d'hôte qu'ils publient. Un clic les transforme en profils CMA, port local et type de service compris.
+- **Publier un service** : nom d'hôte vers service du réseau privé, avec l'enregistrement DNS, l'application Access et le service token autorisé.
+- Service tokens créés depuis CMA, rangés directement dans le coffre : leur secret n'est jamais affiché.
+- Permissions du jeton d'API et détails dans [docs/SECURITE.md](docs/SECURITE.md).
 
 ### Au quotidien
 
@@ -80,6 +91,8 @@ Voir [Migration depuis la v1](#migration-depuis-la-v1).
 - Thème clair, sombre ou système, style Windows 11, interface nette à toutes les échelles d'affichage.
 - Import et export des profils. Les secrets sont exclus par défaut, ou chiffrés par une phrase de passe.
 - Démarrage avec Windows, instance unique, rapport de diagnostic sans secrets.
+- Mise à jour en un clic de la version installée : installeur téléchargé, vérifié par SHA-256, puis relance.
+- Utilisable au clavier et avec un lecteur d'écran (NVDA, Narrateur) : chaque contrôle a un nom.
 
 ![Journaux en thème sombre](docs/captures/logs-sombre.png)
 

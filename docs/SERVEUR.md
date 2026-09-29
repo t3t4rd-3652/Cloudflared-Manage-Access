@@ -51,6 +51,31 @@ ports-report --all             sans les exclusions par défaut (5355, 5357, 2024
 ports-report --version
 ```
 
+## Serveurs Windows
+
+Sur un serveur Windows avec OpenSSH Server, CMA le reconnaît tout seul : `echo %OS% $env:OS` répond
+« Windows_NT » sous cmd.exe comme sous PowerShell. Il envoie alors `server/ports-report.ps1` à PowerShell
+par l'entrée standard, toujours sans rien installer :
+
+```text
+powershell -NoProfile -NonInteractive -Command "& {[Console]::In.ReadToEnd() | Invoke-Expression}"
+```
+
+| Élément | Source |
+| --- | --- |
+| Ports en écoute | `Get-NetTCPConnection`, sinon `netstat -ano` |
+| Service | service Windows du processus (Win32_Service), sinon nom du processus ; `http.sys` pour le PID 4 |
+| Conteneur | `docker ps`, si Docker est installé |
+| Web | sonde HTTPS puis HTTP en parallèle, 1,5 s au plus par port |
+
+Compatible Windows PowerShell 5.1 (Windows Server 2016 et suivants) et PowerShell 7. Les ports RPC dynamiques
+des processus système (au-delà de 49152) et 135, 139, 445, 5040, 5355, 5357 sont ignorés ; `-All` les garde.
+Le script sert aussi à la main :
+
+```text
+powershell -NoProfile -File ports-report.ps1 [-NoWeb] [-All]
+```
+
 ## Noms des conteneurs Docker sans droits docker
 
 `docker ps` exige d'appartenir au groupe `docker`, ce qui équivaut à être root. Pour n'afficher que les noms et

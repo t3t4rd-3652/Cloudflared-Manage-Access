@@ -217,6 +217,38 @@ def test_settings_view(qtbot, gui, monkeypatch, tmp_path):
     view.check_cma_update()
     qtbot.waitUntil(lambda: "Aucune version" in view.cma_update_label.text(), timeout=5000)
 
+    # Mise à jour automatique de la copie installée : téléchargement vérifié, installeur lancé, fermeture.
+    from cma.core.cloudflared.binary import ReleaseAsset
+
+    asset = ReleaseAsset("CloudflaredManageAccess-9.9.9-setup.exe", "https://x/s.exe", 1, "ab" * 32)
+    monkeypatch.setattr(
+        settings_view, "check_for_update", lambda: UpdateInfo("2.0.0", "9.9.9", "https://x", (asset,))
+    )
+    monkeypatch.setattr(view, "self_update_possible", lambda: False)
+    view.check_cma_update()
+    qtbot.waitUntil(lambda: "réservée à la version installée" in view.cma_update_label.text(), timeout=5000)
+    assert view.cma_install.isHidden()
+    monkeypatch.setattr(view, "self_update_possible", lambda: True)
+    view.check_cma_update()
+    qtbot.waitUntil(lambda: not view.cma_install.isHidden(), timeout=5000)
+    installer = tmp_path / asset.name
+    launched: list[Path] = []
+    quits: list[bool] = []
+
+    def fake_download_installer(info, dest, *, progress=None, **_kw):
+        progress(1, 2)
+        return installer
+
+    monkeypatch.setattr(settings_view, "download_installer", fake_download_installer)
+    monkeypatch.setattr(settings_view, "launch_installer", launched.append)
+    monkeypatch.setattr(
+        settings_view.QMessageBox, "question", lambda *_a: settings_view.QMessageBox.StandardButton.Yes
+    )
+    monkeypatch.setattr(view.window(), "quit_now", lambda: quits.append(True))
+    view.install_cma_update()
+    qtbot.waitUntil(lambda: bool(quits), timeout=5000)
+    assert launched == [installer]
+
     opened: list[object] = []
     monkeypatch.setattr(settings_view.QDesktopServices, "openUrl", opened.append)
     view._diagnostic()

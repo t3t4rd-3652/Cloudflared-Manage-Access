@@ -80,6 +80,7 @@ class TokenEditor(QWidget):
         layout.addLayout(form)
         layout.addWidget(title(tr("Profils qui l'utilisent"), "SectionTitle"))
         self.users = QListWidget()
+        self.users.setAccessibleName(tr("Profils qui l'utilisent"))
         self.users.setMaximumHeight(140)
         self.users.itemDoubleClicked.connect(lambda item: self.open_profile(item.data(256)))
         layout.addWidget(self.users)
@@ -210,6 +211,7 @@ class TokensView(QWidget):
                 ("trash", tr("Supprimer (Suppr)"), self.delete),
             ],
             grouped=False,
+            name=tr("Service tokens"),
         )
         self.list.selected.connect(self._on_select)
         splitter.addWidget(self.list)

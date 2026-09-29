@@ -51,6 +51,7 @@ class ProfileList(QWidget):
         actions: list[tuple[str, str, Callable[[], None]]],
         *,
         grouped: bool = True,
+        name: str = "",
         group_actions: Callable[[str], list[tuple[str, str, Callable[[], None]]]] | None = None,
     ) -> None:
         super().__init__()
@@ -78,6 +79,7 @@ class ProfileList(QWidget):
         toolbar.addStretch()
         layout.addLayout(toolbar)
         self.tree = QTreeWidget()
+        self.tree.setAccessibleName(name or placeholder)
         self.tree.setHeaderHidden(True)
         self.tree.setRootIsDecorated(grouped)
         self.tree.setIndentation(14 if grouped else 0)
@@ -151,9 +153,12 @@ class ProfileList(QWidget):
                 parent.addChild(item)
             else:
                 self.tree.addTopLevelItem(item)
-        self._suppress = False
+        # La sélection est restaurée sans émettre `selected` : ce n'est pas un choix de l'utilisateur.
+        # Émettre ici relançait la question « modifications non enregistrées » pendant l'enregistrement
+        # lui-même, en boucle jusqu'au plantage.
         if current:
             self.select(current)
+        self._suppress = False
 
     def group_menu(self, pos: QPoint) -> QMenu | None:
         """Menu contextuel du titre de groupe situé en `pos`, ou None s'il n'y en a pas."""

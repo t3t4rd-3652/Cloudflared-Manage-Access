@@ -71,8 +71,16 @@ class FakeSshServer(asyncssh.SSHServer):
         return True
 
 
+WINDOWS_NDJSON = (
+    '{"v":2,"meta":{"version":"2.1.0","os":"windows","source":"Get-NetTCPConnection","docker":"absent","web_probe":true}}\n'
+    '{"v":2,"proto":"tcp","port":3389,"bind":["0.0.0.0"],"service":"TermService","container":null,'
+    '"scheme":null,"http_code":null,"final_url":null}\n'
+)
+
+
 class ServerState:
     bash_available = True
+    windows = False
     received_scripts: list[str]
 
     def __init__(self):
@@ -88,7 +96,14 @@ async def create_test_server(tmp_path):
 
     async def handle(process: asyncssh.SSHServerProcess):
         command = process.command or ""
-        if command.startswith("bash -s") and state.bash_available:
+        if command == "echo %OS% $env:OS":
+            process.stdout.write("Windows_NT $env:OS\r\n" if state.windows else "%OS% :OS\n")
+            process.exit(0)
+        elif command.startswith("powershell ") and state.windows:
+            state.received_scripts.append(await process.stdin.read())
+            process.stdout.write(WINDOWS_NDJSON)
+            process.exit(0)
+        elif command.startswith("bash -s") and state.bash_available:
             state.received_scripts.append(await process.stdin.read())
             process.stdout.write(NDJSON)
             process.exit(0)
@@ -271,6 +286,19 @@ async def test_discovery_sends_the_script_by_stdin(paths, store, secrets, bus, s
     assert [p.port for p in result.ports] == [22]
     assert result.script_version == "2.0.0"
     assert ssh_server["state"].received_scripts[0].startswith("#!/usr/bin/env bash")
+    await manager.shutdown()
+
+
+async def test_discovery_on_a_windows_server(paths, store, secrets, bus, ssh_server):
+    ssh_server["state"].windows = True
+    profile = add_profile(store, ssh_server["port"])
+    manager = make_manager(paths, store, secrets, bus, ScriptedPrompter(passwords=[PASSWORD]))
+    result = await manager.discover_ports(profile.id, probe_web=False)
+    assert result.os == "windows"
+    assert [(p.port, p.service) for p in result.ports] == [(3389, "TermService")]
+    script = ssh_server["state"].received_scripts[0]
+    assert script.startswith("$CmaNoWeb = $true\n")
+    assert script.isascii() and "Get-NetTCPConnection" in script
     await manager.shutdown()
 
 

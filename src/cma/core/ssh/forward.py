@@ -10,9 +10,12 @@ import asyncio
 import contextlib
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import asyncssh
+if TYPE_CHECKING:
+    import asyncssh
+else:
+    from cma.core.ssh._lazy import asyncssh
 
 from cma.core.models import SavedForward, ServiceType, SshProfile
 from cma.core.netutil import PortStatus, check_local_port, format_host_port

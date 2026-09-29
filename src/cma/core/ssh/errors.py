@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import socket
+from typing import TYPE_CHECKING
 
-import asyncssh
+if TYPE_CHECKING:
+    import asyncssh
+else:
+    from cma.core.ssh._lazy import asyncssh
 
 from cma.i18n import tr
 

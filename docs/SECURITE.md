@@ -29,6 +29,22 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
 - Déploiement de clé publique par SFTP : lecture d'`authorized_keys`, ajout seulement si la clé manque, droits 700/600, relecture de contrôle.
 - Les redirections n'écoutent que sur `127.0.0.1`.
 
+## Compte Cloudflare (API)
+
+- Le jeton d'API est vérifié, puis rangé dans le coffre (clé `cfapi:token`). Il n'est écrit dans aucun fichier ni journal.
+- Permissions conseillées, et rien de plus : Cloudflare Tunnel (modifier), Access: Apps and Policies (modifier),
+  Access: Service Tokens (modifier) sur le compte ; DNS (modifier) et Zone (lire) sur les zones concernées.
+- Un service token créé depuis CMA part directement dans le coffre. Cloudflare ne renvoie son secret qu'une fois,
+  et CMA ne l'affiche jamais.
+- « Oublier le jeton » le retire du coffre. Révoquez-le aussi dans le tableau de bord Cloudflare si besoin.
+
+## Mise à jour de CMA
+
+- Réservée à la version installée : ni la version portable ni les sources ne se mettent à jour seules.
+- L'installeur est vérifié par l'empreinte SHA-256 publiée par GitHub, ou par le fichier SHA256SUMS.txt de la release.
+  Sans empreinte, l'installation est refusée. S'il est signé, sa signature doit être valide.
+- L'installeur ne démarre qu'une fois CMA fermé ; son chemin passe par l'environnement, jamais dans un script.
+
 ## Téléchargement de cloudflared
 
 - Source : l'API des releases GitHub de Cloudflare.
@@ -50,6 +66,7 @@ Voir [SERVEUR.md](SERVEUR.md). Le helper Docker ne donne que les noms et ports d
 - Sans trousseau système (Linux sans Secret Service), les secrets sont gardés dans un fichier chiffré par phrase de passe, ou seulement en mémoire.
 - Une personne qui a ouvert votre session Windows peut lire vos secrets dans le Gestionnaire d'identifiants, comme pour tout logiciel.
 - Les exécutables ne sont signés que si un certificat de signature est configuré dans la CI.
+- Chaque release publie un inventaire des composants (SBOM CycloneDX) ; la CI audite les dépendances avec pip-audit.
 
 ## Signaler une vulnérabilité
 

@@ -1,4 +1,5 @@
 import socket
+import sys
 
 import pytest
 
@@ -136,3 +137,45 @@ def test_release_parsing_keeps_digests():
     assert release.version == "2026.9.3"
     assert release.asset("cloudflared-windows-amd64.exe").sha256 == "abc"
     assert release.asset("sans-digest").sha256 is None
+
+
+def test_windows_payload_is_ascii_and_without_comments():
+    from cma.core.ssh.discovery import windows_payload
+    from cma.paths import ports_report_windows_script
+
+    payload = windows_payload(ports_report_windows_script())
+    assert payload.isascii()
+    assert not [line for line in payload.splitlines() if line.lstrip().startswith(("#", "//"))]
+    assert "Get-NetTCPConnection" in payload and "CmaProbe" in payload
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="PowerShell Windows requis")
+def test_windows_script_runs_on_this_machine():
+    """Exécute ports-report.ps1 comme CMA le fait par SSH : sur l'entrée standard de PowerShell."""
+    import http.server
+    import subprocess
+    import threading
+
+    from cma.core.ssh.discovery import WINDOWS_COMMAND, parse_ndjson, windows_payload
+    from cma.paths import ports_report_windows_script
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), http.server.SimpleHTTPRequestHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    port = server.server_address[1]
+    try:
+        completed = subprocess.run(  # noqa: S602 (le shell reproduit celui du serveur SSH)
+            WINDOWS_COMMAND,
+            input=windows_payload(ports_report_windows_script()),
+            capture_output=True,
+            text=True,
+            timeout=120,
+            shell=True,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+    result = parse_ndjson(completed.stdout)
+    assert result.os == "windows", completed.stderr[-2000:]
+    ours = next(p for p in result.ports if p.port == port)
+    assert ours.bind == ("127.0.0.1",)
+    assert (ours.scheme, ours.http_code) == ("http", 200)

@@ -100,11 +100,27 @@ def test_update_check(monkeypatch):
     monkeypatch.setattr(
         updates.urllib.request,
         "urlopen",
-        lambda *a, **k: FakeResponse(json.dumps({"tag_name": "v99.0.0", "html_url": "u"}).encode()),
+        lambda *a, **k: FakeResponse(
+            json.dumps(
+                {
+                    "tag_name": "v99.0.0",
+                    "html_url": "u",
+                    "assets": [
+                        {
+                            "name": "CloudflaredManageAccess-99.0.0-setup.exe",
+                            "browser_download_url": "https://x/setup.exe",
+                            "size": 3,
+                            "digest": "sha256:" + "ab" * 32,
+                        }
+                    ],
+                }
+            ).encode()
+        ),
     )
     info = updates.check_for_update()
     assert info.available
     assert info.latest == "99.0.0"
+    assert info.installer is not None and info.installer.sha256 == "ab" * 32
     assert info.current == __version__
 
     def not_found(*_a, **_k):

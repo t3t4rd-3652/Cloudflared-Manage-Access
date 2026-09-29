@@ -152,6 +152,7 @@ def main() -> int:
             for f in (
                 DIST / f"CloudflaredManageAccess-{ver}-portable.zip",
                 DIST / f"CloudflaredManageAccess-{ver}-setup.exe",
+                DIST / f"CloudflaredManageAccess-{ver}-sbom.cdx.json",
             )
             if f.exists()
         ]

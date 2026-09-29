@@ -12,21 +12,30 @@ Réécriture complète : cœur métier séparé de l'interface, interface Qt, SS
 - Coffre des service tokens (Gestionnaire d'identifiants Windows). Les profils référencent un token au lieu de recopier son secret.
 - Authentification Access par navigateur (`cloudflared access login`) et état du jeton en cache (`cloudflared access token`), test d'un token, génération du bloc `~/.ssh/config`.
 - Groupes de profils connectables en une fois, depuis la liste, le tableau de bord ou `cma connect --group`.
+- Vue « Compte Cloudflare » (API Cloudflare) : tunnels et noms d'hôte publiés, import en profils, publication d'un
+  service (règle du tunnel, DNS, application Access, service token autorisé), service tokens créés dans le coffre.
+- Découverte des ports sur les serveurs Windows (OpenSSH Server) avec `ports-report.ps1`, sans installation.
+- Mise à jour en un clic de la version installée : installeur vérifié par SHA-256, installé puis relancé.
+- Accessibilité : chaque contrôle a un nom pour les lecteurs d'écran, vérifié par un test.
 - Découverte des ports SSH sans installation (script envoyé par l'entrée standard), en tableau triable avec l'adresse d'écoute réelle.
 - Redirections SSH enregistrées, compteurs d'octets, passage par un profil Cloudflare, authentification par clé, agent ou mot de passe mémorisable.
 - Vérification des clés d'hôte SSH avec empreinte SHA-256 et alerte en cas de changement. Génération et déploiement idempotent des clés ed25519.
 - Téléchargement de cloudflared vérifié (SHA-256 publié par GitHub, signature Authenticode) et alerte de mise à jour.
 - Zone de notification, notifications, thème clair, sombre ou système, style Windows 11, traduction anglaise.
 - Ligne de commande `cma` : `list`, `connect`, `status`, `disconnect`, `quit`, `doctor`.
-- Raccourcis clavier : Ctrl+N, Ctrl+F, Ctrl+S, Ctrl+Entrée, Suppr, F5, Ctrl+1 à 6.
+- Raccourcis clavier : Ctrl+N, Ctrl+F, Ctrl+S, Ctrl+Entrée, Suppr, F5, Ctrl+1 à 7.
 - Instance unique, démarrage avec Windows, mode portable, rapport de diagnostic, import et export avec aperçu des conflits et secrets chiffrés.
 - Migration automatique des données de la v1, avec sauvegarde et rapport.
 - Job Object Windows : aucun cloudflared orphelin, même après un plantage.
-- Installeur (Inno Setup), zip portable, empreintes SHA-256, CI GitHub Actions, pre-commit, Dependabot et 222 tests automatisés.
+- Installeur (Inno Setup), zip portable, empreintes SHA-256, CI GitHub Actions, pre-commit, Dependabot et 251 tests automatisés.
+- Releases avec inventaire des composants (SBOM CycloneDX) et manifestes winget prêts à soumettre ; audit des
+  dépendances (pip-audit) et tests contre le vrai cloudflared dans la CI.
 
 ### Modifié
 - Relais SSH environ 11 fois plus rapide (banc d'essai local : 67,5 contre 6,2 Mio/s), et respect de la demi-fermeture TCP.
-- L'interface est prête en environ 1,3 s, contre 4 à 5 s pour l'exe v1.4.0.
+- L'interface est prête en moins d'une seconde depuis les sources, contre 4 à 5 s pour l'exe v1.4.0 :
+  asyncssh et cryptography ne sont chargés qu'après l'affichage de la fenêtre.
+- Les commandes `cloudflared access login`, `access token` et `ssh-config` utilisent le proxy du profil.
 - `ports-report` 2.0.0 : sortie `--json`, compatibilité mawk et busybox, adresse d'écoute, exclusions paramétrables. La sortie texte reste celle de la v1.
 
 ### Sécurité

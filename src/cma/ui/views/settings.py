@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLineEdit,
+    QMessageBox,
     QProgressBar,
     QScrollArea,
     QSpinBox,
@@ -39,7 +40,13 @@ from cma.core.cloudflared.binary import (
 from cma.core.diagnostics import build_report
 from cma.core.migrations import find_v1_files
 from cma.core.models import Config, KnownHostsMode, Theme
-from cma.core.updates import UpdateInfo, check_for_update
+from cma.core.updates import (
+    UpdateInfo,
+    can_self_update,
+    check_for_update,
+    download_installer,
+    launch_installer,
+)
 from cma.i18n import SUPPORTED_LANGUAGES, tr
 from cma.platform import autostart
 from cma.ui.context import GuiContext
@@ -50,6 +57,7 @@ from cma.ui.widgets import button, label, primary_button, title
 
 class SettingsView(QWidget):
     download_progress = Signal(int, object)
+    cma_progress = Signal(int, object)
 
     def __init__(self, ctx: GuiContext) -> None:
         super().__init__()
@@ -58,6 +66,7 @@ class SettingsView(QWidget):
         self._release: ReleaseInfo | None = None
         self._installed_version: str | None = None
         self._cancel_download = threading.Event()
+        self._cma_update: UpdateInfo | None = None
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 20, 24, 16)
         outer.addWidget(title(tr("Paramètres")))
@@ -77,6 +86,7 @@ class SettingsView(QWidget):
         self._build_about()
         self.body.addStretch()
         self.download_progress.connect(self._on_progress)
+        self.cma_progress.connect(self._on_cma_progress)
         ctx.bridge.config_changed.connect(self.load)
         self.load()
 
@@ -174,7 +184,9 @@ class SettingsView(QWidget):
         form.addRow("", self.start_with_system)
         ports = QHBoxLayout()
         self.port_min = QSpinBox()
+        self.port_min.setAccessibleName(tr("Premier port automatique"))
         self.port_max = QSpinBox()
+        self.port_max.setAccessibleName(tr("Dernier port automatique"))
         for spin in (self.port_min, self.port_max):
             spin.setRange(1024, 65535)
             spin.editingFinished.connect(self._ports_changed)
@@ -264,12 +276,20 @@ class SettingsView(QWidget):
         github.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(REPO_URL)))
         self.cma_update = button(tr("Vérifier les mises à jour de CMA"), "refresh")
         self.cma_update.clicked.connect(self.check_cma_update)
+        self.cma_install = primary_button(tr("Installer la mise à jour"), "cloud-download")
+        self.cma_install.clicked.connect(self.install_cma_update)
+        self.cma_install.hide()
         row.addWidget(github)
         row.addWidget(self.cma_update)
+        row.addWidget(self.cma_install)
         row.addStretch()
         form.addRow("", row)
-        self.cma_update_label = label("", "muted")
+        self.cma_update_label = label("", "muted", wrap=True)
         form.addRow("", self.cma_update_label)
+        self.cma_progress_bar = QProgressBar()
+        self.cma_progress_bar.setAccessibleName(tr("Téléchargement de la mise à jour"))
+        self.cma_progress_bar.hide()
+        form.addRow("", self.cma_progress_bar)
 
     # --- Chargement et enregistrement --------------------------------------------------------------
 
@@ -475,6 +495,59 @@ class SettingsView(QWidget):
         else:
             self.progress.setMaximum(0)
 
+    def _on_cma_progress(self, received: int, total: object) -> None:
+        if isinstance(total, int) and total > 0:
+            self.cma_progress_bar.setMaximum(1000)
+            self.cma_progress_bar.setValue(int(received * 1000 / total))
+        else:
+            self.cma_progress_bar.setMaximum(0)
+
+    # --- Mise à jour de CMA -----------------------------------------------------------------------
+
+    def self_update_possible(self) -> bool:
+        return can_self_update()
+
+    def install_cma_update(self) -> None:
+        info = self._cma_update
+        if info is None or info.installer is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            tr("Mettre à jour CMA"),
+            tr(
+                "La version {v} va être téléchargée et vérifiée. CMA se fermera ensuite (les sessions "
+                "ouvertes seront arrêtées), s'installera puis redémarrera. Continuer ?"
+            ).format(v=info.latest),
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.cma_install.setEnabled(False)
+        self.cma_progress_bar.setValue(0)
+        self.cma_progress_bar.show()
+
+        def progress(received: int, total: int | None) -> None:
+            self.cma_progress.emit(received, total)
+
+        async def run() -> Path:
+            return await asyncio.to_thread(
+                download_installer, info, self.ctx.paths.cache_dir / "updates", progress=progress
+            )
+
+        def done(installer: Path) -> None:
+            self.cma_progress_bar.hide()
+            launch_installer(installer)
+            window = self.window()
+            quit_now = getattr(window, "quit_now", None)
+            if callable(quit_now):
+                quit_now()
+
+        def failed(error: BaseException) -> None:
+            self.cma_progress_bar.hide()
+            self.cma_install.setEnabled(True)
+            self.ctx.notify("error", str(error))
+
+        self.ctx.run(run(), done, failed)
+
     # --- Divers -----------------------------------------------------------------------------------
 
     def _diagnostic(self) -> None:
@@ -507,14 +580,28 @@ class SettingsView(QWidget):
             return await asyncio.to_thread(check_for_update)
 
         def done(info: UpdateInfo) -> None:
+            self._cma_update = info
+            installable = info.available and info.installer is not None and self.self_update_possible()
+            self.cma_install.setVisible(installable)
             if info.latest is None:
                 self.cma_update_label.setText(tr("Aucune version publiée pour l'instant."))
             elif info.available:
-                self.cma_update_label.setText(tr("Version {v} disponible.").format(v=info.latest))
+                text = tr("Version {v} disponible.").format(v=info.latest)
+                if not installable:
+                    text += " " + tr(
+                        "Mise à jour automatique réservée à la version installée : "
+                        "téléchargez-la depuis la page de la release."
+                    )
+                self.cma_update_label.setText(text)
+                action = (
+                    (tr("Installer"), self.install_cma_update)
+                    if installable
+                    else (tr("Voir"), lambda: QDesktopServices.openUrl(QUrl(info.url or REPO_URL)))
+                )
                 self.ctx.notify(
                     "info",
                     tr("Une nouvelle version de CMA est disponible : {v}.").format(v=info.latest),
-                    action=(tr("Voir"), lambda: QDesktopServices.openUrl(QUrl(info.url or REPO_URL))),
+                    action=action,
                 )
             else:
                 self.cma_update_label.setText(tr("Vous utilisez la dernière version."))
