@@ -14,6 +14,7 @@ import ctypes
 import logging
 import sys
 from ctypes import wintypes
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +66,7 @@ class ProcessJob:
 
     def __init__(self) -> None:
         self._handle: int | None = None
+        self._kernel32: Any = None
         if sys.platform != "win32":
             return
         try:
@@ -112,7 +114,7 @@ class ProcessJob:
         return self._handle is not None
 
     def assign(self, pid: int) -> bool:
-        if self._handle is None:
+        if sys.platform != "win32" or self._handle is None:
             return False
         process = self._kernel32.OpenProcess(_PROCESS_SET_QUOTA | _PROCESS_TERMINATE, False, pid)
         if not process:
@@ -130,6 +132,6 @@ class ProcessJob:
 
     def close(self) -> None:
         """Ferme le job : Windows termine les processus qui y sont encore rattachés."""
-        if self._handle is not None:
+        if sys.platform == "win32" and self._handle is not None:
             self._kernel32.CloseHandle(self._handle)
             self._handle = None

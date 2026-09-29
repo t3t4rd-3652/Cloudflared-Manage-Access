@@ -77,7 +77,10 @@ jobs:
           echo "$RUNNER_TEMP/cloudflared" >> "$GITHUB_PATH"
       - run: cloudflared --version
       - name: Tests contre le vrai binaire
-        run: uv run pytest -m real_cloudflared -W ignore::pytest.PytestUnraisableExceptionWarning -rs
+        # Sans les tests d'interface : ce job n'installe pas les bibliothèques système de Qt.
+        run: >
+          uv run pytest tests/unit tests/integration -m real_cloudflared
+          -W ignore::pytest.PytestUnraisableExceptionWarning -rs
 
   audit:
     name: Audit des dépendances
