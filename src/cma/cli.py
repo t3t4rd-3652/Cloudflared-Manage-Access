@@ -18,9 +18,10 @@ from cma.core.commands import execute, profile_summaries
 from cma.core.events import Event, LogLine, Notification, SessionChanged
 from cma.core.instance import send_command
 from cma.core.prompts import PassphraseRequest, PasswordAnswer, PasswordRequest
+from cma.core.secrets import SecretStore
 from cma.core.ssh.hostkeys import HostKeyPrompt
 from cma.i18n import tr
-from cma.paths import resolve_paths
+from cma.paths import AppPaths, resolve_paths
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -102,13 +103,35 @@ class CliPrompter:
         return value or None
 
 
+def portable_secret_store(paths: AppPaths) -> SecretStore | None:
+    """Version portable : le coffre chiffré de data/, déverrouillé au clavier ; ailleurs, le trousseau du système."""
+    if not paths.portable:
+        return None
+    from cma.core.crypto import WrongPassphraseError
+    from cma.core.secrets import EncryptedFileSecretStore, MemorySecretStore
+
+    if not paths.encrypted_secrets_file.exists():
+        return MemorySecretStore(reason=tr("coffre portable pas encore créé : lancez l'interface une fois"))
+    try:
+        passphrase = getpass.getpass(tr("Phrase de passe du coffre portable : "))
+    except (EOFError, KeyboardInterrupt):
+        passphrase = ""
+    if not passphrase:
+        return MemorySecretStore(reason=tr("coffre portable non déverrouillé"))
+    try:
+        return EncryptedFileSecretStore(paths.encrypted_secrets_file, passphrase)
+    except WrongPassphraseError:
+        print(tr("Phrase de passe incorrecte."), file=sys.stderr)
+        return MemorySecretStore(reason=tr("coffre portable non déverrouillé"))
+
+
 async def _foreground_connect(args: argparse.Namespace) -> int:
     from cma.context import create_context
     from cma.logging_setup import setup_logging
 
     paths = resolve_paths(args.data_dir)
     setup_logging(paths, "DEBUG" if args.debug else "INFO", console=True)
-    ctx = create_context(paths, CliPrompter())
+    ctx = create_context(paths, CliPrompter(), secrets=portable_secret_store(paths))
     for warning in ctx.warnings:
         print(tr("Avertissement : {text}").format(text=warning), file=sys.stderr)
 

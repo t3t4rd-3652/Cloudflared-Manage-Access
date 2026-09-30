@@ -12,8 +12,16 @@ seule si besoin, et vos secrets restent dans le coffre du système, jamais dans 
 
 Sous Windows, téléchargez la dernière [release](https://github.com/t3t4rd-3652/Cloudflared-Manage-Access/releases) :
 
-- **`CloudflaredManageAccess-<version>-setup.exe`** : installeur, sans droits administrateur.
-- **`CloudflaredManageAccess-<version>-portable.zip`** : version portable. Le dossier `data/` fourni garde toutes les données à côté de l'exécutable.
+- **`CloudflaredManageAccess-<version>-setup.exe`** : installeur, sans droits administrateur, avec mise à jour en un clic.
+- **`CloudflaredManageAccess-<version>-portable.zip`** : version portable, sans installation (voir ci-dessous).
+
+### Version portable
+
+Décompressez le zip où vous voulez, clé USB comprise, puis lancez `CloudflaredManageAccess.exe`. Le dossier `data/`
+placé à côté de l'exécutable active le mode portable : configuration, journaux, clés SSH, empreintes des serveurs et
+cloudflared téléchargé y restent. Les secrets vont dans un coffre chiffré de ce même dossier, protégé par une phrase
+de passe demandée au démarrage : ils suivent le dossier d'un poste à l'autre, sans passer par le Gestionnaire
+d'identifiants de Windows. Pour mettre à jour, remplacez les fichiers du programme en gardant `data/`.
 
 Vérifiez le fichier avec `SHA256SUMS.txt` publié à côté :
 
@@ -154,9 +162,8 @@ Au premier lancement, la v2 lit les fichiers de la v1 dans `%APPDATA%\Cloudflare
 chaque profil sont regroupés dans des tokens. Rien n'est supprimé sans votre accord : une fois la migration vérifiée,
 **Paramètres › Données › Supprimer les fichiers v1** retire les anciens fichiers, qui contiennent vos secrets en clair.
 
-La v1.4.1 (`CloudflaredManageAccess.py`, Tkinter) reste dans le dépôt le temps de la transition. Elle est corrigée
-(plus d'injection de commande, secret hors de la ligne de commande, JSON en UTF-8) et se lance avec
-`pip install -r requirements-v1.txt` puis `python CloudflaredManageAccess.py`.
+La v1 (Tkinter) n'est plus dans le dépôt depuis la 2.0.0. Son dernier exécutable reste téléchargeable dans la
+release [V1.3.9](https://github.com/t3t4rd-3652/Cloudflared-Manage-Access/releases/tag/V1.3.9).
 
 ## Développement
 

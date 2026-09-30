@@ -561,7 +561,7 @@ class KeysDialog(QDialog):
 class SecretStoreDialog(QDialog):
     """Sans Gestionnaire d'identifiants : coffre chiffré (création ou ouverture) ou secrets en mémoire."""
 
-    def __init__(self, parent: QWidget | None, encrypted_file: Path) -> None:
+    def __init__(self, parent: QWidget | None, encrypted_file: Path, *, portable: bool = False) -> None:
         super().__init__(parent)
         self.exists = encrypted_file.exists()
         self.passphrase_value: str | None = None
@@ -570,9 +570,15 @@ class SecretStoreDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
         layout.addWidget(title(tr("Choisir comment conserver vos secrets"), "SectionTitle"))
-        layout.addWidget(
-            label(tr("Le Gestionnaire d'identifiants Windows n'est pas disponible."), "muted", wrap=True)
+        intro = (
+            tr(
+                "Version portable : les secrets sont gardés dans un coffre chiffré du dossier data/, "
+                "pour vous suivre d'un poste à l'autre."
+            )
+            if portable
+            else tr("Le Gestionnaire d'identifiants Windows n'est pas disponible.")
         )
+        layout.addWidget(label(intro, "muted", wrap=True))
         self.create_new = QRadioButton(tr("Créer un coffre chiffré"))
         self.open_existing = QRadioButton(tr("Ouvrir un coffre existant"))
         self.memory = QRadioButton(tr("Continuer sans conserver les secrets"))
@@ -656,9 +662,11 @@ class SecretStoreDialog(QDialog):
         self.accept()
 
 
-def choose_secret_store(parent: QWidget | None, encrypted_file: Path) -> str | None:
+def choose_secret_store(
+    parent: QWidget | None, encrypted_file: Path, *, portable: bool = False
+) -> str | None:
     """Renvoie la phrase de passe du coffre chiffré, ou None pour garder les secrets en mémoire."""
-    dialog = SecretStoreDialog(parent, encrypted_file)
+    dialog = SecretStoreDialog(parent, encrypted_file, portable=portable)
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None
     return dialog.passphrase_value

@@ -313,3 +313,24 @@ def test_host_key_helpers():
     commands = dict(prompts.keygen_commands("ssh-rsa"))
     assert commands["Linux"] == "ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub -E sha256"
     assert commands["Windows"] == r"ssh-keygen -lf C:\ProgramData\ssh\ssh_host_rsa_key.pub -E sha256"
+
+
+def test_portable_mode_uses_the_encrypted_vault(qapp, monkeypatch, tmp_path):
+    import cma.ui.app as app_module
+    from cma.core.secrets import EncryptedFileSecretStore
+    from cma.paths import AppPaths
+
+    paths = AppPaths(tmp_path, portable=True)
+    asked: list[bool] = []
+
+    def choose(_parent, _file, *, portable=False):
+        asked.append(portable)
+        return "phrase-longue"
+
+    monkeypatch.setattr(misc, "choose_secret_store", choose)
+    store = app_module._open_secret_store(paths)
+    assert asked == [True]
+    assert isinstance(store, EncryptedFileSecretStore)
+    dialog = misc.SecretStoreDialog(None, tmp_path / "absent.json", portable=True)
+    assert dialog.findChildren(type(dialog.hint))  # construit sans erreur en mode portable
+    dialog.deleteLater()

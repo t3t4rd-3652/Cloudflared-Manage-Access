@@ -1,4 +1,0 @@
-# Dependances de la version 1.4.x (CloudflaredManageAccess.py, Tkinter).
-# La version 2 utilise pyproject.toml et uv.lock.
-paramiko>=3.4
-pillow>=10.0

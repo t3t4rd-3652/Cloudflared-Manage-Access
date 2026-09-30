@@ -76,7 +76,7 @@ default-groups = ["dev"]
 line-length = 110
 target-version = "py313"
 src = ["src", "tests"]
-extend-exclude = ["CloudflaredManageAccess.py", "docs/CMA-refonte-complete"]
+extend-exclude = ["docs/CMA-refonte-complete"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "PIE", "SIM", "RUF", "ASYNC", "S", "PT", "RET"]

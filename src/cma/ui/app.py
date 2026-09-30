@@ -39,13 +39,14 @@ log = logging.getLogger(__name__)
 
 
 def _open_secret_store(paths: AppPaths) -> SecretStore:
-    if system_keyring() is not None:
+    # Version portable : les secrets suivent le dossier data/ (coffre chiffré), pas le trousseau de ce poste.
+    if system_keyring() is not None and not paths.portable:
         return open_secret_store()
     from cma.core.crypto import WrongPassphraseError
     from cma.ui.dialogs.misc import choose_secret_store
 
     while True:
-        passphrase = choose_secret_store(None, paths.encrypted_secrets_file)
+        passphrase = choose_secret_store(None, paths.encrypted_secrets_file, portable=paths.portable)
         if passphrase is None:
             return MemorySecretStore(reason="choix de l'utilisateur")
         try:
