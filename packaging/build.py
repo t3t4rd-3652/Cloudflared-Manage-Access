@@ -129,7 +129,8 @@ def installer(ver: str) -> Path | None:
 def checksums(files: list[Path]) -> Path:
     target = DIST / "SHA256SUMS.txt"
     lines = [f"{hashlib.sha256(f.read_bytes()).hexdigest()}  {f.name}" for f in files]
-    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # Fins de ligne LF : `sha256sum -c` (Linux, macOS, Git Bash) échoue sur un fichier en CRLF.
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     return target
 
 
