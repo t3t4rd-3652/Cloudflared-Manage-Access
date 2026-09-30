@@ -25,6 +25,7 @@ jobs:
   tests:
     name: Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -44,6 +45,7 @@ jobs:
         run: >
           uv run pytest -m "not real_cloudflared and not network"
           -W ignore::pytest.PytestUnraisableExceptionWarning
+          --timeout=180
           --cov=cma --cov-report=term --cov-report=xml --cov-fail-under=80
       - name: Couverture du cœur (90 % minimum)
         run: uv run coverage report --include="src/cma/core/*" --fail-under=90
@@ -51,6 +53,7 @@ jobs:
   real-cloudflared:
     name: Vrai cloudflared (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -80,7 +83,7 @@ jobs:
           echo "$RUNNER_TEMP/cloudflared" >> "$GITHUB_PATH"
       - run: cloudflared --version
       - name: Tests contre le vrai binaire
-        # Sans les tests d'interface : ce job n'installe pas les bibliothèques système de Qt.
+        # Sans les tests d'interface, qui sont couverts par le job « Tests ».
         run: >
           uv run pytest tests/unit tests/integration -m real_cloudflared
           -W ignore::pytest.PytestUnraisableExceptionWarning -rs
