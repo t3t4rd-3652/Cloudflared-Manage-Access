@@ -2,6 +2,30 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Modifié
+- Refonte complète de l'interface, d'après la spécification de `docs/CMA-refonte-complete/` :
+  - Navigation par intention (Utiliser, Configurer, Administrer) et jetons de couleur communs aux thèmes clair et sombre, contrastes vérifiés.
+  - Page **Sessions** groupée par état : à vérifier, à l'écoute, terminées. Chaque incident affiche sa cause et l'action qui la corrige.
+  - Éditeurs en onglets, libellés au-dessus des champs, erreurs signalées par onglet et barre « Annuler / Enregistrer ».
+  - **Serveurs SSH** :
+    - onglets Ports distants, Redirections et Configuration ;
+    - date de dernière lecture conservée ;
+    - l'état de la liaison est distinct de celui des redirections.
+  - **Journaux** : volet du message complet, suivi suspendu en remontant et compteur du tampon. « Effacer l'affichage » ne touche pas aux fichiers.
+  - **Administration Cloudflare** :
+    - état porté par chaque tunnel et retrait limité aux noms d'hôte ;
+    - vraies boîtes « Protéger un nom d'hôte », « Autoriser un service token » et « Créer un service token » ;
+    - erreurs de l'API distinctes des erreurs réseau.
+  - Boîtes de dialogue refaites :
+    - assistant en trois étapes, avec détection et téléchargement de cloudflared ;
+    - vérification d'identité SSH avec les commandes `ssh-keygen -E sha256` à copier ; « Annuler » y garde le focus ;
+    - mot de passe, phrase de passe, clés SSH, empreintes, coffre de repli, import et export (phrase de passe saisie dans la boîte).
+  - Confirmations explicites qui nomment l'action (« Arrêter et supprimer », « Supprimer ces fichiers »…) ; le bouton destructif n'est jamais celui par défaut.
+  - Paramètres en cinq onglets courts, libellés au-dessus des champs.
+  - Traduction anglaise mise à jour pour tous les nouveaux textes.
+
 ## [2.0.0] - 2026-09-29
 
 Réécriture complète : cœur métier séparé de l'interface, interface Qt, SSH par asyncssh, secrets dans le coffre du système.

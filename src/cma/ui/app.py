@@ -179,8 +179,16 @@ def run_gui(args: argparse.Namespace) -> int:
         from cma.ui.dialogs.onboarding import OnboardingWizard
 
         def onboarding() -> None:
-            OnboardingWizard(window, ctx, None).exec()
+            wizard = OnboardingWizard(window, ctx)
+            wizard.exec()
             ctx.update_config(lambda c: setattr(c.settings, "onboarding_done", True))
+            created = wizard.created_profile
+            if created is not None:
+                # Aucune connexion implicite : on montre le favori, ou le profil s'il n'en est pas un.
+                if created.favorite:
+                    window.show_view("dashboard")
+                else:
+                    window.open_profile(created.id)
 
         QTimer.singleShot(300, onboarding)
 

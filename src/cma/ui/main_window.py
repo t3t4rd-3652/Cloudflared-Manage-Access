@@ -1,4 +1,4 @@
-"""Fenêtre principale : barre latérale, vues, bandeaux d'information, barre d'état."""
+"""Fenêtre principale : navigation groupée, pages, bandeaux d'information, barre d'état (§3.1 et §4.1)."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from PySide6.QtCore import QByteArray, QSize, Qt, Signal
 from PySide6.QtGui import QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -22,19 +23,52 @@ from PySide6.QtWidgets import (
 
 from cma import APP_NAME, __version__
 from cma.core.events import Notification
-from cma.core.sessions import SessionInfo, SessionState
+from cma.core.sessions import SessionInfo, SessionKind, SessionState
 from cma.i18n import tr
 from cma.ui.a11y import apply_accessible_names
 from cma.ui.context import GuiContext
-from cma.ui.icons import app_icon, icon
+from cma.ui.icons import app_icon, set_icon, token_icon
 from cma.ui.views.cloud import CloudView
-from cma.ui.views.dashboard import DashboardView
+from cma.ui.views.dashboard import TO_CHECK, DashboardView, sessions_summary
 from cma.ui.views.logs import LogsView
 from cma.ui.views.profiles import CloudflareProfilesView
 from cma.ui.views.settings import SettingsView
 from cma.ui.views.ssh import SshView
 from cma.ui.views.tokens import TokensView
 from cma.ui.widgets import BannerStack, add_shortcut, label
+
+# Clés internes inchangées (vue mémorisée dans la configuration) ; libellés de la refonte.
+DESTINATIONS = ("dashboard", "profiles", "tokens", "ssh", "cloud", "logs", "settings")
+KEY_ROLE = Qt.ItemDataRole.UserRole
+
+
+def confirm_quit(parent: QWidget, count: int) -> bool:
+    """« Quitter CMA ? » : Annuler par défaut, « Arrêter et quitter » jamais bouton par défaut (§4.21)."""
+    box = QMessageBox(parent)
+    box.setWindowTitle(tr("Quitter CMA ?"))
+    box.setIcon(QMessageBox.Icon.Question)
+    box.setText(tr("Quitter CMA ?"))
+    box.setInformativeText(
+        tr("1 session est en cours. Elle sera arrêtée.")
+        if count == 1
+        else tr("{n} sessions sont en cours. Elles seront arrêtées.").format(n=count)
+    )
+    cancel = box.addButton(tr("Annuler"), QMessageBox.ButtonRole.RejectRole)
+    stop = box.addButton(tr("Arrêter et quitter"), QMessageBox.ButtonRole.DestructiveRole)
+    box.setDefaultButton(cancel)
+    box.setEscapeButton(cancel)
+    box.exec()
+    return box.clickedButton() is stop
+
+
+def explain_tray(parent: QWidget, text: str) -> None:
+    """Boîte d'information « Compris » (fonction de module pour que les tests puissent la remplacer)."""
+    box = QMessageBox(parent)
+    box.setWindowTitle(APP_NAME)
+    box.setIcon(QMessageBox.Icon.Information)
+    box.setText(text)
+    box.addButton(tr("Compris"), QMessageBox.ButtonRole.AcceptRole)
+    box.exec()
 
 
 class MainWindow(QMainWindow):
@@ -58,28 +92,35 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        sidebar = QWidget()
+        sidebar = QFrame()
         sidebar.setObjectName("Sidebar")
-        sidebar.setFixedWidth(220)
+        sidebar.setFixedWidth(208)
         side = QVBoxLayout(sidebar)
-        side.setContentsMargins(0, 0, 0, 8)
+        side.setContentsMargins(0, 0, 0, 12)
+        side.setSpacing(0)
         brand = QHBoxLayout()
-        brand.setContentsMargins(16, 14, 12, 8)
+        brand.setContentsMargins(18, 18, 12, 10)
+        brand.setSpacing(10)
         logo = QLabel()
         logo.setPixmap(app_icon().pixmap(32, 32))
-        heading = label(APP_NAME)
+        heading = label("CMA")
         heading.setObjectName("AppTitle")
-        heading.setWordWrap(True)
-        brand.addWidget(logo, 0, Qt.AlignmentFlag.AlignTop)
+        heading.setAccessibleName(APP_NAME)
+        heading.setAccessibleDescription(APP_NAME)
+        heading.setToolTip(APP_NAME)
+        brand.addWidget(logo, 0, Qt.AlignmentFlag.AlignVCenter)
         brand.addWidget(heading, 1)
         side.addLayout(brand)
         self.nav = QListWidget()
         self.nav.setAccessibleName(tr("Navigation"))
-        self.nav.setObjectName("SidebarList")
+        self.nav.setObjectName("Navigation")
         self.nav.setIconSize(QSize(20, 20))
         self.nav.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.nav.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         side.addWidget(self.nav, 1)
-        side.addWidget(label(f"v{__version__}", "muted"), 0, Qt.AlignmentFlag.AlignHCenter)
+        version = label(f"CMA {__version__}", "meta")
+        version.setContentsMargins(20, 0, 0, 0)
+        side.addWidget(version)
         layout.addWidget(sidebar)
 
         content = QWidget()
@@ -101,35 +142,54 @@ class MainWindow(QMainWindow):
         self.profiles = CloudflareProfilesView(ctx, lambda: self.show_view("tokens"))
         self.tokens = TokensView(ctx, self.open_profile)
         self.ssh = SshView(ctx)
-        self.cloud = CloudView(ctx)
+        self.cloud = CloudView(ctx, open_profile=self.open_profile)
         self.logs = LogsView(ctx)
         self.settings = SettingsView(ctx)
+        self.dashboard.open_view = self.show_view
+        self.dashboard.open_source = self.open_session_source
         self.views: dict[str, QWidget] = {}
-        for key, text, icon_name, view in (
-            ("dashboard", tr("Tableau de bord"), "layout-dashboard", self.dashboard),
-            ("profiles", tr("Profils Cloudflare"), "cloud", self.profiles),
+        self._nav_items: dict[str, QListWidgetItem] = {}
+        entries: tuple[tuple[str | None, str, str, QWidget | None], ...] = (
+            (None, tr("Utiliser"), "", None),
+            ("dashboard", tr("Sessions"), "layout-dashboard", self.dashboard),
+            (None, tr("Configurer"), "", None),
+            ("profiles", tr("Accès Cloudflare"), "cloud", self.profiles),
             ("tokens", tr("Service tokens"), "key", self.tokens),
-            ("ssh", tr("Redirections SSH"), "server", self.ssh),
-            ("cloud", tr("Compte Cloudflare"), "cloud-cog", self.cloud),
+            ("ssh", tr("Serveurs SSH"), "server", self.ssh),
+            (None, tr("Administrer"), "", None),
+            ("cloud", tr("Cloudflare"), "cloud-cog", self.cloud),
+            (None, "", "", None),
             ("logs", tr("Journaux"), "list-details", self.logs),
             ("settings", tr("Paramètres"), "settings", self.settings),
-        ):
-            item = QListWidgetItem(icon(icon_name), text)
-            item.setData(Qt.ItemDataRole.UserRole, key)
+        )
+        for key, text, icon_name, view in entries:
+            if key is None or view is None:
+                header = QListWidgetItem(text.upper())
+                header.setFlags(Qt.ItemFlag.NoItemFlags)
+                header.setSizeHint(QSize(0, 34 if text else 12))
+                self.nav.addItem(header)
+                continue
+            item = QListWidgetItem(token_icon(icon_name), text)
+            item.setData(KEY_ROLE, key)
+            item.setData(Qt.ItemDataRole.UserRole + 1, (text, icon_name))
             item.setSizeHint(QSize(0, 40))
             self.nav.addItem(item)
             self.stack.addWidget(view)
             self.views[key] = view
+            self._nav_items[key] = item
         self.nav.currentRowChanged.connect(self._on_nav)
-        for index in range(self.nav.count()):
-            add_shortcut(self, QKeySequence(f"Ctrl+{index + 1}"), lambda i=index: self.nav.setCurrentRow(i))
+        for index, key in enumerate(DESTINATIONS):
+            add_shortcut(self, QKeySequence(f"Ctrl+{index + 1}"), lambda k=key: self.show_view(k))
         add_shortcut(self, QKeySequence("Ctrl+Q"), self.request_quit)
+        ctx.theme.changed.connect(self._refresh_nav_icons)
 
         status = self.statusBar()
+        status.setSizeGripEnabled(False)
         self.status_cloudflared = label("")
         self.status_sessions = label("")
         self.status_errors = QPushButton()
         self.status_errors.setFlat(True)
+        self.status_errors.setProperty("role", "link")
         self.status_errors.setCursor(Qt.CursorShape.PointingHandCursor)
         self.status_errors.clicked.connect(lambda: self.show_view("logs"))
         status.addWidget(self.status_cloudflared, 1)
@@ -151,15 +211,7 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(QByteArray.fromBase64(settings.window_geometry.encode("ascii")))
         else:
             self.resize(1180, 760)
-        start = next(
-            (
-                i
-                for i in range(self.nav.count())
-                if self.nav.item(i).data(Qt.ItemDataRole.UserRole) == settings.last_view
-            ),
-            0,
-        )
-        self.nav.setCurrentRow(start)
+        self.show_view(settings.last_view if settings.last_view in self.views else "dashboard")
         self._update_status()
         apply_accessible_names(self)
 
@@ -168,18 +220,25 @@ class MainWindow(QMainWindow):
     def _on_nav(self, row: int) -> None:
         if row < 0:
             return
-        key = self.nav.item(row).data(Qt.ItemDataRole.UserRole)
-        self.stack.setCurrentWidget(self.views[key])
+        item = self.nav.item(row)
+        key = item.data(KEY_ROLE) if item is not None else None
+        if key in self.views:
+            self.stack.setCurrentWidget(self.views[key])
 
     def show_view(self, key: str) -> None:
-        for row in range(self.nav.count()):
-            if self.nav.item(row).data(Qt.ItemDataRole.UserRole) == key:
-                self.nav.setCurrentRow(row)
-                return
+        item = self._nav_items.get(key)
+        if item is not None:
+            self.nav.setCurrentItem(item)
 
     def current_view_key(self) -> str:
         item = self.nav.currentItem()
-        return str(item.data(Qt.ItemDataRole.UserRole)) if item else "dashboard"
+        key = item.data(KEY_ROLE) if item is not None else None
+        return str(key) if key else "dashboard"
+
+    def _refresh_nav_icons(self) -> None:
+        for item in self._nav_items.values():
+            _text, icon_name = item.data(Qt.ItemDataRole.UserRole + 1)
+            item.setIcon(token_icon(icon_name))
 
     def open_logs_for(self, session_id: str) -> None:
         self.logs.show_source(session_id)
@@ -188,6 +247,20 @@ class MainWindow(QMainWindow):
     def open_profile(self, profile_id: str) -> None:
         self.show_view("profiles")
         self.profiles.select_profile(profile_id)
+
+    def open_session_source(self, info: SessionInfo, section: str) -> None:
+        """Depuis un incident de session : ouvrir l'objet configuré, sur la section concernée."""
+        if info.kind == SessionKind.CLOUDFLARE:
+            self.open_profile(info.profile_id)
+            show_section = getattr(self.profiles.editor, "show_section", None)
+            if callable(show_section):
+                show_section(section)
+            return
+        self.show_view("ssh")
+        self.ssh.select_profile(info.profile_id)
+        show_tab = getattr(self.ssh.panel, "show_tab", None)
+        if callable(show_tab):
+            show_tab(section)
 
     def bring_to_front(self) -> None:
         self.showNormal() if self.isMinimized() else self.show()
@@ -210,6 +283,12 @@ class MainWindow(QMainWindow):
         if not visible and self.tray_notify is not None and self.ctx.config().settings.notifications:
             self.tray_notify(level, APP_NAME, text)
 
+    def _tray(self, level: str, title: str, text: str) -> None:
+        """Notification Windows seule, quand la fenêtre est cachée (transitions persistantes, §4.26)."""
+        visible = self.isVisible() and not self.isMinimized()
+        if not visible and self.tray_notify is not None and self.ctx.config().settings.notifications:
+            self.tray_notify(level, title, text)
+
     def _on_task_error(self, error: object) -> None:
         self.notify("error", str(error))
 
@@ -222,15 +301,26 @@ class MainWindow(QMainWindow):
     def _on_session(self, info: SessionInfo) -> None:
         previous = self._sessions.get(info.id)
         self._sessions[info.id] = info
-        if (
-            info.state == SessionState.ERROR
-            and (previous is None or previous.state != SessionState.ERROR)
-            and info.message
-        ):
+        before = previous.state if previous is not None else None
+        if info.state == SessionState.ERROR and before != SessionState.ERROR and info.message:
             self.notify(
                 "error",
                 f"{info.name} : {info.message}",
                 action=(tr("Journal"), lambda: self.open_logs_for(info.id)),
+            )
+        elif info.state == SessionState.RECONNECTING and before in (
+            SessionState.LISTENING,
+            SessionState.DEGRADED,
+        ):
+            delay = round(info.reconnect_in or 0)
+            self._tray(
+                "warning",
+                tr("CMA — Connexion interrompue"),
+                tr("{name} : nouvelle tentative dans {s} s.").format(name=info.name, s=delay),
+            )
+        elif info.state == SessionState.LISTENING and before == SessionState.RECONNECTING:
+            self._tray(
+                "info", tr("CMA — Connexion rétablie"), tr("{name} : à l'écoute.").format(name=info.name)
             )
         self._update_status()
 
@@ -239,13 +329,25 @@ class MainWindow(QMainWindow):
         self._update_status()
 
     def _update_status(self) -> None:
-        active = [s for s in self._sessions.values() if s.state.active]
-        self.status_sessions.setText(tr("{n} session(s) active(s)").format(n=len(active)))
+        infos = list(self._sessions.values())
+        summary = sessions_summary(infos)
+        self.status_sessions.setText(summary)
+        to_check = sum(1 for s in infos if s.state in TO_CHECK)
+        item = self._nav_items.get("dashboard")
+        if item is not None:
+            item.setText(f"{tr('Sessions')} · {to_check} !" if to_check else tr("Sessions"))
+            item.setToolTip(
+                tr("{n} connexion(s) à vérifier").format(n=to_check) if to_check else tr("Sessions")
+            )
         errors = self.logs.error_count()
         self.status_errors.setText(
-            tr("Journal : {n} erreur(s)").format(n=errors) if errors else tr("Journal")
+            tr("Journaux · {n} erreur(s)").format(n=errors) if errors else tr("Journaux")
         )
-        self.status_errors.setIcon(icon("alert-triangle") if errors else icon("list-details"))
+        set_icon(
+            self.status_errors,
+            "alert-triangle" if errors else "list-details",
+            "warning" if errors else "text",
+        )
 
     def set_cloudflared_status(self, text: str) -> None:
         self.status_cloudflared.setText(text)
@@ -259,18 +361,25 @@ class MainWindow(QMainWindow):
         settings = self.ctx.config().settings
         if settings.close_to_tray and self.tray_available:
             event.ignore()
+            if not settings.tray_hint_shown and not self._told_about_tray:
+                self._told_about_tray = True
+                self._explain_tray()
             self.save_window_state()
             self.hide()
-            if not self._told_about_tray and self.tray_notify is not None:
-                self._told_about_tray = True
-                self.tray_notify(
-                    "info",
-                    APP_NAME,
-                    tr("CMA continue dans la zone de notification. Clic droit sur l'icône pour quitter."),
-                )
             return
         event.ignore()
         self.request_quit()
+
+    def _explain_tray(self) -> None:
+        """Première fermeture : expliquer avant de masquer que CMA continue (§4.1)."""
+        text = tr(
+            "CMA continue dans la zone de notification. Pour arrêter les connexions, choisissez « Tout arrêter »."
+        )
+        if self.isVisible():
+            explain_tray(self, text)
+        elif self.tray_notify is not None:
+            self.tray_notify("info", APP_NAME, text)
+        self.ctx.update_config(lambda c: setattr(c.settings, "tray_hint_shown", True))
 
     def has_unsaved_changes(self) -> bool:
         return any(view.has_unsaved_changes() for view in (self.profiles, self.tokens, self.ssh))  # type: ignore[attr-defined]
@@ -279,19 +388,16 @@ class MainWindow(QMainWindow):
         if self.has_unsaved_changes():
             self.bring_to_front()
             answer = QMessageBox.question(
-                self, tr("Quitter"), tr("Des modifications ne sont pas enregistrées. Quitter quand même ?")
+                self,
+                tr("Quitter CMA ?"),
+                tr("Des modifications ne sont pas enregistrées. Quitter quand même ?"),
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
         active = [s for s in self._sessions.values() if s.state.active]
         if active and self.ctx.config().settings.confirm_exit:
             self.bring_to_front()
-            answer = QMessageBox.question(
-                self,
-                tr("Quitter"),
-                tr("{n} session(s) sont ouvertes et seront fermées. Quitter ?").format(n=len(active)),
-            )
-            if answer != QMessageBox.StandardButton.Yes:
+            if not confirm_quit(self, len(active)):
                 return
         self.quit_now()
 

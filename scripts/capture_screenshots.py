@@ -271,7 +271,7 @@ def main() -> int:
             ("INFO", "NAS · grafana", "À l'écoute sur 127.0.0.1:3000, vers 127.0.0.1:3000 depuis NAS."),
         ):
             window.logs.model.add(LogLine(source_id=None, source_label=source, level=level, message=text))  # type: ignore[arg-type]
-        window.logs.model._flush()
+        window.logs.model.flush()
         window.set_cloudflared_status("cloudflared 2026.9.3")
         window.settings.data_dir.setText(r"C:\Users\<utilisateur>\AppData\Roaming\CloudflaredManager")
         suffix = "sombre" if theme_name == Theme.DARK else "clair"

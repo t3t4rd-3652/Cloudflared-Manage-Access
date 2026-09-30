@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtWidgets import QInputDialog
 
 import cma.ui.views.cloud as cloud_module
 from cma.core.cfadmin import PublishRequest
 from cma.core.cfapi import TOKEN_SECRET_KEY, Tunnel
 from cma.core.models import AuthMode
-from cma.ui.views.cloud import CloudView, PublishDialog
+from cma.ui.views.cloud import AllowDialog, CloudView, CreateTokenDialog, ProtectDialog, PublishDialog
 from tests.fakes.fake_cfapi import TOKEN, FakeCloudflareServer
 
 
@@ -38,7 +37,8 @@ def test_cloud_view_full_flow(qtbot, gui, cf, monkeypatch):
     assert view.stack.currentIndex() == 1
     assert ctx.core.secrets.get(TOKEN_SECRET_KEY) == TOKEN
     assert view.token_field.text() == ""
-    assert "3 nom(s) d'hôte" in view.status.text()
+    assert "3 noms d'hôte" in view.status.text()
+    assert view.read_label.text().startswith("Dernière lecture")
 
     # Import d'un nom d'hôte sélectionné, puis de tout le reste.
     bureau = view.tree.topLevelItem(0)
@@ -52,21 +52,21 @@ def test_cloud_view_full_flow(qtbot, gui, cf, monkeypatch):
     assert len(ctx.config().cloudflare_profiles) == 3
 
     # Service token créé chez Cloudflare et rangé dans le coffre.
-    monkeypatch.setattr(QInputDialog, "getText", lambda *_a, **_k: ("Robot", True))
+    monkeypatch.setattr(cloud_module, "ask_create_token", lambda *_a: "Robot")
     view.create_token()
     qtbot.waitUntil(lambda: view.remote_tokens.rowCount() == 1, timeout=10000)
     token = ctx.config().tokens[0]
     assert ctx.core.secrets.get(token.secret_key).startswith("secret-")
-    assert view.remote_tokens.item(0, 3).text() == "oui"
+    assert view.remote_tokens.item(0, 3).text() == "Oui"
 
     # Autorisation du token sur l'application Access existante.
     view.apps.selectRow(0)
-    monkeypatch.setattr(QInputDialog, "getItem", lambda *_a, **_k: ("Robot", True))
+    monkeypatch.setattr(cloud_module, "ask_allow", lambda _p, _app, tokens: tokens[0])
     view.allow_token()
     qtbot.waitUntil(lambda: bool(cf.state.policies), timeout=10000)
 
     # Protection d'un nouveau nom d'hôte.
-    monkeypatch.setattr(QInputDialog, "getText", lambda *_a, **_k: ("DB.exemple.fr", True))
+    monkeypatch.setattr(cloud_module, "ask_protect", lambda *_a: "DB.exemple.fr")
     view.protect_hostname()
     qtbot.waitUntil(lambda: view.apps.rowCount() == 2, timeout=10000)
 
@@ -139,4 +139,48 @@ def test_publish_dialog_validation(qtbot, gui, cf):
 
     empty = PublishDialog(window, overview.__class__(account=overview.account), [])
     qtbot.addWidget(empty)
-    assert empty.request() is None and "aucun tunnel" in empty.error.text()
+    assert empty.request() is None and "aucun tunnel" in empty.error.text().lower()
+
+
+def test_publish_dialog_splits_pasted_hostname(qtbot, gui, cf):
+    ctx, window = gui
+    ctx.core.manager.cloudflare.base_url = cf.base_url
+    ctx.core.secrets.set(TOKEN_SECRET_KEY, TOKEN)
+    accounts = ctx.engine.run_sync(ctx.core.manager.cloudflare.connect(), timeout=10)
+    overview = ctx.engine.run_sync(ctx.core.manager.cloudflare.overview(accounts[0]), timeout=10)
+    dialog = PublishDialog(window, overview, [])
+    qtbot.addWidget(dialog)
+    assert not dialog.ok_button.isEnabled()
+    dialog.hostname.textEdited.emit("pg.lab.exemple.fr")
+    assert dialog.hostname.text() == "pg" and dialog.zone.currentData() == "lab.exemple.fr"
+    dialog.service.setText("tcp://localhost:5432")
+    assert dialog.ok_button.isEnabled()
+    assert "pg.lab.exemple.fr → tcp://localhost:5432 via bureau" in dialog.summary.text()
+
+
+def test_cloud_secondary_dialogs(qtbot, gui):
+    from cma.core.cfapi import AccessApp
+    from cma.core.models import ServiceToken
+
+    _ctx, window = gui
+    protect = ProtectDialog(window, ["ssh.exemple.fr"])
+    qtbot.addWidget(protect)
+    assert not protect.ok_button.isEnabled()
+    protect.hostname.setText("  DB.Exemple.fr ")
+    assert protect.ok_button.isEnabled() and protect.value() == "db.exemple.fr"
+    assert "db.exemple.fr" in protect.app_name.text()
+
+    app = AccessApp("a1", "SSH", "ssh.exemple.fr", "self_hosted")
+    empty = AllowDialog(window, app, [])
+    qtbot.addWidget(empty)
+    assert not empty.ok_button.isEnabled() and empty.value() is None
+    token = ServiceToken(name="Robot", client_id="abc.access")
+    allow = AllowDialog(window, app, [token])
+    qtbot.addWidget(allow)
+    assert allow.ok_button.isEnabled() and allow.value() == token
+
+    create = CreateTokenDialog(window, "Mon compte", persistent=False)
+    qtbot.addWidget(create)
+    assert not create.ok_button.isEnabled()
+    create.name.setText(" Robot ")
+    assert create.ok_button.isEnabled() and create.value() == "Robot"

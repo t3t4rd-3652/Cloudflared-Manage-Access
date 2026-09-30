@@ -327,6 +327,7 @@ class Settings(Model):
     last_view: str = "dashboard"
     onboarding_done: bool = False
     v1_files_handled: bool = False
+    tray_hint_shown: bool = False
     cloudflare_account_id: str | None = None
 
     @model_validator(mode="after")

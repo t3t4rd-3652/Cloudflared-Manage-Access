@@ -125,7 +125,9 @@ def test_ssh_view_full_flow(qtbot, ssh_gui, threaded_ssh_server, monkeypatch):
     forwards._stop_all()
     forwards.table.selectRow(0)
     forwards._edit()
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    import cma.ui.views.ssh as ssh_module
+
+    monkeypatch.setattr(ssh_module, "confirm", lambda *_a: True)
     forwards._remove()
     qtbot.waitUntil(lambda: not ctx.config().ssh_profile(profile_id).saved_forwards, timeout=5000)
 
@@ -268,10 +270,17 @@ def test_tray_menu_and_state(qtbot, gui):
     tray = Tray(ctx, window)
     tray.notify("error", "t", "m")
     tray.notify("info", "t", "m")
+    symbols = []
     for state in (SessionState.ERROR, SessionState.DEGRADED, SessionState.LISTENING):
         tray._on_session(fake_info(profile_id=profile.id, state=state))
+        symbols.append(tray.global_state()[1])
+    assert symbols == ["error", "warn", "ok"]
+    assert tray.icon.toolTip() == "CMA : 1 session en cours"
     labels = [a.text() for a in tray.menu.actions()]
-    assert "Fav" in labels and "FavSSH" in labels
+    assert labels[0] == "CMA — 1 session en cours"
+    favorites = next(a.menu() for a in tray.menu.actions() if a.text() == "Favoris")
+    entries = [a.text() for a in favorites.actions()]
+    assert entries == ["Fav — À l'écoute · Arrêter", "FavSSH — Déconnecté · Connecter"]
     tray._on_removed("s1")
     tray._toggle(profile, False)
     tray._toggle(ssh, True)
@@ -319,13 +328,22 @@ def test_quick_actions(qtbot, monkeypatch, tmp_path):
 
 def test_main_window_behaviour(qtbot, gui, monkeypatch):
     ctx, window = gui
+    import cma.ui.main_window as main_window_module
+
     shown: list[tuple] = []
+    hints: list[str] = []
+    monkeypatch.setattr(main_window_module, "explain_tray", lambda _w, text: hints.append(text))
     window.tray_notify = lambda *a: shown.append(a)
     window.tray_available = True
     event = QCloseEvent()
     window.closeEvent(event)
     assert not event.isAccepted()
     assert not window.isVisible()
+    assert len(hints) == 1 and "Tout arrêter" in hints[0]
+    assert ctx.config().settings.tray_hint_shown
+    window.bring_to_front()
+    window.closeEvent(QCloseEvent())
+    assert len(hints) == 1  # expliqué une seule fois
     window.notify("info", "en arrière-plan")
     assert shown
     window.bring_to_front()
@@ -347,8 +365,11 @@ def test_main_window_behaviour(qtbot, gui, monkeypatch):
     window.profiles.editor.load(window.profiles.editor.profile)
     ctx.update_config(lambda c: setattr(c.settings, "close_to_tray", False))
     window._on_session(fake_info(id="s2", state=SessionState.LISTENING))
+    asked: list[int] = []
+    monkeypatch.setattr(main_window_module, "confirm_quit", lambda _w, n: asked.append(n) or False)
     window.closeEvent(QCloseEvent())
     assert not window.quitting
+    assert asked == [1]
 
 
 def test_full_application_start_and_stop(qtbot, qapp, paths, monkeypatch):
@@ -383,3 +404,52 @@ def test_full_application_start_and_stop(qtbot, qapp, paths, monkeypatch):
     assert QApplication.instance() is qapp
     assert asyncio
     assert Path(paths.lock_file).exists()
+
+
+# --- Journaux --------------------------------------------------------------------------------------
+
+
+def test_logs_view(qtbot, gui, monkeypatch, tmp_path):
+    import cma.ui.views.logs as logs_module
+    from cma.core.events import LogLine
+
+    ctx, window = gui
+    view = window.logs
+    notes: list[str] = []
+    monkeypatch.setattr(ctx, "notify", lambda _level, text, **_k: notes.append(text))
+    assert view.table_stack.currentWidget() is view.first_use
+    assert not view.export_button.isEnabled()
+    view.load_history(
+        [
+            LogLine(None, "CMA", "INFO", "démarrage"),
+            LogLine("s1", "Bureau labo", "ERROR", "Access a refusé le jeton"),
+            LogLine("s1", "Bureau labo", "DEBUG", "détail"),
+        ]
+    )
+    view.model.flush()
+    assert view.counter.text().startswith("2 événements affichés")
+    assert view.proxy.data(view.proxy.index(1, 1)) == "× Erreur"
+    assert view.proxy.data(view.proxy.index(1, 3), 9) is None  # couleur réservée au niveau
+    view.level.setCurrentIndex(0)
+    assert view.proxy.rowCount() == 3
+    view.search.setText("introuvable")
+    assert view.table_stack.currentWidget() is view.no_match
+    view.reset_filters()
+    assert view.proxy.rowCount() == 2
+    view.table.selectRow(1)
+    assert "Access a refusé le jeton" in view.detail.toPlainText()
+    assert "sélectionnée" in view.copy_button.accessibleName()
+    view._copy()
+    assert QApplication.clipboard().text().endswith("Bureau labo : Access a refusé le jeton")
+    target = tmp_path / "export.txt"
+    monkeypatch.setattr(logs_module, "save_path", lambda _p, n: str(target))
+    view._export()
+    assert target.read_text(encoding="utf-8").count("\n") == 2
+    assert notes[-1] == "Journaux exportés."
+    view.follow.setChecked(False)
+    assert not view.resume.isHidden()
+    view.resume.click()
+    assert view.follow.isChecked() and view.resume.isHidden()
+    view.clear_display()
+    assert view.model.rowCount() == 0
+    assert notes[-1] == "Affichage effacé. Les fichiers journaux sont conservés."

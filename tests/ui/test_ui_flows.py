@@ -55,7 +55,7 @@ def test_duplicate_names_are_refused(qtbot, gui):
     editor.name.setText("Nouveau profil")
     editor.name.textEdited.emit("x")
     assert editor.save() is False
-    assert "déjà ce nom" in editor.errors["name"].text()
+    assert "existe déjà" in editor.errors["name"].text()
 
 
 def test_token_secret_goes_to_the_vault(qtbot, gui):
@@ -104,7 +104,7 @@ def test_dashboard_follows_a_real_session(qtbot, gui, monkeypatch):
     )
     card = next(iter(window.dashboard.cards.values()))
     assert card.address.text() == f"127.0.0.1:{port}"
-    assert "1 session(s) active(s)" in window.status_sessions.text()
+    assert "1 session en cours" in window.status_sessions.text()
 
     card._stop()
     wait_until(qtbot, lambda: not window.dashboard.cards)
@@ -185,7 +185,7 @@ def test_groups_delete_key_and_access_token_status(qtbot, gui, monkeypatch):
     second = CloudflareProfile(name="B", group="Prod", hostname="b.ex.fr", local_port=31002)
     ctx.update_config(lambda c: c.cloudflare_profiles.extend([first, second]))
 
-    # Tableau de bord : le menu « Connecter » propose le groupe entier.
+    # Sessions : le menu « Connecter… » propose le groupe entier.
     group_action = next(a for a in window.dashboard.connect_menu.actions() if "Prod (2)" in a.text())
     group_action.trigger()
     qtbot.waitUntil(lambda: ("start", "Prod") in calls)
@@ -195,7 +195,7 @@ def test_groups_delete_key_and_access_token_status(qtbot, gui, monkeypatch):
     window.show_view("profiles")
     tree = view.list.tree
     group_item = tree.topLevelItem(0)
-    assert group_item is not None and group_item.text(0) == "Prod"
+    assert group_item is not None and group_item.text(0) == "Prod (2)"
     menu = view.list.group_menu(tree.visualItemRect(group_item).center())
     assert isinstance(menu, QMenu)
     assert [a.text() for a in menu.actions()] == ["Connecter le groupe", "Déconnecter le groupe"]
@@ -208,10 +208,10 @@ def test_groups_delete_key_and_access_token_status(qtbot, gui, monkeypatch):
     view.select_profile(first.id)
     editor = view.editor
     assert editor.auth_form.isRowVisible(editor.access_host)
-    assert "non vérifié" in editor.access_status.text()
+    assert "Non vérifié" in editor.access_status.text()
     editor.access_check.click()
-    qtbot.waitUntil(lambda: "valide" in editor.access_status.text())
-    assert editor.access_status.property("role") == "success"
+    qtbot.waitUntil(lambda: "Valide" in editor.access_status.text())
+    assert editor.access_status.property("status") == "success"
 
     # Touche Suppr : même action que la corbeille.
     monkeypatch.setattr(profiles_module, "confirm", lambda *_a: True)

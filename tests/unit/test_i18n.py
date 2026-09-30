@@ -46,7 +46,7 @@ def test_language_switch():
     previous = get_language()
     try:
         set_language("en")
-        assert tr("Tableau de bord") == "Dashboard"
+        assert tr("Journaux") == "Logs"
         assert tr("texte inconnu") == "texte inconnu"
         set_language("xx")
         assert get_language() == "fr"

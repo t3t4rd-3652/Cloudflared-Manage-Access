@@ -29,14 +29,14 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
 - Déploiement de clé publique par SFTP : lecture d'`authorized_keys`, ajout seulement si la clé manque, droits 700/600, relecture de contrôle.
 - Les redirections n'écoutent que sur `127.0.0.1`.
 
-## Compte Cloudflare (API)
+## Administration Cloudflare (API)
 
 - Le jeton d'API est vérifié, puis rangé dans le coffre (clé `cfapi:token`). Il n'est écrit dans aucun fichier ni journal.
 - Permissions conseillées, et rien de plus : Cloudflare Tunnel (modifier), Access: Apps and Policies (modifier),
   Access: Service Tokens (modifier) sur le compte ; DNS (modifier) et Zone (lire) sur les zones concernées.
 - Un service token créé depuis CMA part directement dans le coffre. Cloudflare ne renvoie son secret qu'une fois,
   et CMA ne l'affiche jamais.
-- « Oublier le jeton » le retire du coffre. Révoquez-le aussi dans le tableau de bord Cloudflare si besoin.
+- « Oublier le jeton… » le retire du coffre, après confirmation. Révoquez-le aussi dans le tableau de bord Cloudflare si besoin.
 
 ## Mise à jour de CMA
 

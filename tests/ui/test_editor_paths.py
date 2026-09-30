@@ -80,7 +80,7 @@ def test_profile_remote_actions(qtbot, gui, notes, monkeypatch):
     editor._login()
     qtbot.waitUntil(lambda: "token" in calls, timeout=5000)
     qtbot.waitUntil(lambda: "Aucun jeton" in editor.access_status.text(), timeout=5000)
-    assert editor.access_status.property("role") == "warning"
+    assert editor.access_status.property("status") == "warning"
     editor._ssh_config()
     qtbot.waitUntil(lambda: shown == ["Host a.exemple.fr"], timeout=5000)
 
@@ -143,7 +143,9 @@ def test_profile_sessions_toggle_and_unsaved_changes(qtbot, gui, notes, monkeypa
     view.select_profile(first.id)
     view._show(first.id)
     texts: list[str] = []
-    monkeypatch.setattr(profiles_module, "confirm", lambda _p, _h, text: texts.append(text) or True)
+    monkeypatch.setattr(
+        profiles_module, "confirm", lambda _p, heading, text, *_rest: texts.append(heading + text) or True
+    )
     view.delete()
     assert "Via A" in texts[0]
     assert ctx.config().ssh_profile(via.id).via_cloudflare_profile is None

@@ -31,7 +31,7 @@ def test_main_window_has_no_unnamed_control(qtbot, gui):
     window.tokens.list.select(token.id)
     assert describe(missing_accessible_names(window)) == []
     # Les champs enveloppés (message d'erreur sous le champ) reprennent le libellé de leur ligne.
-    assert accessible_name(window.profiles.editor.hostname) == "Hostname"
+    assert accessible_name(window.profiles.editor.hostname) == "Nom d'hôte"
     assert accessible_name(window.profiles.list.tree) == "Profils Cloudflare"
 
 

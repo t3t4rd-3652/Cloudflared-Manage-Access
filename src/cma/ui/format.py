@@ -38,3 +38,12 @@ def since(moment: datetime | None) -> str:
 
 def short_datetime(moment: datetime) -> str:
     return moment.astimezone().strftime("%d/%m/%Y %H:%M")
+
+
+def last_read(when: datetime | None) -> str:
+    """« Dernière lecture : aujourd'hui à 16:29 » ou avec la date complète."""
+    if when is None:
+        return ""
+    if when.date() == datetime.now().date():
+        return tr("Dernière lecture : aujourd'hui à {time}").format(time=when.strftime("%H:%M"))
+    return tr("Dernière lecture : {date}").format(date=when.strftime("%d/%m/%Y %H:%M"))

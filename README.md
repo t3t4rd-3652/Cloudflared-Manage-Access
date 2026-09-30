@@ -3,7 +3,7 @@
 Application de bureau pour ouvrir, d'un clic, des accès locaux à vos applications protégées par
 **Cloudflare Access** (`cloudflared access tcp`) et des **redirections de ports SSH** vers vos serveurs.
 
-![Tableau de bord](docs/captures/dashboard-clair.png)
+![Sessions](docs/captures/dashboard-clair.png)
 
 Chaque connexion affiche son état réel (à l'écoute, dégradée, en reconnexion, en erreur), se reconnecte
 seule si besoin, et vos secrets restent dans le coffre du système, jamais dans un fichier ni sur une ligne de commande.
@@ -39,21 +39,25 @@ uv run cma --help     # ligne de commande
 ## Démarrage rapide
 
 1. Au premier lancement, l'assistant vérifie cloudflared et propose de créer un premier profil.
-2. Dans **Profils Cloudflare**, créez un profil : hostname de l'application Access, port local (le bouton « Port libre » en choisit un), méthode d'authentification.
-3. Cliquez sur **Connecter**. Le tableau de bord montre la session, son adresse locale et l'action adaptée : navigateur, terminal SSH, Bureau à distance, MongoDB Compass…
+2. Dans **Accès Cloudflare**, créez un profil : nom d'hôte de l'application Access, port local (le bouton « Choisir un port libre » en propose un), méthode d'authentification.
+3. Cliquez sur **Connecter**. La page **Sessions** montre la session, son adresse locale et l'action adaptée : navigateur, terminal SSH, Bureau à distance, MongoDB Compass…
 
 Vos données de la v1 (profils, tokens, profils SSH) sont reprises automatiquement au premier lancement de la v2.
 Voir [Migration depuis la v1](#migration-depuis-la-v1).
 
 ## Fonctions
 
-### Profils Cloudflare
+La navigation suit trois intentions : **Utiliser** (Sessions), **Configurer** (Accès Cloudflare, Service tokens,
+Serveurs SSH) et **Administrer** (Cloudflare). Les sessions à vérifier passent en tête, avec la cause et l'action
+qui la corrige.
 
-![Profils Cloudflare](docs/captures/profiles-clair.png)
+### Accès Cloudflare
+
+![Accès Cloudflare](docs/captures/profiles-clair.png)
 
 - Authentification par navigateur (compte Access) ou par service token. En mode navigateur, **Vérifier le jeton** indique si cloudflared a déjà un jeton Access valide.
 - Proxy, en-têtes supplémentaires, groupes, favoris, démarrage et reconnexion automatiques.
-- Un groupe se connecte d'un coup : clic droit sur son titre dans la liste, ou menu **Connecter** du tableau de bord.
+- Un groupe se connecte d'un coup : clic droit sur son titre dans la liste, ou menu **Connecter…** de la page Sessions.
 - Validation en direct : hostname, port libre ou réservé par Windows (Hyper-V, WSL), proxy.
 - Bouton **Tester** : vérifie que Cloudflare Access accepte le token.
 
@@ -63,9 +67,9 @@ Voir [Migration depuis la v1](#migration-depuis-la-v1).
 
 - Le secret est rangé dans le Gestionnaire d'identifiants Windows. Un token est partagé par plusieurs profils sans être recopié.
 
-### Redirections SSH
+### Serveurs SSH
 
-![Redirections SSH](docs/captures/ssh-clair.png)
+![Serveurs SSH](docs/captures/ssh-clair.png)
 
 - Liste des ports en écoute sur le serveur, avec service, conteneur Docker et statut HTTP, **sans rien installer** sur le serveur. Linux et Windows (OpenSSH Server) sont reconnus automatiquement.
 - Redirections enregistrées, démarrées d'un clic, avec compteurs de connexions et d'octets.
@@ -73,9 +77,9 @@ Voir [Migration depuis la v1](#migration-depuis-la-v1).
 - Vérification de la clé d'hôte au premier contact, avec son empreinte SHA-256.
 - Passage par un profil Cloudflare pour les serveurs SSH publiés par Access.
 
-### Compte Cloudflare
+### Administration Cloudflare
 
-![Compte Cloudflare](docs/captures/cloud-clair.png)
+![Administration Cloudflare](docs/captures/cloud-clair.png)
 
 Avec un jeton d'API Cloudflare, CMA gère aussi le côté serveur :
 

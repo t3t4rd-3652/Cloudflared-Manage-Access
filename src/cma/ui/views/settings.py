@@ -11,7 +11,7 @@ from typing import Any
 
 from PySide6 import __version__ as pyside_version
 from PySide6.QtCore import QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QScrollArea,
     QSpinBox,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -52,7 +53,7 @@ from cma.platform import autostart
 from cma.ui.context import GuiContext
 from cma.ui.dialogs.misc import KeysDialog, KnownHostsDialog, confirm_delete_v1
 from cma.ui.dialogs.transfer import run_export, run_import
-from cma.ui.widgets import button, label, primary_button, title
+from cma.ui.widgets import add_shortcut, button, label, primary_button, title
 
 
 class SettingsView(QWidget):
@@ -70,21 +71,38 @@ class SettingsView(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 20, 24, 16)
         outer.addWidget(title(tr("Paramètres")))
-        scroll = QScrollArea()
-        scroll.setObjectName("PageScroll")
-        scroll.setWidgetResizable(True)
-        body = QWidget()
-        self.body = QVBoxLayout(body)
-        self.body.setSpacing(8)
-        scroll.setWidget(body)
-        outer.addWidget(scroll, 1)
-        self._build_cloudflared()
-        self._build_appearance()
-        self._build_behaviour()
-        self._build_ssh()
-        self._build_data()
-        self._build_about()
-        self.body.addStretch()
+        # Cinq pages courtes plutôt qu'une longue page (§4.8) ; préférences enregistrées à la volée.
+        self.tabs = QTabWidget()
+        self.tabs.setProperty("role", "plain")
+        self.tabs.setDocumentMode(True)
+        outer.addWidget(self.tabs, 1)
+        pages = (
+            ("general", tr("Général"), (self._build_appearance, self._build_behaviour)),
+            ("cloudflared", tr("cloudflared"), (self._build_cloudflared,)),
+            ("ssh", tr("SSH"), (self._build_ssh,)),
+            ("data", tr("Données"), (self._build_data,)),
+            ("about", tr("À propos"), (self._build_about,)),
+        )
+        self.pages: dict[str, QWidget] = {}
+        for key, name, builders in pages:
+            scroll = QScrollArea()
+            scroll.setObjectName("PageScroll")
+            scroll.setWidgetResizable(True)
+            body = QWidget()
+            body.setMaximumWidth(736)
+            self.body = QVBoxLayout(body)
+            self.body.setContentsMargins(0, 16, 16, 16)
+            self.body.setSpacing(8)
+            for build in builders:
+                build()
+            if key == "general":
+                self.body.addWidget(label(tr("Les préférences sont enregistrées automatiquement."), "muted"))
+            self.body.addStretch()
+            scroll.setWidget(body)
+            self.tabs.addTab(scroll, name)
+            self.pages[key] = scroll
+        add_shortcut(self, QKeySequence.StandardKey.Save, self._autosave_hint)
+        add_shortcut(self, QKeySequence.StandardKey.Refresh, self._refresh_shortcut)
         self.download_progress.connect(self._on_progress)
         self.cma_progress.connect(self._on_cma_progress)
         ctx.bridge.config_changed.connect(self.load)
@@ -95,14 +113,31 @@ class SettingsView(QWidget):
     def _section(self, text: str) -> QFormLayout:
         self.body.addWidget(title(text, "SectionTitle"))
         form = QFormLayout()
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self.body.addLayout(form)
         return form
+
+    def show_page(self, key: str) -> None:
+        page = self.pages.get(key)
+        if page is not None:
+            self.tabs.setCurrentWidget(page)
+
+    def _autosave_hint(self) -> None:
+        self.ctx.notify("info", tr("Les paramètres sont enregistrés automatiquement."))
+
+    def _refresh_shortcut(self) -> None:
+        current = self.tabs.currentWidget()
+        if current is self.pages.get("cloudflared"):
+            self.check_cloudflared_release()
+        elif current is self.pages.get("about"):
+            self.check_cma_update()
 
     def _build_cloudflared(self) -> None:
         form = self._section(tr("cloudflared"))
         path_row = QHBoxLayout()
         self.cf_path = QLineEdit()
-        self.cf_path.setPlaceholderText(tr("détection automatique"))
+        self.cf_path.setPlaceholderText(tr("Détection automatique"))
         self.cf_path.editingFinished.connect(self._save_path)
         browse = button(tr("Parcourir…"), "folder-open")
         browse.clicked.connect(self._browse)
@@ -111,9 +146,9 @@ class SettingsView(QWidget):
         path_row.addWidget(self.cf_path, 1)
         path_row.addWidget(browse)
         path_row.addWidget(detect)
-        form.addRow(tr("Exécutable :"), path_row)
+        form.addRow(tr("Exécutable"), path_row)
         self.cf_version = label("", "muted")
-        form.addRow(tr("Version :"), self.cf_version)
+        form.addRow(tr("Version"), self.cf_version)
         update_row = QHBoxLayout()
         self.check_button = button(tr("Vérifier les mises à jour"), "refresh")
         self.check_button.clicked.connect(self.check_cloudflared_release)
@@ -126,24 +161,24 @@ class SettingsView(QWidget):
         update_row.addWidget(self.download_button)
         update_row.addWidget(page)
         update_row.addStretch()
-        form.addRow("", update_row)
+        form.addRow(update_row)
         self.release_label = label("", "muted", wrap=True)
-        form.addRow("", self.release_label)
+        form.addRow(self.release_label)
         self.progress = QProgressBar()
         self.progress.hide()
-        form.addRow("", self.progress)
+        form.addRow(self.progress)
         self.cf_log_level = QComboBox()
         for text, value in (
-            (tr("erreurs"), "error"),
-            (tr("avertissements"), "warn"),
-            (tr("normal"), "info"),
-            (tr("débogage"), "debug"),
+            (tr("Erreurs"), "error"),
+            (tr("Avertissements"), "warn"),
+            (tr("Normal"), "info"),
+            (tr("Débogage"), "debug"),
         ):
             self.cf_log_level.addItem(text, value)
         self.cf_log_level.currentIndexChanged.connect(
             lambda _i: self._set("cloudflared_log_level", self.cf_log_level.currentData())
         )
-        form.addRow(tr("Journal de cloudflared :"), self.cf_log_level)
+        form.addRow(tr("Niveau de journal"), self.cf_log_level)
 
     def _build_appearance(self) -> None:
         form = self._section(tr("Apparence"))
@@ -155,21 +190,21 @@ class SettingsView(QWidget):
         ):
             self.theme.addItem(text, value)
         self.theme.currentIndexChanged.connect(self._theme_changed)
-        form.addRow(tr("Thème :"), self.theme)
+        form.addRow(tr("Thème"), self.theme)
         self.language = QComboBox()
         for code, name in SUPPORTED_LANGUAGES.items():
             self.language.addItem(name, code)
         self.language.currentIndexChanged.connect(self._language_changed)
-        form.addRow(tr("Langue :"), self.language)
+        form.addRow(tr("Langue"), self.language)
 
     def _build_behaviour(self) -> None:
         form = self._section(tr("Comportement"))
         self.close_to_tray = QCheckBox(tr("Fermer la fenêtre la réduit dans la zone de notification"))
         self.start_minimized = QCheckBox(tr("Démarrer réduit"))
-        self.start_with_system = QCheckBox(tr("Démarrer avec la session"))
+        self.start_with_system = QCheckBox(tr("Démarrer avec Windows"))
         self.start_with_system.setEnabled(autostart.supported())
-        self.notifications = QCheckBox(tr("Notifications système"))
-        self.confirm_exit = QCheckBox(tr("Demander confirmation pour quitter si des sessions sont ouvertes"))
+        self.notifications = QCheckBox(tr("Notifications Windows"))
+        self.confirm_exit = QCheckBox(tr("Demander confirmation si des sessions sont ouvertes"))
         self.check_updates = QCheckBox(tr("Vérifier les nouvelles versions au démarrage"))
         for widget, key in (
             (self.close_to_tray, "close_to_tray"),
@@ -179,9 +214,9 @@ class SettingsView(QWidget):
             (self.check_updates, "check_updates"),
         ):
             widget.toggled.connect(lambda checked, k=key: self._set(k, checked))
-            form.addRow("", widget)
+            form.addRow(widget)
         self.start_with_system.toggled.connect(self._autostart_changed)
-        form.addRow("", self.start_with_system)
+        form.addRow(self.start_with_system)
         ports = QHBoxLayout()
         self.port_min = QSpinBox()
         self.port_min.setAccessibleName(tr("Premier port automatique"))
@@ -190,30 +225,32 @@ class SettingsView(QWidget):
         for spin in (self.port_min, self.port_max):
             spin.setRange(1024, 65535)
             spin.editingFinished.connect(self._ports_changed)
+        ports.addWidget(label(tr("De")))
         ports.addWidget(self.port_min)
         ports.addWidget(label(tr("à")))
         ports.addWidget(self.port_max)
         ports.addStretch()
-        form.addRow(tr("Ports automatiques :"), ports)
+        form.addRow(tr("Ports automatiques"), ports)
 
     def _build_ssh(self) -> None:
         form = self._section(tr("SSH"))
         self.known_hosts = QComboBox()
-        self.known_hosts.addItem(tr("Fichier de l'application (recommandé)"), KnownHostsMode.APP)
+        self.known_hosts.addItem(tr("Fichier de CMA (recommandé)"), KnownHostsMode.APP)
         self.known_hosts.addItem(tr("~/.ssh/known_hosts de l'utilisateur"), KnownHostsMode.USER)
         self.known_hosts.currentIndexChanged.connect(
             lambda _i: self._set("known_hosts", self.known_hosts.currentData())
         )
-        form.addRow(tr("Empreintes connues :"), self.known_hosts)
+        form.addRow(tr("Empreintes connues"), self.known_hosts)
+        form.addRow(label(tr("Les nouvelles vérifications utiliseront ce fichier."), "muted", wrap=True))
         row = QHBoxLayout()
-        hosts = button(tr("Empreintes…"), "fingerprint")
+        hosts = button(tr("Empreintes des serveurs…"), "fingerprint")
         hosts.clicked.connect(lambda: KnownHostsDialog(self, self.ctx).exec())
         keys = button(tr("Clés SSH…"), "key")
         keys.clicked.connect(lambda: KeysDialog(self, self.ctx).exec())
         row.addWidget(hosts)
         row.addWidget(keys)
         row.addStretch()
-        form.addRow("", row)
+        form.addRow(row)
 
     def _build_data(self) -> None:
         form = self._section(tr("Données"))
@@ -222,9 +259,9 @@ class SettingsView(QWidget):
             "muted",
             selectable=True,
         )
-        form.addRow(tr("Dossier :"), self.data_dir)
+        form.addRow(tr("Dossier"), self.data_dir)
         self.vault = label(self._vault_text(), "muted", wrap=True)
-        form.addRow(tr("Coffre des secrets :"), self.vault)
+        form.addRow(tr("Coffre des secrets"), self.vault)
         row = QHBoxLayout()
         for text, icon_name, callback in (
             (tr("Ouvrir le dossier"), "folder-open", lambda: self._open(self.ctx.paths.data_dir)),
@@ -236,10 +273,10 @@ class SettingsView(QWidget):
             widget.clicked.connect(callback)
             row.addWidget(widget)
         row.addStretch()
-        form.addRow("", row)
+        form.addRow(row)
         row2 = QHBoxLayout()
         diagnostic = button(
-            tr("Rapport de diagnostic"),
+            tr("Créer un rapport de diagnostic…"),
             "bug",
             tooltip=tr("Zip avec versions, configuration sans secrets et journaux récents"),
         )
@@ -251,20 +288,20 @@ class SettingsView(QWidget):
         for widget in (diagnostic, logs, self.v1_button):
             row2.addWidget(widget)
         row2.addStretch()
-        form.addRow("", row2)
+        form.addRow(row2)
 
     def _build_about(self) -> None:
         form = self._section(tr("À propos"))
-        form.addRow(tr("Version :"), label(f"Cloudflared Manage Access {__version__}"))
+        form.addRow(tr("Version"), label(f"Cloudflared Manage Access {__version__}"))
         form.addRow(
-            tr("Composants :"),
+            tr("Composants"),
             label(
                 f"Python {sys.version.split()[0]} · Qt/PySide6 {pyside_version} · {platform.system()} {platform.release()}",
                 "muted",
             ),
         )
         form.addRow(
-            tr("Licence :"),
+            tr("Licence"),
             label(
                 tr("MIT. Icônes Tabler Icons (MIT). Détails dans THIRD_PARTY_LICENSES.md."),
                 "muted",
@@ -283,13 +320,13 @@ class SettingsView(QWidget):
         row.addWidget(self.cma_update)
         row.addWidget(self.cma_install)
         row.addStretch()
-        form.addRow("", row)
+        form.addRow(row)
         self.cma_update_label = label("", "muted", wrap=True)
-        form.addRow("", self.cma_update_label)
+        form.addRow(self.cma_update_label)
         self.cma_progress_bar = QProgressBar()
         self.cma_progress_bar.setAccessibleName(tr("Téléchargement de la mise à jour"))
         self.cma_progress_bar.hide()
-        form.addRow("", self.cma_progress_bar)
+        form.addRow(self.cma_progress_bar)
 
     # --- Chargement et enregistrement --------------------------------------------------------------
 

@@ -1,12 +1,16 @@
-"""Widgets réutilisables : pastille d'état, bandeaux, état vide, champ secret, champ de port, sections de formulaire."""
+"""Widgets réutilisables : boutons à rôles, pastille d'état, bandeaux, état vide, champ secret, champ de port.
+
+Les couleurs viennent de la feuille de style (propriétés `role` et `status`, voir `theme.stylesheet`) ;
+aucun widget ne fixe de couleur en dur. Un état est toujours écrit en toutes lettres, avec un symbole.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from typing import ClassVar
 
-from PySide6.QtCore import QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QGuiApplication, QIntValidator, QKeySequence, QShortcut
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QEnterEvent, QGuiApplication, QIntValidator, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -22,20 +26,33 @@ from PySide6.QtWidgets import (
 from cma.core.netutil import PortStatus, check_local_port
 from cma.core.sessions import SessionState
 from cma.i18n import tr
-from cma.ui.icons import icon
-from cma.ui.theme import current_tokens, state_colors
+from cma.ui.icons import set_glyph, set_icon
+from cma.ui.theme import STATUS_OF_STATE, SYMBOL_OF_STATE
+
+
+def repolish(widget: QWidget) -> None:
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
+    widget.update()
 
 
 def set_role(widget: QWidget, role: str) -> None:
-    widget.setProperty("role", role)
-    widget.style().unpolish(widget)
-    widget.style().polish(widget)
+    if widget.property("role") != role:
+        widget.setProperty("role", role)
+        repolish(widget)
 
 
 def set_flag(widget: QWidget, name: str, value: bool) -> None:
-    widget.setProperty(name, "true" if value else "false")
-    widget.style().unpolish(widget)
-    widget.style().polish(widget)
+    text = "true" if value else "false"
+    if widget.property(name) != text:
+        widget.setProperty(name, text)
+        repolish(widget)
+
+
+def set_status(widget: QWidget, status: str) -> None:
+    if widget.property("status") != status:
+        widget.setProperty("status", status)
+        repolish(widget)
 
 
 def label(text: str = "", role: str | None = None, *, wrap: bool = False, selectable: bool = False) -> QLabel:
@@ -44,46 +61,72 @@ def label(text: str = "", role: str | None = None, *, wrap: bool = False, select
         widget.setProperty("role", role)
     widget.setWordWrap(wrap)
     if selectable:
-        widget.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        widget.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
     return widget
 
 
 def title(text: str, object_name: str = "PageTitle") -> QLabel:
     widget = QLabel(text)
     widget.setObjectName(object_name)
+    widget.setWordWrap(object_name != "PageTitle")
     return widget
+
+
+def group_label(text: str) -> QLabel:
+    """Titre de groupe en petites capitales (« FAVORIS », « À VÉRIFIER · 2 »)."""
+    return label(text.upper(), "group")
 
 
 def primary_button(text: str, icon_name: str | None = None) -> QPushButton:
     button = QPushButton(text)
-    button.setProperty("primary", "true")
+    button.setProperty("role", "primary")
     if icon_name:
-        button.setIcon(icon(icon_name, "#FFFFFF"))
+        set_icon(button, icon_name, "on_accent")
     button.setCursor(Qt.CursorShape.PointingHandCursor)
     return button
 
 
 def button(
-    text: str, icon_name: str | None = None, *, tooltip: str | None = None, danger: bool = False
+    text: str,
+    icon_name: str | None = None,
+    *,
+    tooltip: str | None = None,
+    danger: bool = False,
+    link: bool = False,
 ) -> QPushButton:
     widget = QPushButton(text)
+    tint = "danger" if danger else ("accent" if link else "text")
     if icon_name:
-        widget.setIcon(icon(icon_name))
+        set_icon(widget, icon_name, tint)
     if tooltip:
         widget.setToolTip(tooltip)
     if danger:
-        widget.setProperty("danger", "true")
+        widget.setProperty("role", "danger")
+    elif link:
+        widget.setProperty("role", "link")
     widget.setCursor(Qt.CursorShape.PointingHandCursor)
     return widget
 
 
-def tool_button(icon_name: str, tooltip: str, callback: Callable[[], None] | None = None) -> QToolButton:
+def tool_button(
+    icon_name: str,
+    tooltip: str,
+    callback: Callable[[], None] | None = None,
+    *,
+    flat: bool = True,
+    tint: str = "text",
+) -> QToolButton:
+    """Bouton iconique de 32 × 32 px au moins, avec nom accessible et infobulle (§6.4)."""
     widget = QToolButton()
-    widget.setIcon(icon(icon_name))
+    set_icon(widget, icon_name, tint)
     widget.setIconSize(QSize(18, 18))
+    widget.setMinimumSize(QSize(32, 32))
     widget.setToolTip(tooltip)
     widget.setAccessibleName(tooltip)
-    widget.setAutoRaise(True)
+    widget.setProperty("role", "icon")
+    widget.setProperty("flat", "true" if flat else "false")
     widget.setCursor(Qt.CursorShape.PointingHandCursor)
     if callback is not None:
         widget.clicked.connect(callback)
@@ -94,29 +137,41 @@ def copy_to_clipboard(text: str) -> None:
     QGuiApplication.clipboard().setText(text)
 
 
+def separator() -> QFrame:
+    line = QFrame()
+    line.setProperty("role", "separator")
+    line.setFixedHeight(1)
+    return line
+
+
 class StatusPill(QLabel):
-    """Pastille colorée : l'état est toujours écrit en toutes lettres, pas seulement porté par la couleur."""
+    """Pastille d'état : symbole + libellé en toutes lettres, jamais la couleur seule."""
 
     def __init__(self, state: SessionState | None = None, text: str | None = None) -> None:
         super().__init__()
         self.setObjectName("Pill")
+        self.setProperty("role", "badge")
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         if state is not None:
             self.set_state(state, text)
 
     def set_state(self, state: SessionState, text: str | None = None) -> None:
-        fg, bg = state_colors(state, current_tokens())
-        self.set_colors(f"● {text or state.label}", fg, bg)
+        self.set_status(text or state.label, STATUS_OF_STATE[state], SYMBOL_OF_STATE[state])
 
-    def set_colors(self, text: str, fg: str, bg: str) -> None:
-        self.setText(text)
-        self.setStyleSheet(f"color: {fg}; background: {bg};")
-        self.setAccessibleName(text.lstrip("● "))
+    def set_status(self, text: str, status: str, symbol: str | None = None) -> None:
+        self.setText(f"{symbol} {text}" if symbol else text)
+        self.setAccessibleName(text)
+        set_status(self, status)
 
 
 class Banner(QFrame):
-    """Bandeau d'information dans la fenêtre, à la place des boîtes modales."""
+    """Bandeau dans la fenêtre, à la place des boîtes modales (§4.1).
+
+    Les messages d'information et de succès disparaissent après 5 s ; le délai est suspendu tant que le
+    pointeur survole le bandeau ou que le focus est sur l'un de ses boutons. Avertissements et erreurs
+    restent jusqu'à fermeture.
+    """
 
     closed = Signal()
 
@@ -125,6 +180,12 @@ class Banner(QFrame):
         "success": "circle-check",
         "warning": "alert-triangle",
         "error": "circle-x",
+    }
+    STATUS: ClassVar[dict[str, str]] = {
+        "info": "info",
+        "success": "success",
+        "warning": "warning",
+        "error": "danger",
     }
 
     def __init__(
@@ -137,31 +198,56 @@ class Banner(QFrame):
     ) -> None:
         super().__init__()
         self.setObjectName("Banner")
-        self.setProperty("level", level)
-        tokens = current_tokens()
-        color = {
-            "info": tokens.info,
-            "success": tokens.success,
-            "warning": tokens.warning,
-            "error": tokens.danger,
-        }[level]
+        self.setProperty("role", "banner")
+        self.setProperty("status", self.STATUS[level])
+        self.level = level
+        self.text = text
+        self.count = 1
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 8, 8, 8)
+        layout.setSpacing(10)
         glyph = QLabel()
-        glyph.setPixmap(icon(self.ICONS[level], color).pixmap(20, 20))
+        set_glyph(glyph, self.ICONS[level], self.STATUS[level], 20)
         layout.addWidget(glyph, 0, Qt.AlignmentFlag.AlignTop)
-        text_label = label(text, wrap=True, selectable=True)
-        text_label.setStyleSheet(f"color: {tokens.text};")
-        layout.addWidget(text_label, 1)
+        self.text_label = label(text, wrap=True, selectable=True)
+        layout.addWidget(self.text_label, 1)
         if action is not None:
             action_button = QPushButton(action[0])
             action_button.clicked.connect(action[1])
             action_button.clicked.connect(self.dismiss)
             layout.addWidget(action_button, 0, Qt.AlignmentFlag.AlignTop)
-        close = tool_button("x", tr("Fermer"), self.dismiss)
+        short = text if len(text) <= 60 else text[:57] + "…"
+        close = tool_button("x", tr("Fermer la notification : {title}").format(title=short), self.dismiss)
         layout.addWidget(close, 0, Qt.AlignmentFlag.AlignTop)
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self._expire)
+        self._timeout = timeout_ms
         if timeout_ms:
-            QTimer.singleShot(timeout_ms, self.dismiss)
+            self._timer.start(timeout_ms)
+
+    def repeat(self) -> None:
+        """Même message une nouvelle fois : compteur plutôt qu'un bandeau de plus."""
+        self.count += 1
+        self.text_label.setText(f"{self.text} (×{self.count})")
+        if self._timeout:
+            self._timer.start(self._timeout)
+
+    def enterEvent(self, event: QEnterEvent) -> None:
+        self._timer.stop()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event: QEvent) -> None:
+        if self._timeout:
+            self._timer.start(self._timeout)
+        super().leaveEvent(event)
+
+    def _expire(self) -> None:
+        focus = QGuiApplication.focusObject()
+        if isinstance(focus, QWidget) and self.isAncestorOf(focus):
+            self._timer.start(self._timeout or 5000)
+            return
+        self.dismiss()
 
     def dismiss(self) -> None:
         if self.isVisible() or self.parent() is not None:
@@ -171,7 +257,10 @@ class Banner(QFrame):
 
 
 class BannerStack(QWidget):
-    MAX_BANNERS = 4
+    """Deux bandeaux visibles au plus ; les répétitions identiques sont regroupées (§4.1)."""
+
+    MAX_BANNERS = 2
+    INFO_TIMEOUT_MS = 5000
 
     def __init__(self) -> None:
         super().__init__()
@@ -179,6 +268,15 @@ class BannerStack(QWidget):
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(6)
         self.hide()
+
+    def banners(self) -> list[Banner]:
+        found: list[Banner] = []
+        for index in range(self._layout.count()):
+            item = self._layout.itemAt(index)
+            widget = item.widget() if item is not None else None
+            if isinstance(widget, Banner) and not widget.isHidden():
+                found.append(widget)
+        return found
 
     def show_message(
         self,
@@ -188,13 +286,15 @@ class BannerStack(QWidget):
         action: tuple[str, Callable[[], None]] | None = None,
         timeout_ms: int | None = None,
     ) -> Banner:
+        for existing in self.banners():
+            if existing.level == level and existing.text == text:
+                existing.repeat()
+                return existing
         if timeout_ms is None and level in ("info", "success"):
-            timeout_ms = 6000
-        while self._layout.count() >= self.MAX_BANNERS:
-            item = self._layout.takeAt(0)
-            widget = item.widget() if item is not None else None
-            if widget is not None:
-                widget.deleteLater()
+            timeout_ms = self.INFO_TIMEOUT_MS
+        visible = self.banners()
+        while len(visible) >= self.MAX_BANNERS:
+            visible.pop(0).dismiss()
         banner = Banner(level, text, action=action, timeout_ms=timeout_ms)
         banner.closed.connect(self._update_visibility)
         self._layout.addWidget(banner)
@@ -202,36 +302,31 @@ class BannerStack(QWidget):
         return banner
 
     def _update_visibility(self) -> None:
-        QTimer.singleShot(0, lambda: self.setVisible(self._has_visible_banner()))
-
-    def _has_visible_banner(self) -> bool:
-        for index in range(self._layout.count()):
-            item = self._layout.itemAt(index)
-            widget = item.widget() if item is not None else None
-            if widget is not None and not widget.isHidden():
-                return True
-        return False
+        QTimer.singleShot(0, lambda: self.setVisible(bool(self.banners())))
 
 
 class EmptyState(QFrame):
+    """État vide : titre explicite, une phrase et des actions ; pas de grand rectangle pointillé (§4.0)."""
+
     def __init__(
         self, icon_name: str, heading: str, text: str, actions: list[QPushButton] | None = None
     ) -> None:
         super().__init__()
         self.setObjectName("EmptyState")
+        self.setProperty("role", "empty")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 32, 24, 32)
         layout.setSpacing(8)
         glyph = QLabel()
-        glyph.setPixmap(icon(icon_name).pixmap(48, 48))
+        set_glyph(glyph, icon_name, "muted", 32)
         glyph.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(glyph)
-        head = title(heading, "SectionTitle")
-        head.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(head)
-        body = label(text, "muted", wrap=True)
-        body.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(body)
+        self.heading = title(heading, "SectionTitle")
+        self.heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.heading)
+        self.body = label(text, "muted", wrap=True)
+        self.body.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.body)
         if actions:
             row = QHBoxLayout()
             row.addStretch()
@@ -239,44 +334,76 @@ class EmptyState(QFrame):
                 row.addWidget(action)
             row.addStretch()
             layout.addLayout(row)
+        layout.addStretch()
 
 
 class SecretField(QWidget):
-    """Champ masqué avec boutons « afficher » et « copier ». `reveal_provider` charge le secret à la demande."""
+    """Champ masqué, boutons « Afficher / Masquer » et « Copier ». Le secret revient masqué à chaque chargement."""
 
     changed = Signal()
+    copied = Signal()
 
-    def __init__(self, placeholder: str = "") -> None:
+    def __init__(self, placeholder: str = "", *, subject: str = "") -> None:
         super().__init__()
+        self._subject = subject
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(6)
         self.edit = QLineEdit()
         self.edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.edit.setPlaceholderText(placeholder)
         self.edit.textEdited.connect(lambda _t: self.changed.emit())
-        self.toggle = tool_button("eye", tr("Afficher ou masquer"), self._toggle)
-        self.copy = tool_button("copy", tr("Copier"), lambda: copy_to_clipboard(self.edit.text()))
+        self.toggle = button(tr("Afficher"), "eye")
+        self.toggle.setCheckable(True)
+        self.toggle.toggled.connect(self._toggle)
+        self.copy = button(tr("Copier"), "copy")
+        self.copy.clicked.connect(self._copy)
         layout.addWidget(self.edit, 1)
         layout.addWidget(self.toggle)
         layout.addWidget(self.copy)
+        self.set_subject(subject)
 
-    def _toggle(self) -> None:
-        hidden = self.edit.echoMode() == QLineEdit.EchoMode.Password
-        self.edit.setEchoMode(QLineEdit.EchoMode.Normal if hidden else QLineEdit.EchoMode.Password)
-        self.toggle.setIcon(icon("eye-off" if hidden else "eye"))
+    def set_subject(self, subject: str) -> None:
+        """Nom de l'objet protégé, pour des noms accessibles précis (« Afficher le secret de Production »)."""
+        self._subject = subject
+        self._update_names()
+
+    def _update_names(self) -> None:
+        shown = self.toggle.isChecked()
+        if self._subject:
+            name = (
+                tr("Masquer le secret de {name}") if shown else tr("Afficher le secret de {name}")
+            ).format(name=self._subject)
+            copy_name = tr("Copier le secret de {name}").format(name=self._subject)
+        else:
+            name = tr("Masquer le secret") if shown else tr("Afficher le secret")
+            copy_name = tr("Copier le secret")
+        self.toggle.setAccessibleName(name)
+        self.toggle.setToolTip(name)
+        self.copy.setAccessibleName(copy_name)
+        self.copy.setToolTip(copy_name)
+
+    def _toggle(self, shown: bool) -> None:
+        self.edit.setEchoMode(QLineEdit.EchoMode.Normal if shown else QLineEdit.EchoMode.Password)
+        self.toggle.setText(tr("Masquer") if shown else tr("Afficher"))
+        set_icon(self.toggle, "eye-off" if shown else "eye")
+        self._update_names()
+
+    def _copy(self) -> None:
+        copy_to_clipboard(self.edit.text())
+        self.copied.emit()
 
     def text(self) -> str:
         return self.edit.text()
 
     def set_text(self, value: str) -> None:
         self.edit.setText(value)
-        self.edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.toggle.setIcon(icon("eye"))
+        self.toggle.setChecked(False)
+        self._toggle(False)
 
 
 class PortField(QWidget):
-    """Port local avec vérification en direct (libre, occupé, réservé par Windows) et bouton « port libre »."""
+    """Port local avec vérification en direct (libre, occupé, réservé par Windows) et « Choisir un port libre »."""
 
     changed = Signal()
 
@@ -287,21 +414,21 @@ class PortField(QWidget):
         self._ignore_port: int | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
+        layout.setSpacing(4)
         row = QHBoxLayout()
-        row.setSpacing(4)
+        row.setSpacing(8)
         self.edit = QLineEdit()
         self.edit.setValidator(QIntValidator(1, 65535, self))
-        self.edit.setMaximumWidth(110)
+        self.edit.setMaximumWidth(120)
         self.edit.setPlaceholderText("2222")
         self.edit.textEdited.connect(self._on_edit)
-        self.auto = button(tr("Port libre"), "refresh", tooltip=tr("Choisir un port local libre"))
+        self.auto = button(tr("Choisir un port libre"), "refresh")
         self.auto.clicked.connect(self._auto)
         row.addWidget(self.edit)
         row.addWidget(self.auto)
         row.addStretch()
         layout.addLayout(row)
-        self.status = label("", "muted")
+        self.status = label("", "muted", wrap=True)
         layout.addWidget(self.status)
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -329,23 +456,30 @@ class PortField(QWidget):
             self.changed.emit()
             self.check()
 
+    def _show(self, text: str, role: str) -> None:
+        self.status.setText(text)
+        set_role(self.status, role)
+        self.edit.setAccessibleDescription(text)
+
     def check(self) -> None:
         port = self.value()
         if port is None:
-            self.status.setText(tr("Port requis (1 à 65535)") if self.edit.text() else "")
-            set_role(self.status, "muted")
+            self._show(tr("Le port doit être compris entre 1 et 65535.") if self.edit.text() else "", "muted")
             return
         if port == self._ignore_port:
-            self.status.setText(tr("Utilisé par la session de ce profil"))
-            set_role(self.status, "muted")
+            self._show(tr("Ce port est utilisé par la session de ce profil."), "muted")
             return
         result = check_local_port(self._host_provider() or "127.0.0.1", port)
         if result.status == PortStatus.FREE:
-            self.status.setText(tr("Port libre"))
-            set_role(self.status, "success")
+            self._show("✓ " + tr("Le port {port} est libre.").format(port=port), "success")
+        elif result.status == PortStatus.RESERVED:
+            self._show("× " + result.message, "error")
+        elif result.status == PortStatus.IN_USE:
+            self._show(
+                "! " + tr("Le port {port} est utilisé par un autre programme.").format(port=port), "warning"
+            )
         else:
-            self.status.setText(result.message)
-            set_role(self.status, "error" if result.status == PortStatus.RESERVED else "warning")
+            self._show("! " + result.message, "warning")
 
 
 class FieldError(QLabel):
@@ -356,7 +490,7 @@ class FieldError(QLabel):
         self.hide()
 
     def show_error(self, message: str | None) -> None:
-        self.setText(message or "")
+        self.setText(("× " + message) if message else "")
         self.setVisible(bool(message))
 
 
@@ -371,11 +505,7 @@ def with_error(field: QWidget, error: FieldError) -> QWidget:
 
 
 def hline() -> QFrame:
-    line = QFrame()
-    line.setFrameShape(QFrame.Shape.HLine)
-    line.setFrameShadow(QFrame.Shadow.Plain)
-    line.setStyleSheet(f"color: {current_tokens().border};")
-    return line
+    return separator()
 
 
 def add_shortcut(
@@ -384,3 +514,18 @@ def add_shortcut(
     shortcut = QShortcut(sequence if isinstance(sequence, QKeySequence) else QKeySequence(sequence), parent)
     shortcut.activated.connect(callback)
     return shortcut
+
+
+class FocusWithinWatcher(QObject):
+    """Marque un conteneur `focusWithin=true` tant qu'un de ses enfants a le focus (repère de focus, §6.3)."""
+
+    def __init__(self, shell: QWidget) -> None:
+        super().__init__(shell)
+        self.shell = shell
+        app = QGuiApplication.instance()
+        if isinstance(app, QGuiApplication):
+            app.focusObjectChanged.connect(self._changed)
+
+    def _changed(self, focus: QObject | None) -> None:
+        inside = isinstance(focus, QWidget) and self.shell.isAncestorOf(focus)
+        set_flag(self.shell, "focusWithin", inside)

@@ -1,6 +1,6 @@
 # Côté serveur : ports-report et helper Docker
 
-La vue **Redirections SSH** liste les ports TCP en écoute sur un serveur Linux. Ce document explique ce qui s'exécute
+La vue **Serveurs SSH** liste les ports TCP en écoute sur un serveur Linux. Ce document explique ce qui s'exécute
 sur le serveur, ce qu'il faut (ou non) y installer, et comment le retirer.
 
 ## Rien à installer par défaut

@@ -50,7 +50,7 @@ class SshForwardSession(Session):
         super().__init__(
             bus=bus,
             name=f"{profile.name} · {label}",
-            subtitle=tr("{profile} → {target} (vu du serveur)").format(profile=profile.name, target=target),
+            subtitle=tr("{target} depuis {profile}").format(profile=profile.name, target=target),
             profile_id=profile.id,
             local_host=local_host,
             local_port=forward.local_port,

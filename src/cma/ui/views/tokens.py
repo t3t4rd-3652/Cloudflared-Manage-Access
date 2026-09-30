@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from pydantic import ValidationError
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QFormLayout,
@@ -12,6 +13,8 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QPlainTextEdit,
+    QPushButton,
+    QScrollArea,
     QSplitter,
     QStackedWidget,
     QVBoxLayout,
@@ -30,6 +33,7 @@ from cma.ui.widgets import (
     FieldError,
     SecretField,
     add_shortcut,
+    button,
     label,
     primary_button,
     title,
@@ -46,51 +50,73 @@ class TokenEditor(QWidget):
         self._secret_loaded: str | None = None
         self._loading = False
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(8, 0, 0, 0)
+        layout.setSpacing(8)
         header = QHBoxLayout()
-        self.heading = title("")
-        header.addWidget(self.heading)
-        header.addStretch()
+        self.heading = title("", "ObjectTitle")
+        header.addWidget(self.heading, 1)
         layout.addLayout(header)
-        layout.addWidget(
-            label(
-                tr(
-                    "Le secret est rangé dans le coffre du système (Gestionnaire d'identifiants sous Windows). "
-                    "Il est transmis à cloudflared par variable d'environnement, jamais sur la ligne de commande."
-                ),
-                "muted",
-                wrap=True,
-            )
-        )
+        self.vault_text = label("", "muted", wrap=True)
+        layout.addWidget(self.vault_text)
+        scroll = QScrollArea()
+        scroll.setObjectName("PageScroll")
+        scroll.setWidgetResizable(True)
+        host = QWidget()
+        host_layout = QHBoxLayout(host)
+        host_layout.setContentsMargins(0, 8, 16, 8)
+        column = QWidget()
+        column.setMaximumWidth(720)
+        body = QVBoxLayout(column)
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(8)
         form = QFormLayout()
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self.name_error = FieldError()
         self.client_error = FieldError()
         self.name = QLineEdit()
         self.client_id = QLineEdit()
         self.client_id.setPlaceholderText("xxxxxxxx.access")
         self.secret = SecretField(tr("secret du service token"))
+        self.secret.copied.connect(lambda: self.ctx.notify("success", tr("Secret copié.")))
         self.notes = QPlainTextEdit()
-        self.notes.setMaximumHeight(80)
+        self.notes.setMinimumHeight(80)
+        self.notes.setMaximumHeight(120)
         self.created = label("", "muted")
-        form.addRow(tr("Nom :"), with_error(self.name, self.name_error))
-        form.addRow(tr("Client ID :"), with_error(self.client_id, self.client_error))
-        form.addRow(tr("Secret :"), self.secret)
-        form.addRow(tr("Créé le :"), self.created)
-        form.addRow(tr("Notes :"), self.notes)
-        layout.addLayout(form)
-        layout.addWidget(title(tr("Profils qui l'utilisent"), "SectionTitle"))
+        form.addRow(tr("Nom"), with_error(self.name, self.name_error))
+        form.addRow(tr("Client ID"), with_error(self.client_id, self.client_error))
+        form.addRow(tr("Secret"), self.secret)
+        form.addRow(self.created)
+        form.addRow(tr("Notes"), self.notes)
+        body.addLayout(form)
+        self.users_title = title(tr("Profils qui l'utilisent"), "SectionTitle")
+        body.addWidget(self.users_title)
         self.users = QListWidget()
         self.users.setAccessibleName(tr("Profils qui l'utilisent"))
-        self.users.setMaximumHeight(140)
-        self.users.itemDoubleClicked.connect(lambda item: self.open_profile(item.data(256)))
-        layout.addWidget(self.users)
-        layout.addStretch()
+        self.users.setMaximumHeight(180)
+        self.users.itemDoubleClicked.connect(lambda item: self._open_usage(item))
+        self.users.itemActivated.connect(lambda item: self._open_usage(item))
+        body.addWidget(self.users)
+        self.open_usage = button(tr("Ouvrir le profil"), "external-link")
+        self.open_usage.clicked.connect(lambda: self._open_usage(self.users.currentItem()))
+        self.users.currentItemChanged.connect(
+            lambda current, _previous: self.open_usage.setEnabled(
+                current is not None and bool(current.data(256))
+            )
+        )
+        body.addWidget(self.open_usage, 0, Qt.AlignmentFlag.AlignLeft)
+        body.addStretch()
+        host_layout.addWidget(column, 1)
+        scroll.setWidget(host)
+        layout.addWidget(scroll, 1)
         footer = QHBoxLayout()
         self.dirty_label = label("", "muted")
-        footer.addWidget(self.dirty_label)
-        footer.addStretch()
+        footer.addWidget(self.dirty_label, 1)
+        self.revert_button = QPushButton(tr("Annuler les modifications"))
+        self.revert_button.clicked.connect(lambda: self.load(self.token))
         self.save_button = primary_button(tr("Enregistrer"), "circle-check")
         self.save_button.clicked.connect(self.save)
+        footer.addWidget(self.revert_button)
         footer.addWidget(self.save_button)
         layout.addLayout(footer)
         add_shortcut(self, QKeySequence.StandardKey.Save, self.save)
@@ -98,6 +124,21 @@ class TokenEditor(QWidget):
             field.textEdited.connect(self._changed)
         self.secret.changed.connect(self._changed)
         self.notes.textChanged.connect(self._changed)
+
+    def _open_usage(self, item: object) -> None:
+        profile_id = item.data(256) if item is not None else None  # type: ignore[attr-defined]
+        if profile_id:
+            self.open_profile(str(profile_id))
+
+    def _vault_description(self) -> str:
+        store = self.ctx.core.secrets
+        if not store.persistent:
+            where = tr("Secret conservé en mémoire jusqu'à la fermeture de CMA.")
+        elif store.description == "encrypted-file":
+            where = tr("Secret conservé dans votre coffre chiffré.")
+        else:
+            where = tr("Secret conservé dans le Gestionnaire d'identifiants Windows.")
+        return where + " " + tr("Transmis à cloudflared par variable d'environnement.")
 
     def load(self, token: ServiceToken | None) -> None:
         self.token = token
@@ -114,13 +155,23 @@ class TokenEditor(QWidget):
             self.ctx.notify("error", tr("Coffre illisible : {error}").format(error=exc))
         self.secret.set_text(self._secret_loaded)
         self.notes.setPlainText(token.notes)
-        self.created.setText(short_datetime(token.created))
+        self.created.setText(tr("Créé le {date}").format(date=short_datetime(token.created)))
+        self.secret.set_subject(token.name)
+        self.vault_text.setText(self._vault_description())
         self.users.clear()
         for profile in self.ctx.config().profiles_using_token(token.id):
             self.users.addItem(profile.name)
             self.users.item(self.users.count() - 1).setData(256, profile.id)
-        if self.users.count() == 0:
-            self.users.addItem(tr("Aucun profil"))
+        count = self.users.count()
+        if count == 0:
+            self.users.addItem(tr("Aucun profil n'utilise ce token."))
+        if count == 0:
+            self.users_title.setText(tr("Profils qui l'utilisent"))
+        elif count == 1:
+            self.users_title.setText(tr("Utilisé par 1 profil"))
+        else:
+            self.users_title.setText(tr("Utilisé par {n} profils").format(n=count))
+        self.open_usage.setEnabled(False)
         self.name_error.show_error(None)
         self.client_error.show_error(None)
         self._loading = False
@@ -141,6 +192,7 @@ class TokenEditor(QWidget):
             return
         dirty = self.is_dirty()
         self.save_button.setEnabled(dirty)
+        self.revert_button.setEnabled(dirty)
         self.dirty_label.setText(tr("Modifications non enregistrées") if dirty else "")
 
     def save(self) -> bool:
@@ -201,14 +253,19 @@ class TokensView(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 16)
         layout.addWidget(title(tr("Service tokens")))
+        layout.addWidget(label(tr("Identifiants enregistrés sur cet ordinateur"), "muted"))
         splitter = QSplitter()
         self.list = ProfileList(
             tr("Rechercher un token"),
             [
-                ("plus", tr("Nouveau token"), self.new_token),
                 ("file-import", tr("Importer…"), lambda: run_import(ctx, self)),
                 ("file-export", tr("Exporter…"), lambda: run_export(ctx, self)),
-                ("trash", tr("Supprimer (Suppr)"), self.delete),
+                ("trash", tr("Supprimer le token…"), self.delete),
+            ],
+            new_action=(tr("Nouveau token"), self.new_token),
+            item_actions=lambda _tid: [
+                ("file-export", tr("Exporter…"), lambda: run_export(ctx, self)),
+                ("trash", tr("Supprimer…"), self.delete),
             ],
             grouped=False,
             name=tr("Service tokens"),

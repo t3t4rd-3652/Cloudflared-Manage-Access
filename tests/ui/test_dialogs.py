@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 import asyncssh
-from PySide6.QtWidgets import QCheckBox, QDialog, QFileDialog, QInputDialog, QLineEdit, QMessageBox
+from PySide6.QtWidgets import QCheckBox, QDialog, QFileDialog, QLineEdit
 
 from cma.core.migrations import MigrationReport
 from cma.core.models import AuthMode, CloudflareProfile, ServiceToken, SshProfile
@@ -102,10 +102,14 @@ def test_export_then_import(qtbot, gui, accept_dialogs, monkeypatch, tmp_path):
     ctx.core.secrets.set(token.secret_key, "secret-prod")
     target = tmp_path / "export.json"
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **k: (str(target), ""))
-    monkeypatch.setattr(transfer, "ask_new_passphrase", lambda *a, **k: "phrase-longue")
-    accept_dialogs.append(
-        lambda d: d.with_secrets.setChecked(True) if isinstance(d, transfer.ExportDialog) else None
-    )
+
+    def fill_export(dialog):
+        if isinstance(dialog, transfer.ExportDialog):
+            dialog.with_secrets.setChecked(True)
+            dialog.passphrase.setText("phrase-longue")
+            dialog.confirmation.setText("phrase-longue")
+
+    accept_dialogs.append(fill_export)
     transfer.run_export(ctx, window)
     data = json.loads(target.read_text(encoding="utf-8"))
     assert "secrets" in data
@@ -149,9 +153,11 @@ def test_migration_report_and_v1_cleanup(qtbot, gui, accept_dialogs, monkeypatch
         profiles=1, tokens=1, created_tokens=["X (migré)"], warnings=["à voir"], backup_dir=ctx.paths.data_dir
     )
     misc.show_migration_report(ctx, window, report)
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
+    asked: list[str] = []
+    monkeypatch.setattr(misc, "confirm", lambda _p, heading, text, *_r: asked.append(text) or False)
     assert not misc.confirm_delete_v1(ctx, window)
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    assert "cloudflared_tokens.json" in asked[0]
+    monkeypatch.setattr(misc, "confirm", lambda *_a: True)
     assert misc.confirm_delete_v1(ctx, window)
     assert not (ctx.paths.data_dir / "cloudflared_tokens.json").exists()
     assert ctx.config().settings.v1_files_handled
@@ -164,27 +170,47 @@ def test_known_hosts_and_keys_dialogs(qtbot, gui, accept_dialogs, monkeypatch):
     KnownHostsFile(ctx.paths.known_hosts).add("srv.ex.fr", 22, key, replace=True)
     dialog = misc.KnownHostsDialog(window, ctx)
     assert dialog.table.rowCount() >= 1
+    assert not dialog.remove_button.isEnabled()
     dialog.table.selectRow(0)
+    assert "SHA256:" in dialog.detail.text()
+    monkeypatch.setattr(misc, "confirm", lambda *_a: True)
     dialog._remove()
     assert dialog.table.rowCount() == 0
+    assert not dialog.empty.isHidden()
 
     keys_dialog = misc.KeysDialog(window, ctx)
-    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("testui", True))
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No)
+    monkeypatch.setattr(misc, "ask_generate_key", lambda _p: ("testui", None))
     keys_dialog._generate()
     names = [k.name for k in keys_dialog.keys]
     assert "id_ed25519_testui" in names
-    keys_dialog.table.selectRow(names.index("id_ed25519_testui"))
+    assert keys_dialog._selected_key().name == "id_ed25519_testui"
+    assert keys_dialog.delete_button.isEnabled()
     keys_dialog._copy()
-    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
-    monkeypatch.setattr(misc, "ask_new_passphrase", lambda *a, **k: "phrase-longue")
-    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("protegee", True))
+    monkeypatch.setattr(misc, "ask_generate_key", lambda _p: ("protegee", "phrase-longue"))
     keys_dialog._generate()
     protected = next(k for k in keys_dialog.keys if k.name == "id_ed25519_protegee")
     assert protected.encrypted
     keys_dialog.table.selectRow([k.name for k in keys_dialog.keys].index("id_ed25519_testui"))
     keys_dialog._delete()
     assert "id_ed25519_testui" not in [k.name for k in keys_dialog.keys]
+
+
+def test_generate_key_dialog_validation(qtbot, gui):
+    _ctx, window = gui
+    dialog = misc.GenerateKeyDialog(window)
+    qtbot.addWidget(dialog)
+    assert not dialog.ok_button.isEnabled()
+    dialog.name.setText("nas")
+    dialog.passphrase.setText("court")
+    dialog._accept()
+    assert "8 caractères" in dialog.error.text()
+    dialog.passphrase.setText("phrase-longue")
+    dialog._accept()
+    assert "correspondent" in dialog.error.text()
+    dialog.confirmation.setText("phrase-longue")
+    dialog._accept()
+    assert dialog.result() == QDialog.DialogCode.Accepted
+    assert dialog.value() == ("nas", "phrase-longue")
 
 
 def test_redirect_dialog(qtbot, gui):
@@ -229,20 +255,61 @@ def test_onboarding_creates_a_first_profile(qtbot, gui):
 
 
 def test_choose_secret_store(qapp, monkeypatch, tmp_path):
-    clicked = {}
+    def answering(**fields):
+        def fake_exec(self):
+            for name, value in fields.items():
+                widget = getattr(self, name)
+                if isinstance(value, bool):
+                    widget.setChecked(value)
+                else:
+                    widget.setText(value)
+            self._accept()
+            return self.result()
 
-    def fake_exec(self):
-        clicked["button"] = self.buttons()[0]
-        return 0
+        monkeypatch.setattr(QDialog, "exec", fake_exec)
 
-    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
-    monkeypatch.setattr(QMessageBox, "clickedButton", lambda self: clicked.get("button"))
-    monkeypatch.setattr(misc, "ask_new_passphrase", lambda *a, **k: "phrase-longue")
-    assert misc.choose_secret_store(None, tmp_path / "absent.json") == "phrase-longue"
+    absent = tmp_path / "absent.json"
+    answering(passphrase="phrase-longue", confirmation="phrase-longue")
+    assert misc.choose_secret_store(None, absent) == "phrase-longue"
+    answering(passphrase="court", confirmation="court")
+    assert misc.choose_secret_store(None, absent) is None
     existing = tmp_path / "coffre.json"
     existing.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(QInputDialog, "getText", lambda *a, **k: ("phrase", True))
+    answering(passphrase="phrase")
     assert misc.choose_secret_store(None, existing) == "phrase"
-    monkeypatch.setattr(QMessageBox, "clickedButton", lambda self: None)
+    answering(memory=True)
     assert misc.choose_secret_store(None, existing) is None
+    dialog = misc.SecretStoreDialog(None, existing)
+    assert dialog.open_existing.isChecked() and not dialog.create_new.isEnabled()
+    dialog.memory.setChecked(True)
+    assert "perdus" in dialog.hint.text()
+    dialog.deleteLater()
     assert SshProfile(name="x")  # modèle importé pour les autres tests
+
+
+def test_export_dialog_rules(qtbot, gui):
+    ctx, window = gui
+    access = CloudflareProfile(name="Bastion", hostname="b.ex.fr", local_port=2201)
+    server = SshProfile(name="NAS", host="nas", user="admin", via_cloudflare_profile=access.id)
+    ctx.update_config(lambda c: (c.cloudflare_profiles.append(access), c.ssh_profiles.append(server)))
+    dialog = transfer.ExportDialog(window, ctx, {server.id})
+    qtbot.addWidget(dialog)
+    assert "NAS utilise l'accès Bastion" in dialog.dependencies.text()
+    assert dialog.ok_button.isEnabled()
+    dialog.with_secrets.setChecked(True)
+    assert not dialog.ok_button.isEnabled()
+    dialog.passphrase.setText("phrase-longue")
+    dialog.confirmation.setText("phrase-longue")
+    assert dialog.ok_button.isEnabled() and dialog.passphrase_value() == "phrase-longue"
+    empty = transfer.ExportDialog(window, ctx, set())
+    qtbot.addWidget(empty)
+    assert not empty.ok_button.isEnabled()
+
+
+def test_host_key_helpers():
+    assert prompts.key_type_label("ssh-ed25519") == "ED25519"
+    assert prompts.key_type_label("ecdsa-sha2-nistp256") == "ECDSA"
+    assert prompts.key_type_label("rsa-sha2-512") == "RSA"
+    commands = dict(prompts.keygen_commands("ssh-rsa"))
+    assert commands["Linux"] == "ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub -E sha256"
+    assert commands["Windows"] == r"ssh-keygen -lf C:\ProgramData\ssh\ssh_host_rsa_key.pub -E sha256"
