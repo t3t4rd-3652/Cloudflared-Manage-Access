@@ -52,5 +52,33 @@ def test_ipc_roundtrip(paths):
         server.stop()
 
 
+def test_ipc_stop_right_after_a_command_never_hangs(paths):
+    """Course corrigée : l'arrêt juste après une commande bloquait parfois indéfiniment (vu sous Linux)."""
+    for _ in range(30):
+        server = IpcServer(paths, lambda m: {"ok": True})
+        server.start()
+        assert send_command(paths, {"cmd": "ping"}, timeout=5) == {"ok": True}
+        started = time.monotonic()
+        server.stop()
+        assert time.monotonic() - started < 5
+
+
+def test_send_command_to_a_frozen_instance_times_out(paths):
+    """Une instance qui écoute sans jamais répondre ne bloque plus la ligne de commande."""
+    from multiprocessing.connection import Listener
+
+    from cma.core.instance import ipc_address, ipc_authkey
+
+    address = ipc_address(paths)
+    listener = Listener(address, authkey=ipc_authkey(paths))  # jamais d'accept() : instance figée
+    try:
+        started = time.monotonic()
+        reply = send_command(paths, {"cmd": "status"}, timeout=1)
+        assert time.monotonic() - started < 5
+        assert reply == {"ok": False, "error": "pas de réponse de l'instance en cours"}
+    finally:
+        listener.close()
+
+
 def test_send_command_without_instance_returns_none(paths):
     assert send_command(paths, {"cmd": "status"}, timeout=1) is None

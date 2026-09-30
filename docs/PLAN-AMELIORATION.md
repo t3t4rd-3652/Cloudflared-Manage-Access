@@ -18,7 +18,7 @@ La v1.4.1 corrigée reste disponible à la racine, et la v2.0.0 vit dans `src/cm
 | Débit d'un tunnel SSH (banc local) | 6,2 Mio/s | 67,5 Mio/s | limité par le réseau |
 | Distribution | exe onefile de 25,2 Mo | dossier de 85,4 Mo, zip portable de 39,6 Mo, installeur de 26,5 Mo | taille mesurée |
 | RAM au repos de l'application | non mesurée | 140 Mo en mémoire de travail, 90 Mo privés | — |
-| Tests automatisés | 0 | 251 tests Python, 20 tests bats par image (3 images) | — |
+| Tests automatisés | 0 | 253 tests Python, 20 tests bats par image (3 images) | — |
 | Couverture | 0 % | 89 % au global, 90 % sur `core/` | 80 % et 90 % |
 | Gel de l'interface | plusieurs secondes | aucune entrée-sortie dans le thread de l'interface, détecteur à 50 ms en mode debug | < 50 ms |
 

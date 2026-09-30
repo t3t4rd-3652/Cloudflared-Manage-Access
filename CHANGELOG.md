@@ -27,7 +27,7 @@ Réécriture complète : cœur métier séparé de l'interface, interface Qt, SS
 - Instance unique, démarrage avec Windows, mode portable, rapport de diagnostic, import et export avec aperçu des conflits et secrets chiffrés.
 - Migration automatique des données de la v1, avec sauvegarde et rapport.
 - Job Object Windows : aucun cloudflared orphelin, même après un plantage.
-- Installeur (Inno Setup), zip portable, empreintes SHA-256, CI GitHub Actions, pre-commit, Dependabot et 251 tests automatisés.
+- Installeur (Inno Setup), zip portable, empreintes SHA-256, CI GitHub Actions, pre-commit, Dependabot et 253 tests automatisés.
 - Releases avec inventaire des composants (SBOM CycloneDX) et manifestes winget prêts à soumettre ; audit des
   dépendances (pip-audit) et tests contre le vrai cloudflared dans la CI.
 

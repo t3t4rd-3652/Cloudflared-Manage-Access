@@ -105,51 +105,87 @@ class IpcServer:
         self._thread.start()
 
     def _serve(self) -> None:
+        """Boucle d'accueil. Elle ne se termine qu'à réception de « __stop__ ».
+
+        S'arrêter sur un simple drapeau laissait une course : le thread pouvait sortir juste avant la
+        connexion d'arrêt, que le système acceptait alors sans que personne ne réponde à l'authentification.
+        """
         assert self._listener is not None
-        while not self._stopping:
+        while True:
             try:
                 conn = self._listener.accept()
             except Exception as exc:
-                if not self._stopping:
-                    log.warning("Canal local : connexion refusée (%s)", exc)
+                if self._stopping:
+                    return
+                log.warning("Canal local : connexion refusée (%s)", exc)
                 continue
             with conn:
-                self._handle(conn)
+                if self._handle(conn):
+                    return
 
-    def _handle(self, conn: Any) -> None:
+    def _handle(self, conn: Any) -> bool:
+        """Traite une commande. Renvoie True pour la commande d'arrêt."""
         try:
             message: object = conn.recv()
             if not isinstance(message, dict):
                 conn.send({"ok": False, "error": "message invalide"})
-                return
+                return False
             request = cast(dict[str, Any], message)
             if request.get("cmd") == "__stop__":
                 conn.send({"ok": True})
-                return
+                return True
             conn.send(self._handler(request))
         except (EOFError, OSError):
-            return
+            return False
         except Exception as exc:
             log.exception("Canal local : erreur de traitement")
             with contextlib.suppress(Exception):
                 conn.send({"ok": False, "error": str(exc)})
+        return False
 
     def stop(self) -> None:
         self._stopping = True
         if self._listener is not None:
-            # Débloque accept() en se connectant soi-même, puis ferme l'écoute.
-            with contextlib.suppress(Exception):
-                send_command(self._paths, {"cmd": "__stop__"}, timeout=2)
+            # Débloque accept() par la commande d'arrêt, puis ferme l'écoute.
+            if self._thread is not None and self._thread.is_alive():
+                with contextlib.suppress(Exception):
+                    send_command(self._paths, {"cmd": "__stop__"}, timeout=2)
             with contextlib.suppress(Exception):
                 self._listener.close()
         if self._thread is not None:
             self._thread.join(3)
 
 
+def _connect(paths: AppPaths, timeout: float) -> Any:
+    """Client authentifié, avec un délai : l'authentification de multiprocessing n'en a aucun.
+
+    La connexion est ouverte dans un thread ; au-delà de `timeout`, on abandonne (TimeoutError). Sans cela,
+    une instance figée, ou un serveur qui s'arrête, bloquait la ligne de commande indéfiniment.
+    """
+    outcome: list[Any] = []
+
+    def run() -> None:
+        try:
+            outcome.append(Client(ipc_address(paths), authkey=ipc_authkey(paths)))
+        except BaseException as exc:
+            outcome.append(exc)
+
+    worker = threading.Thread(target=run, name="cma-ipc-client", daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if not outcome:
+        raise TimeoutError("pas de réponse de l'instance en cours")
+    if isinstance(outcome[0], BaseException):
+        raise outcome[0]
+    return outcome[0]
+
+
 def send_command(paths: AppPaths, message: dict[str, Any], timeout: float = 30) -> dict[str, Any] | None:
     """Envoie une commande à l'instance en cours. None si aucune instance n'écoute."""
     try:
-        conn = Client(ipc_address(paths), authkey=ipc_authkey(paths))
+        conn = _connect(paths, min(timeout, 10))
+    except TimeoutError:
+        return {"ok": False, "error": "pas de réponse de l'instance en cours"}
     except (FileNotFoundError, ConnectionRefusedError, OSError):
         return None
     with conn:
