@@ -35,6 +35,8 @@ from cma.core.sessions import SessionInfo, SessionKind, SessionState
 from cma.i18n import tr
 from cma.ui.actions import QuickAction, quick_actions, run_action
 from cma.ui.context import GuiContext
+from cma.ui.dialogs.diagnose import open_diagnosis
+from cma.ui.dialogs.workspaces import WorkspacesDialog, launch_favorites, launch_workspace
 from cma.ui.format import human_bytes, since
 from cma.ui.icons import set_glyph, set_icon
 from cma.ui.theme import ICON_OF_STATE, STATUS_OF_STATE, SYMBOL_OF_STATE
@@ -47,6 +49,7 @@ from cma.ui.widgets import (
     label,
     primary_button,
     repolish,
+    set_role,
     set_status,
     title,
     tool_button,
@@ -178,6 +181,9 @@ class SessionRow(QFrame):
         body.addLayout(row2)
         self.stats = label("", "meta")
         body.addWidget(self.stats)
+        self.probe = label("", "muted", wrap=True, selectable=True)
+        self.probe.hide()
+        body.addWidget(self.probe)
 
         cause = QHBoxLayout()
         cause.setContentsMargins(0, 0, 0, 0)
@@ -210,6 +216,9 @@ class SessionRow(QFrame):
         self.more_button = tool_button("dots", tr("Actions de la session"), flat=False)
         self.more_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.more_menu = QMenu(self.more_button)
+        self.more_menu.addAction(tr("Tester le service"), self.test_service)
+        self.diagnose_action = self.more_menu.addAction(tr("Diagnostiquer…"), self._diagnose)
+        self.more_menu.addSeparator()
         self.more_menu.addAction(tr("Voir le journal"), lambda: self._open_logs(self.info.id))
         self.more_menu.addAction(tr("Redémarrer"), self._restart)
         self.more_menu.addAction(tr("Arrêter"), self._stop)
@@ -267,6 +276,8 @@ class SessionRow(QFrame):
             self.stats.show()
         else:
             self.stats.hide()
+        self._update_probe()
+        self.diagnose_action.setVisible(info.kind == SessionKind.CLOUDFLARE)
         self._update_cause()
         self._update_actions()
         self._setup_open_button()
@@ -280,6 +291,30 @@ class SessionRow(QFrame):
             else ""
         )
         self.tick()
+
+    def _update_probe(self) -> None:
+        info = self.info
+        if not info.probe_message:
+            self.probe.hide()
+            return
+        symbol, role = {True: ("✓", "success"), False: ("×", "error")}.get(info.probe_ok, ("?", "muted"))  # type: ignore[arg-type]
+        self.probe.setText(f"{symbol} {info.probe_message}")
+        set_role(self.probe, role)
+        self.probe.show()
+
+    def test_service(self) -> None:
+        """Test explicite et borné du service distant, à travers le port local."""
+        self.probe.setText(tr("Test du service…"))
+        set_role(self.probe, "muted")
+        self.probe.show()
+        self.ctx.run(self.ctx.manager.probe_session(self.info.id), on_error=self._probe_failed)
+
+    def _diagnose(self) -> None:
+        open_diagnosis(self.window(), self.ctx, self.info.profile_id)
+
+    def _probe_failed(self, error: BaseException) -> None:
+        self.probe.hide()
+        self.ctx.notify("error", str(error))
 
     def _update_cause(self) -> None:
         info = self.info
@@ -547,7 +582,15 @@ class DashboardView(QWidget):
         self.content.setContentsMargins(0, 0, 4, 0)
         self.content.setSpacing(10)
 
-        self.favorites_title = group_label(tr("Favoris"))
+        self.favorites_title = QWidget()
+        favorites_row = QHBoxLayout(self.favorites_title)
+        favorites_row.setContentsMargins(0, 0, 0, 0)
+        favorites_row.addWidget(group_label(tr("Favoris")))
+        self.launch_favorites_button = button(tr("Tout connecter"), "player-play-filled", link=True)
+        self.launch_favorites_button.setToolTip(tr("Connecter tous les favoris"))
+        self.launch_favorites_button.clicked.connect(self.launch_favorites)
+        favorites_row.addWidget(self.launch_favorites_button)
+        favorites_row.addStretch()
         self.content.addWidget(self.favorites_title)
         self.favorites_host = QWidget()
         self.favorites_grid = QGridLayout(self.favorites_host)
@@ -736,6 +779,18 @@ class DashboardView(QWidget):
         config = self.ctx.config()
         self.connect_menu.clear()
         active = {r.info.profile_id for r in self.cards.values() if r.info.state in RUNNING}
+        self.connect_menu.addSection(tr("Favoris et espaces de travail"))
+        favorites = config.favorite_items()
+        launch_all = self.connect_menu.addAction(
+            tr("Connecter tous les favoris ({n})").format(n=len(favorites)), self.launch_favorites
+        )
+        launch_all.setEnabled(bool(favorites))
+        for workspace in sorted(config.workspaces, key=lambda w: w.name.lower()):
+            self.connect_menu.addAction(
+                tr("Connecter « {name} » ({n})").format(name=workspace.name, n=len(workspace.items)),
+                lambda w=workspace: launch_workspace(self.ctx, w),
+            )
+        self.connect_menu.addAction(tr("Gérer les espaces de travail…"), self.manage_workspaces)
         if config.cloudflare_profiles:
             self.connect_menu.addSection(tr("Accès Cloudflare"))
             for profile in sorted(
@@ -824,6 +879,13 @@ class DashboardView(QWidget):
     def _start_failed(self, error: BaseException) -> None:
         self.ctx.notify("error", str(error))
         self._refresh_tiles()
+
+    def launch_favorites(self) -> None:
+        launch_favorites(self.ctx)
+
+    def manage_workspaces(self) -> None:
+        WorkspacesDialog(self, self.ctx).exec()
+        self.refresh_profiles()
 
     def start_cloudflare(self, profile_id: str) -> None:
         self.ctx.run(self.ctx.manager.start_cloudflare(profile_id), on_error=self._start_failed)

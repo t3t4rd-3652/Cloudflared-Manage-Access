@@ -270,3 +270,122 @@ async def test_text_commands(manager, store, ssh_server):  # noqa: F811
     incomplete = add(store, CloudflareProfile(name="Vide"))
     assert "incomplet" in (await execute(manager, {"cmd": "connect", "profile": incomplete.name}))["error"]
     assert os.environ.get("FAKE_CF_MODE") is None
+
+
+async def test_favorites_and_workspaces(manager, store):
+    from cma.core.models import LaunchItem, SavedForward, Workspace
+
+    fav = add(store, CloudflareProfile(name="Fav", favorite=True, hostname="f.ex.fr", local_port=free_port()))
+    other = add(store, CloudflareProfile(name="Autre", hostname="o.ex.fr", local_port=free_port()))
+    forward = SavedForward(remote_port=80, local_port=free_port(), label="web")
+    server = add(store, SshProfile(name="Srv", host="127.0.0.1", user="u", saved_forwards=[forward]))
+    items = store.snapshot().favorite_items()
+    assert [(i.kind, i.profile_id) for i in items] == [("cloudflare", fav.id)]
+
+    report = await manager.start_favorites()
+    assert [i.profile_id for i in report.started] == [fav.id] and report.failed == []
+    for info in report.started:
+        await wait_state(manager, info.id, {SessionState.LISTENING})
+
+    workspace = Workspace(
+        name="Matin",
+        items=[
+            LaunchItem(kind="cloudflare", profile_id=other.id),
+            LaunchItem(kind="ssh", profile_id=server.id, forward_id=forward.id),
+            LaunchItem(kind="cloudflare", profile_id="supprimé"),
+        ],
+    )
+    store.update(lambda c: c.workspaces.append(workspace))
+    report = await manager.start_workspace("matin")
+    assert {i.profile_id for i in report.started} == {other.id, server.id}
+    assert report.failed == [("Élément supprimé", "Cet accès n'existe plus.")]
+    with pytest.raises(ManagerError):
+        await manager.start_workspace("Inconnu")
+    store.update(lambda c: c.workspaces.append(Workspace(name="Vide")))
+    with pytest.raises(ManagerError, match="vide"):
+        await manager.start_workspace("Vide")
+
+
+async def test_favorites_and_workspace_commands(manager, store):
+    from cma.core.models import LaunchItem, Workspace
+
+    fav = add(store, CloudflareProfile(name="Fav", favorite=True, hostname="f.ex.fr", local_port=free_port()))
+    reply = await execute(manager, {"cmd": "connect", "favorites": True})
+    assert reply["ok"] and len(reply["sessions"]) == 1
+    store.update(
+        lambda c: c.workspaces.append(
+            Workspace(name="Soir", items=[LaunchItem(kind="cloudflare", profile_id="absent")])
+        )
+    )
+    reply = await execute(manager, {"cmd": "connect", "workspace": "Soir"})
+    assert reply["ok"] and reply["sessions"] == [] and "absent" not in reply["message"]
+    assert "n'existe plus" in reply["message"]
+    reply = await execute(manager, {"cmd": "connect", "workspace": "Inconnu"})
+    assert not reply["ok"]
+    assert fav
+
+
+async def test_probe_session_reports_the_remote_answer(manager, store, monkeypatch):
+    from cma.core.models import ServiceType
+
+    async def handle(reader, writer):
+        await reader.read(1024)
+        writer.write(b"HTTP/1.1 200 OK\r\n\r\n")
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    target = server.sockets[0].getsockname()[1]
+    monkeypatch.setitem(FAKE_ENV, "FAKE_CF_MODE", "proxy")
+    monkeypatch.setitem(FAKE_ENV, "FAKE_CF_TARGET", f"127.0.0.1:{target}")
+    profile = add(
+        store,
+        CloudflareProfile(
+            name="Web", hostname="w.ex.fr", local_port=free_port(), service_type=ServiceType.HTTP
+        ),
+    )
+    info = await manager.start_cloudflare(profile.id)
+    await wait_state(manager, info.id, {SessionState.LISTENING})
+    result = await manager.probe_session(info.id)
+    server.close()
+    assert result.ok and "200" in result.message
+    assert manager.session(info.id).info().probe_ok is True
+    with pytest.raises(ManagerError):
+        await manager.probe_session("absent")
+
+
+async def test_guided_diagnosis(manager, store, secrets, monkeypatch):
+    import cma.core.diagnose as diagnose
+
+    token = ServiceToken(name="T", client_id="t.access")
+    store.update(lambda c: c.tokens.append(token))
+    secrets.set(token.secret_key, "secret")
+    profile = add(
+        store,
+        CloudflareProfile(
+            name="Diag",
+            hostname="localhost",
+            local_port=free_port(),
+            auth=AuthMode.SERVICE_TOKEN,
+            token_id=token.id,
+        ),
+    )
+    monkeypatch.setattr(
+        diagnose, "_https_head", lambda *_a: (302, "https://equipe.cloudflareaccess.com/cdn-cgi")
+    )
+    checks = await diagnose.diagnose_cloudflare_profile(manager, profile.id)
+    by_name = {c.name: c for c in checks}
+    assert by_name["Port local"].status == "ok"
+    assert by_name["Résolution DNS"].status == "ok"
+    assert by_name["Proxy"].status == "skipped"
+    assert by_name["HTTPS et Cloudflare Access"].status == "ok"
+    assert by_name["Authentification"].status in ("ok", "error")
+    report = diagnose.format_report("Diag", checks)
+    assert report.startswith("Diagnostic de « Diag »") and "secret" not in report
+
+    monkeypatch.setattr(diagnose, "_https_head", lambda *_a: (200, ""))
+    unprotected = await diagnose._access(profile)
+    assert unprotected.status == "warning"
+    proxied = profile.model_copy(update={"proxy": "127.0.0.1:1"})
+    assert (await diagnose._proxy(proxied.proxy)).status == "error"
+    assert (await diagnose.diagnose_cloudflare_profile(manager, "absent"))[0].status == "error"

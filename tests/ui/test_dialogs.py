@@ -360,3 +360,30 @@ def test_import_dialog_rename_requires_a_free_name(qtbot, gui):
     assert not dialog.rename_error.text() and dialog.ok_button.isEnabled()
     dialog._accept()
     assert plan.items[0].rename_to == "T équipe"
+
+
+def test_diagnose_dialog(qtbot, gui, monkeypatch):
+    import cma.ui.dialogs.diagnose as diag
+    from cma.core.diagnose import Check
+
+    ctx, window = gui
+    profile = CloudflareProfile(name="Diag", hostname="d.ex.fr", local_port=27003)
+    ctx.update_config(lambda c: c.cloudflare_profiles.append(profile))
+
+    async def fake(_manager, _profile_id):
+        return [
+            Check("DNS", "ok", "1.2.3.4"),
+            Check("Proxy", "skipped", "aucun"),
+            Check("TLS", "error", "refus"),
+        ]
+
+    monkeypatch.setattr(diag, "diagnose_cloudflare_profile", fake)
+    dialog = diag.DiagnoseDialog(window, ctx, profile.id)
+    qtbot.addWidget(dialog)
+    qtbot.waitUntil(lambda: bool(dialog.checks), timeout=5000)
+    assert dialog.status.text() == "1 contrôle(s) en échec."
+    assert dialog.grid.count() == 9 and dialog.copy.isEnabled()
+    dialog.copy.click()
+    from PySide6.QtWidgets import QApplication
+
+    assert QApplication.clipboard().text().startswith("Diagnostic de « Diag »")

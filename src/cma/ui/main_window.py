@@ -27,9 +27,12 @@ from cma.core.sessions import SessionInfo, SessionKind, SessionState
 from cma.i18n import tr
 from cma.ui.a11y import apply_accessible_names
 from cma.ui.context import GuiContext
+from cma.ui.dialogs.diagnose import open_diagnosis
+from cma.ui.dialogs.palette import CommandPalette, PaletteEntry
+from cma.ui.dialogs.workspaces import launch_workspace
 from cma.ui.icons import app_icon, set_icon, token_icon
 from cma.ui.views.cloud import CloudView
-from cma.ui.views.dashboard import TO_CHECK, DashboardView, sessions_summary
+from cma.ui.views.dashboard import RUNNING, TO_CHECK, DashboardView, sessions_summary
 from cma.ui.views.logs import LogsView
 from cma.ui.views.profiles import CloudflareProfilesView
 from cma.ui.views.settings import SettingsView
@@ -181,6 +184,7 @@ class MainWindow(QMainWindow):
         for index, key in enumerate(DESTINATIONS):
             add_shortcut(self, QKeySequence(f"Ctrl+{index + 1}"), lambda k=key: self.show_view(k))
         add_shortcut(self, QKeySequence("Ctrl+Q"), self.request_quit)
+        add_shortcut(self, QKeySequence("Ctrl+K"), self.open_palette)
         ctx.theme.changed.connect(self._refresh_nav_icons)
 
         status = self.statusBar()
@@ -229,6 +233,161 @@ class MainWindow(QMainWindow):
         item = self._nav_items.get(key)
         if item is not None:
             self.nav.setCurrentItem(item)
+
+    def open_ssh_server(self, profile_id: str) -> None:
+        self.show_view("ssh")
+        self.ssh.select_profile(profile_id)
+
+    def new_cloudflare_profile(self) -> None:
+        self.show_view("profiles")
+        self.profiles.new_profile()
+
+    def new_ssh_server(self) -> None:
+        self.show_view("ssh")
+        self.ssh.new_profile()
+
+    def open_palette(self) -> None:
+        CommandPalette(self, self.palette_entries()).exec()
+
+    def palette_entries(self) -> list[PaletteEntry]:
+        """Toutes les commandes de la palette Ctrl+K, le verbe suivant l'état réel de chaque accès."""
+        config = self.ctx.config()
+        dashboard = self.dashboard
+        running = {r.info.profile_id for r in dashboard.cards.values() if r.info.state in RUNNING}
+        entries: list[PaletteEntry] = []
+        section = tr("Accès Cloudflare")
+        for profile in sorted(config.cloudflare_profiles, key=lambda p: (not p.favorite, p.name.lower())):
+            if profile.id in running:
+                entries.append(
+                    PaletteEntry(
+                        section,
+                        tr("Arrêter « {name} »").format(name=profile.name),
+                        lambda p=profile: self.ctx.run(self.ctx.manager.stop_profile(p.id)),
+                        profile.hostname,
+                        "player-stop-filled",
+                        profile.group,
+                    )
+                )
+            else:
+                entries.append(
+                    PaletteEntry(
+                        section,
+                        tr("Connecter « {name} »").format(name=profile.name),
+                        lambda p=profile: dashboard.start_cloudflare(p.id),
+                        profile.hostname,
+                        "player-play-filled",
+                        profile.group,
+                    )
+                )
+            entries.append(
+                PaletteEntry(
+                    section,
+                    tr("Diagnostiquer « {name} »").format(name=profile.name),
+                    lambda p=profile: open_diagnosis(self, self.ctx, p.id),
+                    profile.hostname,
+                    "bug",
+                    profile.group,
+                )
+            )
+            entries.append(
+                PaletteEntry(
+                    section,
+                    tr("Modifier « {name} »").format(name=profile.name),
+                    lambda p=profile: self.open_profile(p.id),
+                    profile.hostname,
+                    "pencil",
+                    profile.group,
+                )
+            )
+        section = tr("Serveurs SSH")
+        for server in sorted(config.ssh_profiles, key=lambda p: (not p.favorite, p.name.lower())):
+            target = f"{server.user}@{server.host}" if server.host else server.user
+            entries.append(
+                PaletteEntry(
+                    section,
+                    tr("Ouvrir le serveur « {name} »").format(name=server.name),
+                    lambda s=server: self.open_ssh_server(s.id),
+                    target,
+                    "server",
+                    server.group,
+                )
+            )
+            for forward in server.saved_forwards:
+                name = f"{server.name} › {forward.label or forward.remote_port}"
+                entries.append(
+                    PaletteEntry(
+                        section,
+                        tr("Connecter « {name} »").format(name=name),
+                        lambda s=server, f=forward: dashboard.start_forward(s.id, f),
+                        f"127.0.0.1:{forward.local_port} → {forward.remote_host}:{forward.remote_port}",
+                        "arrows-right-left",
+                        server.group,
+                    )
+                )
+        section = tr("Groupes et espaces de travail")
+        if config.favorite_items():
+            entries.append(
+                PaletteEntry(
+                    section, tr("Connecter tous les favoris"), dashboard.launch_favorites, icon="star"
+                )
+            )
+        for workspace in sorted(config.workspaces, key=lambda w: w.name.lower()):
+            entries.append(
+                PaletteEntry(
+                    section,
+                    tr("Connecter l'espace « {name} »").format(name=workspace.name),
+                    lambda w=workspace: launch_workspace(self.ctx, w),
+                    tr("{n} élément(s)").format(n=len(workspace.items)),
+                    "layout-dashboard",
+                )
+            )
+        for group in sorted({p.group for p in config.cloudflare_profiles if p.group}, key=str.lower):
+            entries.append(
+                PaletteEntry(
+                    section,
+                    tr("Connecter le groupe « {name} »").format(name=group),
+                    lambda g=group: dashboard.start_group(g),
+                    icon="player-play-filled",
+                )
+            )
+        section = tr("Actions")
+        entries += [
+            PaletteEntry(
+                section,
+                tr("Nouvel accès Cloudflare"),
+                self.new_cloudflare_profile,
+                icon="plus",
+            ),
+            PaletteEntry(
+                section,
+                tr("Nouveau serveur SSH"),
+                self.new_ssh_server,
+                icon="plus",
+            ),
+            PaletteEntry(
+                section,
+                tr("Gérer les espaces de travail…"),
+                dashboard.manage_workspaces,
+                icon="layout-dashboard",
+            ),
+        ]
+        if running:
+            entries.append(
+                PaletteEntry(
+                    section,
+                    tr("Tout arrêter"),
+                    lambda: self.ctx.run(self.ctx.manager.stop_all()),
+                    icon="player-stop-filled",
+                )
+            )
+        section = tr("Aller à")
+        for key, item in self._nav_items.items():
+            entries.append(
+                PaletteEntry(
+                    section, item.text(), lambda k=key: self.show_view(k), icon="arrow-right", keywords=key
+                )
+            )
+        return entries
 
     def current_view_key(self) -> str:
         item = self.nav.currentItem()

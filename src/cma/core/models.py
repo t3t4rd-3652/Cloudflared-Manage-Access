@@ -297,6 +297,22 @@ class SshProfile(Model):
         return problems
 
 
+class LaunchItem(Model):
+    """Élément d'un espace de travail : un accès Cloudflare, ou les redirections (toutes ou une) d'un serveur SSH."""
+
+    kind: Literal["cloudflare", "ssh"]
+    profile_id: str
+    forward_id: str | None = None
+
+
+class Workspace(Model):
+    """Ensemble d'accès à ouvrir d'un coup (par exemple « le matin »)."""
+
+    id: str = Field(default_factory=new_id)
+    name: Name
+    items: list[LaunchItem] = Field(default_factory=list[LaunchItem])
+
+
 class Theme(StrEnum):
     SYSTEM = "system"
     LIGHT = "light"
@@ -343,6 +359,26 @@ class Config(Model):
     tokens: list[ServiceToken] = Field(default_factory=list[ServiceToken])
     cloudflare_profiles: list[CloudflareProfile] = Field(default_factory=list[CloudflareProfile])
     ssh_profiles: list[SshProfile] = Field(default_factory=list[SshProfile])
+    workspaces: list[Workspace] = Field(default_factory=list[Workspace])
+
+    def workspace(self, workspace_id: str | None) -> Workspace | None:
+        return next((w for w in self.workspaces if w.id == workspace_id), None)
+
+    def find_workspace(self, name: str) -> Workspace | None:
+        lowered = name.strip().lower()
+        return next((w for w in self.workspaces if w.id == name or w.name.lower() == lowered), None)
+
+    def favorite_items(self) -> list[LaunchItem]:
+        """Accès Cloudflare favoris, puis serveurs SSH favoris avec toutes leurs redirections."""
+        items = [
+            LaunchItem(kind="cloudflare", profile_id=p.id) for p in self.cloudflare_profiles if p.favorite
+        ]
+        items += [
+            LaunchItem(kind="ssh", profile_id=p.id)
+            for p in self.ssh_profiles
+            if p.favorite and p.saved_forwards
+        ]
+        return items
 
     def token(self, token_id: str | None) -> ServiceToken | None:
         return next((t for t in self.tokens if t.id == token_id), None)

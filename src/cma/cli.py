@@ -46,6 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
     connect = sub.add_parser("connect", help=tr("ouvrir la connexion d'un profil"))
     connect.add_argument("profile", nargs="?", help=tr("nom ou identifiant du profil"))
     connect.add_argument("--group", help=tr("connecter tous les profils Cloudflare de ce groupe"))
+    connect.add_argument("--favorites", action="store_true", help=tr("connecter tous les favoris"))
+    connect.add_argument("--workspace", help=tr("connecter un espace de travail (nom)"))
     connect.add_argument(
         "--foreground", action="store_true", help=tr("ne pas passer par l'application en cours")
     )
@@ -146,7 +148,7 @@ async def _foreground_connect(args: argparse.Namespace) -> int:
             print(f"  {event.source_label} {event.level} {event.message}")
 
     ctx.bus.subscribe(on_event)
-    reply = await execute(ctx.manager, {"cmd": "connect", "profile": args.profile, "group": args.group})
+    reply = await execute(ctx.manager, connect_message(args))
     if not reply.get("ok"):
         print(tr("Erreur : {error}").format(error=reply.get("error")), file=sys.stderr)
         await ctx.manager.shutdown()
@@ -162,6 +164,16 @@ async def _foreground_connect(args: argparse.Namespace) -> int:
         return 0
     finally:
         await ctx.manager.shutdown()
+
+
+def connect_message(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "cmd": "connect",
+        "profile": args.profile,
+        "group": args.group,
+        "favorites": getattr(args, "favorites", False),
+        "workspace": getattr(args, "workspace", None),
+    }
 
 
 def run(args: argparse.Namespace) -> int:
@@ -224,13 +236,11 @@ def run(args: argparse.Namespace) -> int:
         return 0
 
     if command == "connect":
-        if not args.profile and not args.group:
-            print(tr("Indiquez un profil ou --group."), file=sys.stderr)
+        if not (args.profile or args.group or args.favorites or args.workspace):
+            print(tr("Indiquez un profil, --group, --favorites ou --workspace."), file=sys.stderr)
             return 2
         if not args.foreground:
-            reply = send_command(
-                paths, {"cmd": "connect", "profile": args.profile, "group": args.group}, timeout=120
-            )
+            reply = send_command(paths, connect_message(args), timeout=120)
             if reply is not None:
                 if not reply.get("ok"):
                     print(tr("Erreur : {error}").format(error=reply.get("error")), file=sys.stderr)

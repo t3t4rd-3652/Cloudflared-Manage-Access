@@ -84,6 +84,8 @@ class SessionInfo:
     bytes_down: int
     reconnect_in: float | None
     attempts: int
+    probe_ok: bool | None = None
+    probe_message: str = ""
 
     @property
     def local_address(self) -> str:
@@ -150,6 +152,9 @@ class Session(ABC):
         self.started_at = datetime.now()
         self.listening_since: datetime | None = None
         self.connections = 0
+        # Dernier test du service distant (« Tester le service ») : None tant qu'il n'a pas été lancé.
+        self.probe_ok: bool | None = None
+        self.probe_message = ""
         self.bytes_up = 0
         self.bytes_down = 0
         self.backoff = Backoff()
@@ -200,12 +205,16 @@ class Session(ABC):
             bytes_down=self.bytes_down,
             reconnect_in=reconnect_in,
             attempts=self.backoff.failures,
+            probe_ok=self.probe_ok,
+            probe_message=self.probe_message,
         )
 
     def publish(self) -> None:
         self.bus.publish(SessionChanged(self.info()))
 
     def set_state(self, state: SessionState, message: str | None = None) -> None:
+        if state not in (SessionState.LISTENING, SessionState.DEGRADED):
+            self.probe_ok, self.probe_message = None, ""
         if state == SessionState.LISTENING and self._state not in (
             SessionState.LISTENING,
             SessionState.DEGRADED,

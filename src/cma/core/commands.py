@@ -59,6 +59,17 @@ async def execute(manager: SessionManager, message: dict[str, Any]) -> dict[str,
         if command == "status":
             return {"ok": True, "sessions": [session_summary(i) for i in manager.list_sessions()]}
         if command == "connect":
+            if message.get("favorites") or message.get("workspace"):
+                report = (
+                    await manager.start_favorites()
+                    if message.get("favorites")
+                    else await manager.start_workspace(str(message["workspace"]))
+                )
+                failures = "; ".join(f"{name} : {error}" for name, error in report.failed)
+                reply: dict[str, Any] = {"ok": True, "sessions": [session_summary(i) for i in report.started]}
+                if failures:
+                    reply["message"] = tr("Non lancés : {list}").format(list=failures)
+                return reply
             if message.get("group"):
                 infos = await manager.start_group(str(message["group"]))
                 return {"ok": True, "sessions": [session_summary(i) for i in infos]}

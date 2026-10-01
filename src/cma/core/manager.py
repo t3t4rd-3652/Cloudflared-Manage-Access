@@ -13,6 +13,7 @@ import socket
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -29,8 +30,9 @@ from cma.core.cloudflared.command import (
 from cma.core.cloudflared.session import CloudflaredSession
 from cma.core.config_store import ConfigStore
 from cma.core.events import EventBus, Notification, SessionRemoved
-from cma.core.models import AuthMode, CloudflareProfile, SavedForward, SshAuthMode
+from cma.core.models import AuthMode, CloudflareProfile, LaunchItem, SavedForward, SshAuthMode, SshProfile
 from cma.core.netutil import find_free_port
+from cma.core.probe import ProbeResult, probe_kind, probe_service
 from cma.core.prompts import Prompter
 from cma.core.secrets import SecretStore
 from cma.core.sessions import Session, SessionInfo, SessionKind, SessionState, connect_host
@@ -50,6 +52,14 @@ BRIDGE_TIMEOUT = 30.0
 
 class ManagerError(RuntimeError):
     """Action impossible, avec un message destiné à l'utilisateur."""
+
+
+@dataclass(frozen=True)
+class LaunchReport:
+    """Résultat d'un lancement groupé : sessions ouvertes, et éléments en échec avec leur raison."""
+
+    started: list[SessionInfo]
+    failed: list[tuple[str, str]]
 
 
 class SessionManager:
@@ -305,6 +315,84 @@ class SessionManager:
             else:
                 raise result
         return infos
+
+    def _item_name(self, item: LaunchItem) -> str:
+        config = self.store.snapshot()
+        profile = (
+            config.cloudflare_profile(item.profile_id)
+            if item.kind == "cloudflare"
+            else config.ssh_profile(item.profile_id)
+        )
+        if profile is None:
+            return tr("Élément supprimé")
+        if isinstance(profile, SshProfile) and item.forward_id:
+            forward = next((f for f in profile.saved_forwards if f.id == item.forward_id), None)
+            if forward is not None:
+                return f"{profile.name} · {forward.label or forward.remote_port}"
+        return profile.name
+
+    async def _start_item(self, item: LaunchItem) -> list[SessionInfo]:
+        config = self.store.snapshot()
+        if item.kind == "cloudflare":
+            if config.cloudflare_profile(item.profile_id) is None:
+                raise ManagerError(tr("Cet accès n'existe plus."))
+            return [await self.start_cloudflare(item.profile_id)]
+        profile = config.ssh_profile(item.profile_id)
+        if profile is None:
+            raise ManagerError(tr("Ce serveur n'existe plus."))
+        if item.forward_id is None:
+            return await self.start_saved_forwards(profile.id)
+        forward = next((f for f in profile.saved_forwards if f.id == item.forward_id), None)
+        if forward is None:
+            raise ManagerError(tr("Cette redirection n'existe plus."))
+        return [await self.start_forward(profile.id, forward)]
+
+    async def start_items(self, items: list[LaunchItem]) -> LaunchReport:
+        """Lance chaque élément ; un échec n'empêche pas les autres et figure dans le rapport."""
+        results = await asyncio.gather(*(self._start_item(item) for item in items), return_exceptions=True)
+        started: list[SessionInfo] = []
+        failed: list[tuple[str, str]] = []
+        for item, result in zip(items, results, strict=True):
+            if isinstance(result, BaseException):
+                if not isinstance(result, Exception):
+                    raise result
+                failed.append((self._item_name(item), str(result)))
+            else:
+                started.extend(result)
+        return LaunchReport(started, failed)
+
+    async def start_favorites(self) -> LaunchReport:
+        items = self.store.snapshot().favorite_items()
+        if not items:
+            raise ManagerError(tr("Aucun favori à connecter."))
+        return await self.start_items(items)
+
+    async def start_workspace(self, workspace_id: str) -> LaunchReport:
+        workspace = self.store.snapshot().find_workspace(workspace_id)
+        if workspace is None:
+            raise ManagerError(tr("Espace de travail introuvable : {name}").format(name=workspace_id))
+        if not workspace.items:
+            raise ManagerError(tr("L'espace de travail « {name} » est vide.").format(name=workspace.name))
+        return await self.start_items(workspace.items)
+
+    async def probe_session(self, session_id: str) -> ProbeResult:
+        """Teste le service distant à travers le port local (demande explicite de l'utilisateur)."""
+        session = self.sessions.get(session_id)
+        if session is None or session.state not in (SessionState.LISTENING, SessionState.DEGRADED):
+            raise ManagerError(tr("La session n'est pas à l'écoute."))
+        kind = probe_kind(session.service_type, session.scheme)
+        result = await probe_service(connect_host(session.local_host), session.local_port, kind)
+        if result.ok is not False:
+            # cloudflared ou le relais peuvent signaler l'échec juste après : on laisse une seconde au journal.
+            await asyncio.sleep(1.0)
+            if session.state in (SessionState.DEGRADED, SessionState.ERROR) and session.message:
+                result = ProbeResult(False, session.message)
+        session.probe_ok, session.probe_message = result.ok, result.message
+        session.log(
+            "INFO" if result.ok else "WARNING", tr("Test du service : {result}").format(result=result.message)
+        )
+        session.publish()
+        return result
 
     async def stop_group(self, group: str) -> None:
         profiles = self.group_profiles(group)

@@ -38,6 +38,7 @@ from cma.core.models import AuthMode, CloudflareProfile, Config, ServiceType, ne
 from cma.core.sessions import SessionInfo, SessionKind, SessionState
 from cma.i18n import tr
 from cma.ui.context import GuiContext
+from cma.ui.dialogs.diagnose import open_diagnosis
 from cma.ui.dialogs.misc import show_text
 from cma.ui.dialogs.transfer import run_export, run_import
 from cma.ui.icons import set_icon
@@ -745,6 +746,7 @@ class CloudflareProfilesView(QWidget):
                 tr("Déconnecter") if active else tr("Connecter"),
                 toggle,
             ),
+            ("bug", tr("Diagnostiquer…"), lambda: open_diagnosis(self, self.ctx, profile_id)),
             ("copy", tr("Dupliquer"), self.duplicate),
             ("pencil", tr("Renommer"), rename),
             ("file-export", tr("Exporter…"), lambda: run_export(self.ctx, self, {profile_id})),

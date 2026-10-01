@@ -280,7 +280,12 @@ def test_tray_menu_and_state(qtbot, gui):
     assert labels[0] == "CMA — 1 session en cours"
     favorites = next(a.menu() for a in tray.menu.actions() if a.text() == "Favoris")
     entries = [a.text() for a in favorites.actions()]
-    assert entries == ["Fav — À l'écoute · Arrêter", "FavSSH — Déconnecté · Connecter"]
+    assert entries == [
+        "Fav — À l'écoute · Arrêter",
+        "FavSSH — Déconnecté · Connecter",
+        "",
+        "Connecter tous les favoris",
+    ]
     tray._on_removed("s1")
     tray._toggle(profile, False)
     tray._toggle(ssh, True)
@@ -453,3 +458,83 @@ def test_logs_view(qtbot, gui, monkeypatch, tmp_path):
     view.clear_display()
     assert view.model.rowCount() == 0
     assert notes[-1] == "Affichage effacé. Les fichiers journaux sont conservés."
+
+
+# --- Espaces de travail ----------------------------------------------------------------------------
+
+
+def test_workspaces_dialog(qtbot, gui, monkeypatch):
+    import cma.ui.dialogs.workspaces as ws
+
+    ctx, window = gui
+    profile = CloudflareProfile(name="Mongo", hostname="m.ex.fr", local_port=27001, favorite=True)
+    ctx.update_config(lambda c: c.cloudflare_profiles.append(profile))
+    dialog = ws.WorkspacesDialog(window, ctx)
+    qtbot.addWidget(dialog)
+    assert not dialog.name.isEnabled()
+    dialog.new_workspace()
+    workspace = ctx.config().workspaces[0]
+    assert workspace.name == "Nouvel espace" and dialog.name.isEnabled()
+    dialog.name.setText("Matin")
+    dialog._rename()
+    assert ctx.config().workspaces[0].name == "Matin"
+    node = dialog.tree.topLevelItem(0).child(0)
+    node.setCheckState(0, node.checkState(0).Checked)
+    assert [i.profile_id for i in ctx.config().workspaces[0].items] == [profile.id]
+    window.dashboard.refresh_profiles()
+    texts = [a.text() for a in window.dashboard.connect_menu.actions()]
+    assert "Connecter tous les favoris (1)" in texts and "Connecter « Matin » (1)" in texts
+    notes: list[tuple[str, str]] = []
+    monkeypatch.setattr(ctx, "notify", lambda level, text, **_k: notes.append((level, text)))
+    from cma.core.manager import LaunchReport
+
+    ws.report_launch(ctx, "Matin", LaunchReport([], [("X", "absent")]))
+    assert notes[-1][0] == "warning" and "X : absent" in notes[-1][1]
+    monkeypatch.setattr(ws, "confirm", lambda *_a: True)
+    dialog.delete_workspace()
+    assert ctx.config().workspaces == []
+
+
+# --- Palette Ctrl+K --------------------------------------------------------------------------------
+
+
+def test_command_palette(qtbot, gui, monkeypatch):
+    from cma.ui.dialogs.palette import CommandPalette, fold, matches
+
+    ctx, window = gui
+    profile = CloudflareProfile(name="Mongo Prod", group="Équipe", hostname="mongo.ex.fr", local_port=27002)
+    ctx.update_config(lambda c: c.cloudflare_profiles.append(profile))
+    entries = window.palette_entries()
+    texts = [e.text for e in entries]
+    assert "Connecter « Mongo Prod »" in texts and "Aller à" not in texts
+    assert fold("Équipe") == "equipe"
+    connect = next(e for e in entries if e.text == "Connecter « Mongo Prod »")
+    assert matches(connect, "mongo equipe") and not matches(connect, "mongo absent")
+
+    palette = CommandPalette(window, entries)
+    qtbot.addWidget(palette)
+    palette.search.setText("modifier mongo")
+    assert palette.current_entry().text == "Modifier « Mongo Prod »"
+    palette.search.setText("introuvable xyz")
+    assert palette.current_entry() is None and not palette.empty.isHidden()
+    palette.search.setText("journaux")
+    palette.run_current()
+    assert window.current_view_key() == "logs"
+
+    window.dashboard._on_session(fake_info(profile_id=profile.id, state=SessionState.LISTENING))
+    assert "Arrêter « Mongo Prod »" in [e.text for e in window.palette_entries()]
+
+
+def test_session_card_shows_the_service_test(qtbot, gui):
+    _ctx, window = gui
+    window.dashboard._on_session(fake_info(state=SessionState.LISTENING))
+    card = window.dashboard.cards["s1"]
+    assert card.probe.isHidden()
+    window.dashboard._on_session(
+        fake_info(state=SessionState.LISTENING, probe_ok=True, probe_message="Le serveur SSH répond.")
+    )
+    assert not card.probe.isHidden() and card.probe.text() == "✓ Le serveur SSH répond."
+    window.dashboard._on_session(
+        fake_info(state=SessionState.LISTENING, probe_ok=None, probe_message="Silence.")
+    )
+    assert card.probe.text().startswith("?")

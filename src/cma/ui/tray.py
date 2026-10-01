@@ -14,6 +14,7 @@ from cma.core.models import CloudflareProfile, SshProfile
 from cma.core.sessions import SessionInfo, SessionState
 from cma.i18n import tr
 from cma.ui.context import GuiContext
+from cma.ui.dialogs.workspaces import launch_favorites, launch_workspace
 from cma.ui.icons import app_icon_with_status, token_icon
 from cma.ui.main_window import MainWindow
 from cma.ui.theme import LIGHT
@@ -131,6 +132,20 @@ class Tray(QObject):
                 f"{profile.name} — {state} · {verb}",
             )
             action.triggered.connect(lambda _c=False, p=profile, r=running: self._toggle(p, r))
+        if favorites:
+            submenu.addSeparator()
+            submenu.addAction(
+                token_icon("player-play-filled"),
+                tr("Connecter tous les favoris"),
+                lambda: launch_favorites(self.ctx),
+            )
+        if config.workspaces:
+            spaces = self.menu.addMenu(token_icon("layout-dashboard"), tr("Espaces de travail"))
+            for workspace in sorted(config.workspaces, key=lambda w: w.name.lower()):
+                spaces.addAction(
+                    tr("Connecter « {name} » ({n})").format(name=workspace.name, n=len(workspace.items)),
+                    lambda w=workspace: launch_workspace(self.ctx, w),
+                )
         self.menu.addSeparator()
         self.menu.addAction(token_icon("layout-dashboard"), tr("Ouvrir"), self.window.bring_to_front)
         stop = self.menu.addAction(
