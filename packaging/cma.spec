@@ -5,12 +5,15 @@
 # et bibliothèques Qt remplaçables (LGPL). Deux exécutables partagent le même dossier _internal :
 #   CloudflaredManageAccess.exe  interface graphique (sans console)
 #   cma.exe                      ligne de commande (console)
+import sys
 from pathlib import Path
 
+WINDOWS = sys.platform == "win32"
 ROOT = Path(SPECPATH).resolve().parent  # noqa: F821 (variable fournie par PyInstaller)
 SRC = ROOT / "src"
-ICON = str(ROOT / "packaging" / "cma.ico")
-VERSION_FILE = str(ROOT / "build" / "version_info.txt")
+# Icône et ressource de version n'existent que dans les exécutables Windows.
+ICON = str(ROOT / "packaging" / "cma.ico") if WINDOWS else None
+VERSION_FILE = str(ROOT / "build" / "version_info.txt") if WINDOWS else None
 
 datas = [
     (str(SRC / "cma" / "resources" / "icons"), "cma/resources/icons"),
@@ -55,7 +58,10 @@ excludes = [
     "xmlrpc",
 ]
 
-hiddenimports = ["keyring.backends.Windows", "cma.i18n_en"]
+hiddenimports = [
+    "keyring.backends.Windows" if WINDOWS else "keyring.backends.SecretService",
+    "cma.i18n_en",
+]
 
 
 def analysis(script):

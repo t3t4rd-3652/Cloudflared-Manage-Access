@@ -251,6 +251,26 @@ def test_settings_view(qtbot, gui, monkeypatch, tmp_path):
     qtbot.waitUntil(lambda: bool(quits), timeout=5000)
     assert launched == [installer]
 
+    # Version portable : zip vérifié puis remplacement des fichiers après fermeture, data/ conservé.
+    zip_asset = ReleaseAsset("CloudflaredManageAccess-9.9.9-portable.zip", "https://x/p.zip", 1, "cd" * 32)
+    view._cma_update = UpdateInfo("2.0.0", "9.9.9", "https://x", (asset, zip_asset))
+    monkeypatch.setattr(settings_view, "update_mode", lambda: "portable")
+    monkeypatch.setattr(settings_view, "download_portable", lambda info, dest, **_kw: tmp_path / "p.zip")
+    monkeypatch.setattr(settings_view, "prepare_portable", lambda archive, staging: tmp_path / "nouveau")
+    portable_launches: list[tuple[Path, Path]] = []
+    monkeypatch.setattr(
+        settings_view,
+        "launch_portable_update",
+        lambda new, app, staging: portable_launches.append((new, app)),
+    )
+    quits.clear()
+    view.install_cma_update()
+    qtbot.waitUntil(lambda: bool(quits), timeout=5000)
+    assert portable_launches[0][0] == tmp_path / "nouveau"
+    monkeypatch.setattr(settings_view, "update_mode", lambda: "scoop")
+    view.check_cma_update()
+    qtbot.waitUntil(lambda: "scoop update" in view.cma_update_label.text(), timeout=5000)
+
     opened: list[object] = []
     monkeypatch.setattr(settings_view.QDesktopServices, "openUrl", opened.append)
     view._diagnostic()

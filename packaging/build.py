@@ -1,4 +1,5 @@
-"""Construit la distribution Windows : dossier onedir, zip portable, installeur Inno Setup, SHA256SUMS.
+"""Construit la distribution : dossier onedir, puis zip portable et installeur (Windows) ou archive portable et
+AppImage (Linux), et SHA256SUMS.
 
     uv run python packaging/build.py [--no-installer] [--stage all|app|package|sums]
 
@@ -8,7 +9,11 @@ Résultat dans dist/ :
     CloudflaredManageAccess/                          application (onedir)
     CloudflaredManageAccess-<version>-portable.zip    version portable (dossier data/ inclus)
     CloudflaredManageAccess-<version>-setup.exe       installeur (si Inno Setup est installé)
+    CloudflaredManageAccess-<version>-linux-x86_64.tar.gz   version portable Linux (dossier data/ inclus)
+    CloudflaredManageAccess-<version>-x86_64.AppImage       AppImage Linux (si appimagetool est disponible)
     SHA256SUMS.txt
+
+Sous Linux, appimagetool est cherché dans le PATH ou dans la variable APPIMAGETOOL.
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -96,6 +102,71 @@ def portable_zip(ver: str) -> Path:
     return target
 
 
+def linux_tarball(ver: str) -> Path:
+    """Archive portable Linux : comme le zip Windows, le dossier data/ active le mode portable."""
+    target = DIST / f"CloudflaredManageAccess-{ver}-linux-x86_64.tar.gz"
+    readme = BUILD / "LISEZMOI.txt"
+    BUILD.mkdir(exist_ok=True)
+    readme.write_text("Données de CMA en mode portable. Ne partagez pas ce dossier.\n", encoding="utf-8")
+    with tarfile.open(target, "w:gz") as archive:
+        archive.add(APP_DIR, arcname="CloudflaredManageAccess")
+        archive.add(readme, arcname="CloudflaredManageAccess/data/LISEZMOI.txt")
+    return target
+
+
+def render_icon(target: Path, size: int = 256) -> None:
+    """Icône PNG de l'AppImage, rendue depuis l'icône SVG de l'application."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QGuiApplication, QImage, QPainter
+    from PySide6.QtSvg import QSvgRenderer
+
+    app = QGuiApplication.instance() or QGuiApplication([])
+    image = QImage(size, size, QImage.Format.Format_ARGB32)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    QSvgRenderer(str(ROOT / "src" / "cma" / "resources" / "app-icon.svg")).render(painter)
+    painter.end()
+    image.save(str(target))
+    del app
+
+
+DESKTOP_ENTRY = """[Desktop Entry]
+Type=Application
+Name=Cloudflared Manage Access
+Comment=Cloudflare Access connections and SSH port forwards
+Exec=CloudflaredManageAccess
+Icon=cloudflared-manage-access
+Categories=Network;Utility;
+Terminal=false
+"""
+
+APP_RUN = """#!/bin/sh
+HERE="$(dirname "$(readlink -f "$0")")"
+exec "$HERE/usr/lib/cma/CloudflaredManageAccess" "$@"
+"""
+
+
+def appimage(ver: str) -> Path | None:
+    tool = os.environ.get("APPIMAGETOOL") or shutil.which("appimagetool")
+    if not tool:
+        print("appimagetool introuvable : AppImage non construite.")
+        return None
+    appdir = BUILD / "AppDir"
+    shutil.rmtree(appdir, ignore_errors=True)
+    shutil.copytree(APP_DIR, appdir / "usr" / "lib" / "cma", symlinks=True)
+    (appdir / "cloudflared-manage-access.desktop").write_text(DESKTOP_ENTRY, encoding="utf-8")
+    render_icon(appdir / "cloudflared-manage-access.png")
+    run = appdir / "AppRun"
+    run.write_text(APP_RUN, encoding="utf-8", newline="\n")
+    run.chmod(0o755)
+    target = DIST / f"CloudflaredManageAccess-{ver}-x86_64.AppImage"
+    # APPIMAGE_EXTRACT_AND_RUN : appimagetool (lui-même une AppImage) tourne sans FUSE, comme en CI.
+    env = {**os.environ, "ARCH": "x86_64", "APPIMAGE_EXTRACT_AND_RUN": "1"}
+    subprocess.run([tool, str(appdir), str(target)], check=True, env=env)
+    return target
+
+
 def find_iscc() -> Path | None:
     for candidate in (
         shutil.which("iscc"),
@@ -144,9 +215,13 @@ def main() -> int:
         write_version_info(ver)
         run_pyinstaller()
     if args.stage in ("all", "package"):
-        portable_zip(ver)
-        if not args.no_installer:
-            installer(ver)
+        if sys.platform == "win32":
+            portable_zip(ver)
+            if not args.no_installer:
+                installer(ver)
+        else:
+            linux_tarball(ver)
+            appimage(ver)
     if args.stage in ("all", "package", "sums"):
         artifacts = [
             f
@@ -154,6 +229,8 @@ def main() -> int:
                 DIST / f"CloudflaredManageAccess-{ver}-portable.zip",
                 DIST / f"CloudflaredManageAccess-{ver}-setup.exe",
                 DIST / f"CloudflaredManageAccess-{ver}-sbom.cdx.json",
+                DIST / f"CloudflaredManageAccess-{ver}-linux-x86_64.tar.gz",
+                DIST / f"CloudflaredManageAccess-{ver}-x86_64.AppImage",
             )
             if f.exists()
         ]

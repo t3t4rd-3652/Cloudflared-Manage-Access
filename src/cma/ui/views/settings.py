@@ -45,10 +45,13 @@ from cma.core.models import Config, KnownHostsMode, Theme
 from cma.core.secrets import EncryptedFileSecretStore
 from cma.core.updates import (
     UpdateInfo,
-    can_self_update,
     check_for_update,
     download_installer,
+    download_portable,
     launch_installer,
+    launch_portable_update,
+    prepare_portable,
+    update_mode,
 )
 from cma.i18n import SUPPORTED_LANGUAGES, tr
 from cma.platform import autostart
@@ -581,10 +584,13 @@ class SettingsView(QWidget):
     # --- Mise à jour de CMA -----------------------------------------------------------------------
 
     def self_update_possible(self) -> bool:
-        return can_self_update()
+        return update_mode() in ("installer", "portable")
 
     def install_cma_update(self) -> None:
         info = self._cma_update
+        if info is not None and update_mode() == "portable":
+            self._install_portable_update(info)
+            return
         if info is None or info.installer is None:
             return
         answer = QMessageBox.question(
@@ -612,6 +618,49 @@ class SettingsView(QWidget):
         def done(installer: Path) -> None:
             self.cma_progress_bar.hide()
             launch_installer(installer)
+            window = self.window()
+            quit_now = getattr(window, "quit_now", None)
+            if callable(quit_now):
+                quit_now()
+
+        def failed(error: BaseException) -> None:
+            self.cma_progress_bar.hide()
+            self.cma_install.setEnabled(True)
+            self.ctx.notify("error", str(error))
+
+        self.ctx.run(run(), done, failed)
+
+    def _install_portable_update(self, info: UpdateInfo) -> None:
+        """Version portable : zip vérifié, fichiers du programme remplacés après fermeture, data/ conservé."""
+        if info.portable_zip is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            tr("Mettre à jour CMA"),
+            tr(
+                "La version {v} va être téléchargée et vérifiée. CMA se fermera (les sessions ouvertes seront "
+                "arrêtées), remplacera ses fichiers en gardant le dossier data/, puis redémarrera. Continuer ?"
+            ).format(v=info.latest),
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.cma_install.setEnabled(False)
+        self.cma_progress_bar.setValue(0)
+        self.cma_progress_bar.show()
+        updates_dir = self.ctx.paths.cache_dir / "updates"
+        staging = updates_dir / "portable"
+        app_dir = Path(sys.executable).resolve().parent
+
+        def progress(received: int, total: int | None) -> None:
+            self.cma_progress.emit(received, total)
+
+        async def run() -> Path:
+            archive = await asyncio.to_thread(download_portable, info, updates_dir, progress=progress)
+            return await asyncio.to_thread(prepare_portable, archive, staging)
+
+        def done(new_app: Path) -> None:
+            self.cma_progress_bar.hide()
+            launch_portable_update(new_app, app_dir, staging)
             window = self.window()
             quit_now = getattr(window, "quit_now", None)
             if callable(quit_now):
@@ -657,13 +706,17 @@ class SettingsView(QWidget):
 
         def done(info: UpdateInfo) -> None:
             self._cma_update = info
-            installable = info.available and info.installer is not None and self.self_update_possible()
+            mode = update_mode()
+            asset = info.portable_zip if mode == "portable" else info.installer
+            installable = info.available and asset is not None and self.self_update_possible()
             self.cma_install.setVisible(installable)
             if info.latest is None:
                 self.cma_update_label.setText(tr("Aucune version publiée pour l'instant."))
             elif info.available:
                 text = tr("Version {v} disponible.").format(v=info.latest)
-                if not installable:
+                if mode == "scoop":
+                    text += " " + tr("Mettez à jour avec Scoop : scoop update cloudflared-manage-access")
+                elif not installable:
                     text += " " + tr(
                         "Mise à jour automatique réservée à la version installée : "
                         "téléchargez-la depuis la page de la release."

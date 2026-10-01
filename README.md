@@ -15,13 +15,26 @@ Sous Windows, téléchargez la dernière [release](https://github.com/t3t4rd-365
 - **`CloudflaredManageAccess-<version>-setup.exe`** : installeur, sans droits administrateur, avec mise à jour en un clic.
 - **`CloudflaredManageAccess-<version>-portable.zip`** : version portable, sans installation (voir ci-dessous).
 
+Avec [Scoop](https://scoop.sh), qui installe la version portable et garde son dossier `data/` à chaque mise à jour :
+
+```powershell
+scoop bucket add cma https://github.com/t3t4rd-3652/Cloudflared-Manage-Access
+scoop install cma/cloudflared-manage-access
+```
+
+Sous Linux : `CloudflaredManageAccess-<version>-x86_64.AppImage` (un seul fichier, à rendre exécutable) ou
+`CloudflaredManageAccess-<version>-linux-x86_64.tar.gz` (version portable, avec son dossier `data/`).
+
 ### Version portable
 
 Décompressez le zip où vous voulez, clé USB comprise, puis lancez `CloudflaredManageAccess.exe`. Le dossier `data/`
 placé à côté de l'exécutable active le mode portable : configuration, journaux, clés SSH, empreintes des serveurs et
 cloudflared téléchargé y restent. Les secrets vont dans un coffre chiffré de ce même dossier, protégé par une phrase
-de passe demandée au démarrage : ils suivent le dossier d'un poste à l'autre, sans passer par le Gestionnaire
-d'identifiants de Windows. Pour mettre à jour, remplacez les fichiers du programme en gardant `data/`.
+de passe : ils suivent le dossier d'un poste à l'autre, sans passer par le Gestionnaire d'identifiants de Windows.
+La phrase de passe peut être mémorisée sur un poste (chiffrée par Windows pour votre compte) ; ailleurs, elle est
+redemandée. L'interface peut se verrouiller après inactivité (Ctrl+L à tout moment), sans couper les sessions.
+**Paramètres › À propos** met la version portable à jour en un clic : le zip est vérifié, les fichiers du programme
+sont remplacés et `data/` est conservé.
 
 Vérifiez le fichier avec `SHA256SUMS.txt` publié à côté :
 
@@ -80,10 +93,11 @@ qui la corrige.
 ![Serveurs SSH](docs/captures/ssh-clair.png)
 
 - Liste des ports en écoute sur le serveur, avec service, conteneur Docker et statut HTTP, **sans rien installer** sur le serveur. Linux et Windows (OpenSSH Server) sont reconnus automatiquement.
-- Redirections enregistrées, démarrées d'un clic, avec compteurs de connexions et d'octets.
+- Redirections enregistrées, démarrées d'un clic, avec compteurs de connexions et d'octets : locales (`-L`),
+  proxy SOCKS 5 (`-D`, les applications choisissent leur cible) et inverses (`-R`, le serveur renvoie vers ce poste).
 - Authentification par mot de passe (mémorisable dans le coffre), par clé (générée ici, avec phrase de passe) ou par agent SSH.
 - Vérification de la clé d'hôte au premier contact, avec son empreinte SHA-256.
-- Passage par un profil Cloudflare pour les serveurs SSH publiés par Access.
+- Passage par un profil Cloudflare pour les serveurs SSH publiés par Access, ou rebond par un autre serveur (ProxyJump).
 
 ### Administration Cloudflare
 
@@ -98,6 +112,10 @@ Avec un jeton d'API Cloudflare, CMA gère aussi le côté serveur :
 
 ### Au quotidien
 
+- **Ctrl+K** : palette pour trouver et lancer n'importe quel accès, serveur ou action au clavier.
+- **Espaces de travail** : plusieurs accès ouverts d'un coup (« le matin »), et « Connecter tous les favoris ».
+- **Tester le service** : vérifie que le service distant répond vraiment, pas seulement que le port local est ouvert.
+- **Diagnostiquer…** : cloudflared, port local, DNS, proxy, HTTPS et Access, authentification ; rapport copiable.
 - Icône dans la zone de notification, dont la couleur reflète l'état global, avec les favoris dans son menu.
 - Notifications au lieu de fenêtres bloquantes, journaux en direct filtrables (thème sombre ci-dessous).
 - Thème clair, sombre ou système, style Windows 11, interface nette à toutes les échelles d'affichage.
@@ -116,6 +134,8 @@ Avec un jeton d'API Cloudflare, CMA gère aussi le côté serveur :
 cma list                     profils Cloudflare et SSH
 cma connect "SSH prod"       ouvre la connexion d'un profil (au premier plan si l'application ne tourne pas)
 cma connect --group Prod     connecte tous les profils Cloudflare du groupe « Prod »
+cma connect --favorites      connecte tous les favoris
+cma connect --workspace Matin  ouvre l'espace de travail « Matin »
 cma status                   sessions ouvertes par l'application
 cma disconnect --group Prod  ferme les connexions du groupe
 cma disconnect --all         ferme toutes les connexions

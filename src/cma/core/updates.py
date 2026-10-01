@@ -13,11 +13,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
 import urllib.error
 import urllib.request
+import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -51,6 +53,12 @@ class UpdateInfo:
             return None
         name = f"CloudflaredManageAccess-{self.latest}-setup.exe"
         return next((a for a in self.assets if a.name == name), None)
+
+    @property
+    def portable_zip(self) -> ReleaseAsset | None:
+        if not self.latest:
+            return None
+        return self.asset(f"CloudflaredManageAccess-{self.latest}-portable.zip")
 
     def asset(self, name: str) -> ReleaseAsset | None:
         return next((a for a in self.assets if a.name == name), None)
@@ -160,6 +168,25 @@ def download_installer(
     asset = info.installer
     if asset is None:
         raise DownloadError(tr("Cette release ne contient pas d'installeur Windows."))
+    final = download_asset(info, asset, dest_dir, progress=progress, cancel=cancel, timeout=timeout)
+    check = verify_signature or signature_is_acceptable
+    ok, detail = check(final)
+    if not ok:
+        final.unlink(missing_ok=True)
+        raise DownloadError(tr("Signature de l'installeur invalide : {detail}").format(detail=detail))
+    return final
+
+
+def download_asset(
+    info: UpdateInfo,
+    asset: ReleaseAsset,
+    dest_dir: Path,
+    *,
+    progress: Callable[[int, int | None], None] | None = None,
+    cancel: threading.Event | None = None,
+    timeout: float = 60,
+) -> Path:
+    """Télécharge un fichier de la release et vérifie son empreinte SHA-256 (refus sans empreinte publiée)."""
     expected = expected_sha256(info, asset, timeout)
     dest_dir.mkdir(parents=True, exist_ok=True)
     partial = dest_dir / f".{asset.name}.part"
@@ -190,12 +217,98 @@ def download_installer(
         os.replace(partial, final)
     finally:
         partial.unlink(missing_ok=True)
-    check = verify_signature or signature_is_acceptable
-    ok, detail = check(final)
-    if not ok:
-        final.unlink(missing_ok=True)
-        raise DownloadError(tr("Signature de l'installeur invalide : {detail}").format(detail=detail))
     return final
+
+
+# --- Version portable --------------------------------------------------------------------------------
+
+
+def update_mode() -> str | None:
+    """Comment cette copie se met à jour : « installer », « portable », « scoop » ou None (sources, Linux…)."""
+    if can_self_update():
+        return "installer"
+    if sys.platform != "win32" or not is_frozen() or portable_data_dir() is None:
+        return None
+    # Scoop remplace lui-même les fichiers et garde data/ : ne pas lui couper l'herbe sous le pied.
+    if "\\scoop\\apps\\" in str(Path(sys.executable).resolve()).lower():
+        return "scoop"
+    return "portable"
+
+
+def download_portable(
+    info: UpdateInfo,
+    dest_dir: Path,
+    *,
+    progress: Callable[[int, int | None], None] | None = None,
+    cancel: threading.Event | None = None,
+    timeout: float = 60,
+) -> Path:
+    asset = info.portable_zip
+    if asset is None:
+        raise DownloadError(tr("Cette release ne contient pas de version portable."))
+    return download_asset(info, asset, dest_dir, progress=progress, cancel=cancel, timeout=timeout)
+
+
+def prepare_portable(archive: Path, staging: Path) -> Path:
+    """Décompresse la nouvelle version dans `staging` et renvoie son dossier programme, vérifié."""
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True)
+    with zipfile.ZipFile(archive) as bundle:
+        for member in bundle.namelist():
+            target = (staging / member).resolve()
+            if not target.is_relative_to(staging.resolve()):
+                raise DownloadError(tr("Archive refusée : chemin hors du dossier de mise à jour."))
+        bundle.extractall(staging)
+    app = staging / "CloudflaredManageAccess"
+    if not (app / "CloudflaredManageAccess.exe").is_file() or not (app / "_internal").is_dir():
+        raise DownloadError(tr("Archive portable incomplète : mise à jour annulée."))
+    return app
+
+
+PORTABLE_SCRIPT = (
+    "Wait-Process -Id ([int]$env:CMA_WAIT_PID) -Timeout 120 -ErrorAction SilentlyContinue; "
+    "Start-Sleep -Milliseconds 500; "
+    # _internal appartient entièrement au programme : copie miroir. Le reste est copié sans rien supprimer,
+    # et data/ (configuration, journaux, coffre) n'est jamais touché.
+    "robocopy (Join-Path $env:CMA_NEW '_internal') (Join-Path $env:CMA_APP '_internal') /MIR /R:5 /W:1 /NFL /NDL /NJH /NJS | Out-Null; "
+    "robocopy $env:CMA_NEW $env:CMA_APP /E /XD (Join-Path $env:CMA_NEW '_internal') (Join-Path $env:CMA_NEW 'data') "
+    "/R:5 /W:1 /NFL /NDL /NJH /NJS | Out-Null; "
+    "Remove-Item -LiteralPath $env:CMA_STAGING -Recurse -Force -ErrorAction SilentlyContinue; "
+    "if ($env:CMA_RELAUNCH -eq '1') { Start-Process -FilePath (Join-Path $env:CMA_APP 'CloudflaredManageAccess.exe') }"
+)
+
+
+def launch_portable_update(
+    new_app: Path, app_dir: Path, staging: Path, *, relaunch: bool = True, wait_pid: int | None = None
+) -> None:
+    """Remplace les fichiers du programme une fois CMA fermé, en gardant data/, puis relance l'application."""
+    env = {
+        **powershell_env(),
+        "CMA_WAIT_PID": str(wait_pid if wait_pid is not None else os.getpid()),
+        "CMA_NEW": str(new_app),
+        "CMA_APP": str(app_dir),
+        "CMA_STAGING": str(staging),
+        "CMA_RELAUNCH": "1" if relaunch else "0",
+    }
+    flags = 0
+    if sys.platform == "win32":
+        flags = (
+            subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+        )
+    subprocess.Popen(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            PORTABLE_SCRIPT,
+        ],
+        env=env,
+        close_fds=True,
+        creationflags=flags,
+    )
 
 
 def signature_is_acceptable(path: Path) -> tuple[bool, str]:

@@ -2,6 +2,30 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Ajouté
+- Palette de commandes **Ctrl+K** : chercher et lancer un accès, un serveur ou une action au clavier.
+- **Espaces de travail** : plusieurs accès ouverts d'un coup, depuis Sessions, la zone de notification, la palette
+  ou `cma connect --workspace` ; « Connecter tous les favoris » (`cma connect --favorites`).
+- **Tester le service** : connexion réelle et bornée à travers le port local (bannière SSH, statut HTTP).
+- **Diagnostiquer…** : cloudflared, port local, DNS, proxy, HTTPS et réponse d'Access, authentification.
+- SSH : proxy **SOCKS 5/4a** (`-D`), redirection **inverse** (`-R`) et **rebond** par un autre serveur (ProxyJump).
+- Version portable : phrase de passe du coffre mémorisable sur un poste (DPAPI), verrouillage de l'interface après
+  inactivité ou par Ctrl+L, et **mise à jour en un clic** (zip vérifié, `data/` conservé).
+- Distribution : **Scoop** (bucket dans le dépôt), **Linux** (AppImage et archive portable), manifestes winget en anglais.
+- CI : temps de démarrage mesuré, captures à 100, 125 et 150 % comparées au dernier `main`.
+
+### Modifié
+- Largeurs de colonnes mémorisées ; journaux en police à chasse fixe ; Serveurs SSH lisible à 980 px.
+- Publication d'un service : étapes réelles affichées et résultat de chaque étape en cas d'échec partiel.
+- Import : « Renommer » laisse choisir le nouveau nom. Service token créé dans Cloudflare : durée au choix.
+
+### Corrigé
+- Erreur intermittente au démarrage : plus aucun filtre d'événements Python sur toute l'application.
+- Serveur SSH via Cloudflare : l'hôte n'est plus exigé à l'enregistrement.
+- Espaces de travail : plantage en cochant un accès.
+
 ## [2.0.0] - 2026-09-30
 
 Réécriture complète : cœur métier séparé de l'interface, interface Qt, SSH par asyncssh, secrets dans le coffre du système.

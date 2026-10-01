@@ -11,6 +11,9 @@ jobs:
   windows:
     name: Build Windows
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
     env:
       SIGNING_CERT_BASE64: ${{ secrets.SIGNING_CERT_BASE64 }}
       SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
@@ -53,9 +56,7 @@ jobs:
           uvx --from cyclonedx-bom cyclonedx-py requirements requirements-release.txt
           --output-format JSON
           --output-file "dist/CloudflaredManageAccess-${{ steps.meta.outputs.version }}-sbom.cdx.json"
-      - name: Empreintes SHA-256
-        run: uv run python packaging/build.py --stage sums
-      - name: Manifestes winget
+      - name: Manifestes winget et Scoop
         shell: bash
         run: |
           version="${{ steps.meta.outputs.version }}"
@@ -63,28 +64,112 @@ jobs:
           uv run python packaging/winget.py --installer "dist/${installer}" \
             --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${installer}"
           (cd dist/winget && 7z a -tzip "../winget-manifests-${version}.zip" manifests > /dev/null)
+          uv run python packaging/scoop.py --zip "dist/CloudflaredManageAccess-${version}-portable.zip" --out dist/scoop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/CloudflaredManageAccess-*-portable.zip
+            dist/CloudflaredManageAccess-*-setup.exe
+            dist/CloudflaredManageAccess-*-sbom.cdx.json
+            dist/winget-manifests-*.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scoop
+          path: dist/scoop/cloudflared-manage-access.json
+          if-no-files-found: error
+
+  linux:
+    name: Build Linux
+    # Version d'Ubuntu ancienne : l'AppImage et l'archive tournent sur les glibc plus anciennes aussi.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Bibliothèques système de Qt et appimagetool
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libgl1 file
+          curl -fsSL -o "$RUNNER_TEMP/appimagetool" \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x "$RUNNER_TEMP/appimagetool"
+          echo "APPIMAGETOOL=$RUNNER_TEMP/appimagetool" >> "$GITHUB_ENV"
+      - run: uv sync --locked
+      - name: Build de l'application (onedir)
+        run: uv run python packaging/build.py --stage app
+      - name: Archive portable et AppImage
+        run: uv run python packaging/build.py --stage package
+      - name: Vérification rapide
+        run: QT_QPA_PLATFORM=offscreen ./dist/CloudflaredManageAccess/cma --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            dist/CloudflaredManageAccess-*-linux-x86_64.tar.gz
+            dist/CloudflaredManageAccess-*-x86_64.AppImage
+          if-no-files-found: error
+
+  publish:
+    name: Publication
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+          pattern: "{windows,linux}"
+      - name: Empreintes SHA-256 (fins de ligne LF, pour sha256sum -c)
+        run: cd dist && sha256sum CloudflaredManageAccess-* > SHA256SUMS.txt && cat SHA256SUMS.txt
       - name: Notes de version tirées du CHANGELOG
         shell: bash
         run: |
-          version="${{ steps.meta.outputs.version }}"
+          version="${{ needs.windows.outputs.version }}"
           {
             echo "## Téléchargements"
             echo
             echo "| Fichier | Usage |"
             echo "| --- | --- |"
-            echo "| \`CloudflaredManageAccess-${version}-setup.exe\` | Installeur (sans droits administrateur), mise à jour en un clic |"
-            echo "| \`CloudflaredManageAccess-${version}-portable.zip\` | Version portable : décompressez et lancez ; tout reste dans \`data/\`, secrets compris (coffre chiffré) |"
+            echo "| \`CloudflaredManageAccess-${version}-setup.exe\` | Windows : installeur (sans droits administrateur), mise à jour en un clic |"
+            echo "| \`CloudflaredManageAccess-${version}-portable.zip\` | Windows : version portable ; tout reste dans \`data/\`, secrets compris (coffre chiffré) |"
+            echo "| \`CloudflaredManageAccess-${version}-x86_64.AppImage\` | Linux : application en un seul fichier |"
+            echo "| \`CloudflaredManageAccess-${version}-linux-x86_64.tar.gz\` | Linux : version portable, avec son dossier \`data/\` |"
             echo "| \`SHA256SUMS.txt\` | Empreintes à vérifier avec \`Get-FileHash\` ou \`sha256sum -c\` |"
+            echo
+            echo "Avec Scoop : \`scoop bucket add cma https://github.com/${GITHUB_REPOSITORY}\` puis \`scoop install cma/cloudflared-manage-access\`."
             echo
             awk -v h="## [$version]" 'index($0, h) == 1 {found=1; next} found && /^## \[/ {exit} found {print}' CHANGELOG.md
           } > notes.md
       - uses: softprops/action-gh-release@v2
         with:
           body_path: notes.md
-          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
+          prerelease: ${{ needs.windows.outputs.prerelease == 'true' }}
           files: |
-            dist/CloudflaredManageAccess-*-portable.zip
-            dist/CloudflaredManageAccess-*-setup.exe
-            dist/CloudflaredManageAccess-*-sbom.cdx.json
+            dist/CloudflaredManageAccess-*
             dist/winget-manifests-*.zip
             dist/SHA256SUMS.txt
+
+  scoop:
+    name: Bucket Scoop
+    needs: [windows, publish]
+    # Une préversion ne remplace pas la version proposée aux utilisateurs de Scoop.
+    if: needs.windows.outputs.prerelease == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/download-artifact@v4
+        with:
+          name: scoop
+          path: bucket
+      - name: Commit du manifeste sur main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bucket/cloudflared-manage-access.json
+          if git diff --cached --quiet; then echo "Manifeste déjà à jour"; exit 0; fi
+          git commit -m "Scoop : version ${{ needs.windows.outputs.version }}"
+          git push origin HEAD:main
