@@ -2,7 +2,7 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
-## [Non publié]
+## [2.1.1] - 2026-10-01
 
 ### Modifié
 - Vue Cloudflare redessinée : en-tête du compte, tuiles de chiffres clés (tunnels, noms d'hôte, applications,
