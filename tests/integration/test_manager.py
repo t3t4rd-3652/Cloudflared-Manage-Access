@@ -389,3 +389,29 @@ async def test_guided_diagnosis(manager, store, secrets, monkeypatch):
     proxied = profile.model_copy(update={"proxy": "127.0.0.1:1"})
     assert (await diagnose._proxy(proxied.proxy)).status == "error"
     assert (await diagnose.diagnose_cloudflare_profile(manager, "absent"))[0].status == "error"
+
+
+async def test_launch_items_edge_cases(manager, store):
+    from cma.core.models import LaunchItem, SavedForward
+
+    forward = SavedForward(remote_port=80, local_port=free_port(), label="web")
+    server = add(store, SshProfile(name="Srv", host="127.0.0.1", user="u", saved_forwards=[forward]))
+    items = [
+        LaunchItem(kind="ssh", profile_id="absent"),
+        LaunchItem(kind="ssh", profile_id=server.id, forward_id="absent"),
+    ]
+    report = await manager.start_items(items)
+    assert report.started == []
+    assert report.failed == [
+        ("Élément supprimé", "Ce serveur n'existe plus."),
+        ("Srv", "Cette redirection n'existe plus."),
+    ]
+    assert (
+        manager._item_name(LaunchItem(kind="ssh", profile_id=server.id, forward_id=forward.id)) == "Srv · web"
+    )
+    whole = await manager.start_items([LaunchItem(kind="ssh", profile_id=server.id)])
+    assert [i.forward_id for i in whole.started] == [forward.id]
+    with pytest.raises(ManagerError):
+        await manager.start_favorites()
+    with pytest.raises(ManagerError):
+        await manager.probe_session("absent")

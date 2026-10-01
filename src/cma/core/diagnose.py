@@ -139,7 +139,9 @@ async def _access(profile: CloudflareProfile) -> Check:
             if profile.proxy
             else ""
         )
-        return Check(name, "error", tr("Échec TLS : {error}.").format(error=exc.reason or exc) + hint)
+        return Check(
+            name, "error", tr("Échec TLS : {error}.").format(error=getattr(exc, "reason", None) or exc) + hint
+        )
     except (OSError, urllib.error.URLError) as exc:
         reason = getattr(exc, "reason", exc)
         return Check(name, "error", tr("Connexion HTTPS impossible : {error}").format(error=reason))

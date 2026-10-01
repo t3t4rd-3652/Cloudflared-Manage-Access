@@ -157,7 +157,8 @@ class SshForwardSession(Session):
             listener = await conn.start_server(  # pyright: ignore[reportUnknownMemberType]
                 self._remote_handler, forward.remote_host, forward.remote_port
             )
-        except (asyncssh.Error, OSError) as exc:
+        except (asyncssh.Error, asyncssh.ChannelListenError, OSError) as exc:
+            # ChannelListenError ne dérive pas d'asyncssh.Error : refus d'écoute du serveur.
             listener, error = None, getattr(exc, "reason", None) or str(exc)
         else:
             error = tr("requête refusée")

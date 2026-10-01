@@ -76,3 +76,38 @@ def test_probe_kind():
     assert probe_kind(ServiceType.GENERIC, "https") == "https"
     assert probe_kind(ServiceType.HTTP, None) == "http"
     assert probe_kind(ServiceType.RDP, None) == "tcp"
+
+
+async def test_probe_https_and_silent_web(monkeypatch):
+    import cma.core.probe as probe_module
+
+    monkeypatch.setattr(probe_module, "SILENT_WAIT", 0.3)
+    server, port = await serve(close_now)
+    try:
+        refused_tls = await probe_service("127.0.0.1", port, "https", timeout=1)
+    finally:
+        server.close()
+    assert refused_tls.ok is False
+
+    server, port = await serve(silent)
+    try:
+        quiet_web = await probe_service("127.0.0.1", port, "http", timeout=0.5)
+        quiet_ssh = await probe_service("127.0.0.1", port, "ssh", timeout=0.5)
+    finally:
+        server.close()
+    assert quiet_web.ok is None and quiet_ssh.ok is None
+
+
+async def test_probe_service_that_talks_first():
+    async def greet(_reader, writer):
+        writer.write(b"+OK serveur pret\r\n")
+        await writer.drain()
+        await asyncio.sleep(0.5)
+        writer.close()
+
+    server, port = await serve(greet)
+    try:
+        result = await probe_service("127.0.0.1", port, "tcp", timeout=1)
+    finally:
+        server.close()
+    assert result.ok is True and "octets" in result.message

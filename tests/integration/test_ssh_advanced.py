@@ -129,3 +129,26 @@ def test_forward_model_rules():
     assert socks.short_label == "SOCKS" and socks.describe() == "SOCKS sur 127.0.0.1:1080"
     remote = SavedForward(kind="remote", remote_host="localhost", remote_port=8080, local_port=3000)
     assert remote.describe() == "serveur localhost:8080 → 127.0.0.1:3000 sur ce poste"
+
+
+async def test_remote_forward_refused_by_the_server(paths, store, secrets, bus, ssh_server, monkeypatch):  # noqa: F811
+    from tests.integration.test_ssh import FakeSshServer
+
+    monkeypatch.setattr(FakeSshServer, "server_requested", lambda self, host, port: False)
+    forward = SavedForward(kind="remote", remote_host="127.0.0.1", remote_port=free_port(), local_port=1)
+    profile = add_profile(store, ssh_server["port"], saved_forwards=[forward])
+    manager = make_manager(paths, store, secrets, bus, ScriptedPrompter(passwords=[PASSWORD]))
+    info = await manager.start_forward(profile.id, forward)
+    for _ in range(200):
+        session = manager.session(info.id)
+        if session.state == SessionState.ERROR:
+            break
+        await asyncio.sleep(0.05)
+    assert session.state == SessionState.ERROR and "refuse d'écouter" in session.message
+
+
+async def test_missing_jump_server(paths, store, secrets, bus, ssh_server):  # noqa: F811
+    target = add_profile(store, ssh_server["port"], name="Orphelin", jump_profile="absent")
+    manager = make_manager(paths, store, secrets, bus, ScriptedPrompter(passwords=[PASSWORD]))
+    with pytest.raises(SshError, match="rebond n'existe plus"):
+        await manager.ssh.get(target)

@@ -236,7 +236,12 @@ class WorkspacesDialog(QDialog):
             target.items = [*items, item] if checked else items
 
         self._update(workspace.id, change)
-        self._reload(workspace.id)
+        # Pas de reconstruction de l'arbre ici : l'élément coché est encore en cours d'utilisation par Qt
+        # (le détruire pendant son propre signal provoque une violation d'accès). Seul le compteur change.
+        updated = self.ctx.config().workspace(workspace.id)
+        current = self.list.currentItem()
+        if updated is not None and current is not None:
+            current.setText(f"{updated.name} ({len(updated.items)})")
 
     def _rename(self) -> None:
         workspace = self.current()

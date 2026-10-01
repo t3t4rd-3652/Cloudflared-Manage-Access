@@ -3,9 +3,13 @@
     uv run python packaging/winget.py --installer dist/CloudflaredManageAccess-2.0.0-setup.exe \
         --url https://github.com/t3t4rd-3652/Cloudflared-Manage-Access/releases/download/v2.0.0/CloudflaredManageAccess-2.0.0-setup.exe
 
-Les trois fichiers sont écrits dans dist/winget/manifests/t/t3t4rd-3652/CloudflaredManageAccess/<version>/,
-l'arborescence attendue par le dépôt microsoft/winget-pkgs. Pour publier : `winget validate` sur ce dossier,
-puis pull request sur winget-pkgs (ou `wingetcreate submit`).
+Les quatre fichiers (version, anglais par défaut, français, installeur) sont écrits dans
+dist/winget/manifests/t/t3t4rd-3652/CloudflaredManageAccess/<version>/, l'arborescence attendue par le dépôt
+microsoft/winget-pkgs. Pour publier : `winget validate` sur ce dossier, puis `wingetcreate submit` (ou une pull
+request sur winget-pkgs). L'anglais est la langue par défaut : c'est sur elle que porte la recherche de winget.
+
+Seul l'installeur est proposé à winget : une version portable gérée par winget perdrait son dossier data/ à
+chaque mise à jour. La version portable est distribuée par Scoop (packaging/scoop.py), qui le conserve.
 """
 
 from __future__ import annotations
@@ -34,47 +38,96 @@ def header(kind: str) -> str:
     return f"# yaml-language-server: $schema=https://aka.ms/winget-manifest.{kind}.{MANIFEST_VERSION}.schema.json\n\n"
 
 
+def lines(*items: str) -> str:
+    return "".join(f"{item}\n" for item in items)
+
+
 def manifests(ver: str, url: str, sha256: str) -> dict[str, str]:
-    base = f"PackageIdentifier: {IDENTIFIER}\nPackageVersion: {ver}\n"
+    base = lines(f"PackageIdentifier: {IDENTIFIER}", f"PackageVersion: {ver}")
+    common = lines(
+        "Publisher: t3t4rd-3652",
+        "PublisherUrl: https://github.com/t3t4rd-3652",
+        f"PublisherSupportUrl: {REPO}/issues",
+        "PackageName: Cloudflared Manage Access",
+        f"PackageUrl: {REPO}",
+        "License: MIT",
+        f"LicenseUrl: {REPO}/blob/main/LICENSE.md",
+    )
+    footer = f"ReleaseNotesUrl: {REPO}/releases/tag/v{ver}\n"
     version_manifest = (
         header("version")
         + base
-        + f"DefaultLocale: fr-FR\nManifestType: version\nManifestVersion: {MANIFEST_VERSION}\n"
+        + lines("DefaultLocale: en-US", "ManifestType: version", f"ManifestVersion: {MANIFEST_VERSION}")
     )
-    locale_manifest = (
-        header("defaultLocale") + base + "PackageLocale: fr-FR\n"
-        "Publisher: t3t4rd-3652\n"
-        "PublisherUrl: https://github.com/t3t4rd-3652\n"
-        f"PublisherSupportUrl: {REPO}/issues\n"
-        "PackageName: Cloudflared Manage Access\n"
-        f"PackageUrl: {REPO}\n"
-        "License: MIT\n"
-        f"LicenseUrl: {REPO}/blob/main/LICENSE.md\n"
-        "ShortDescription: Gestionnaire graphique des connexions cloudflared access et des redirections SSH.\n"
-        "Description: |-\n"
-        "  Profils Cloudflare Access, service tokens dans le coffre de Windows, redirections SSH avec\n"
-        "  découverte des ports, gestion des tunnels et des applications Access par l'API Cloudflare.\n"
-        "Moniker: cma\n"
-        "Tags:\n"
-        "- cloudflare\n- cloudflared\n- ssh\n- tunnel\n- zero-trust\n"
-        f"ReleaseNotesUrl: {REPO}/releases/tag/v{ver}\n"
-        f"ManifestType: defaultLocale\nManifestVersion: {MANIFEST_VERSION}\n"
+    english = (
+        header("defaultLocale")
+        + base
+        + "PackageLocale: en-US\n"
+        + common
+        + lines(
+            "ShortDescription: Desktop manager for cloudflared access connections and SSH port forwards.",
+            "Description: |-",
+            "  Cloudflare Access profiles with service tokens kept in the Windows vault, SSH forwards (local,",
+            "  SOCKS and reverse) with port discovery, and management of tunnels and Access applications",
+            "  through the Cloudflare API.",
+            "Moniker: cma",
+            "Tags:",
+            "- cloudflare",
+            "- cloudflared",
+            "- ssh",
+            "- tunnel",
+            "- zero-trust",
+            "- port-forwarding",
+        )
+        + footer
+        + lines("ManifestType: defaultLocale", f"ManifestVersion: {MANIFEST_VERSION}")
+    )
+    french = (
+        header("locale")
+        + base
+        + "PackageLocale: fr-FR\n"
+        + common
+        + lines(
+            "ShortDescription: Gestionnaire graphique des connexions cloudflared access et des redirections SSH.",
+            "Description: |-",
+            "  Profils Cloudflare Access, service tokens dans le coffre de Windows, redirections SSH (locales,",
+            "  SOCKS et inverses) avec découverte des ports, gestion des tunnels et des applications Access",
+            "  par l'API Cloudflare.",
+            "Tags:",
+            "- cloudflare",
+            "- cloudflared",
+            "- ssh",
+            "- tunnel",
+            "- zero-trust",
+            "- redirection",
+        )
+        + footer
+        + lines("ManifestType: locale", f"ManifestVersion: {MANIFEST_VERSION}")
     )
     installer_manifest = (
-        header("installer") + base + "InstallerType: inno\n"
-        "Scope: user\n"
-        "InstallModes:\n- interactive\n- silent\n- silentWithProgress\n"
-        "UpgradeBehavior: install\n"
-        f"ProductCode: '{PRODUCT_CODE}'\n"
-        "Installers:\n"
-        "- Architecture: x64\n"
-        f"  InstallerUrl: {url}\n"
-        f"  InstallerSha256: {sha256.upper()}\n"
-        f"ManifestType: installer\nManifestVersion: {MANIFEST_VERSION}\n"
+        header("installer")
+        + base
+        + lines(
+            "InstallerType: inno",
+            "Scope: user",
+            "InstallModes:",
+            "- interactive",
+            "- silent",
+            "- silentWithProgress",
+            "UpgradeBehavior: install",
+            f"ProductCode: '{PRODUCT_CODE}'",
+            "Installers:",
+            "- Architecture: x64",
+            f"  InstallerUrl: {url}",
+            f"  InstallerSha256: {sha256.upper()}",
+            "ManifestType: installer",
+            f"ManifestVersion: {MANIFEST_VERSION}",
+        )
     )
     return {
         f"{IDENTIFIER}.yaml": version_manifest,
-        f"{IDENTIFIER}.locale.fr-FR.yaml": locale_manifest,
+        f"{IDENTIFIER}.locale.en-US.yaml": english,
+        f"{IDENTIFIER}.locale.fr-FR.yaml": french,
         f"{IDENTIFIER}.installer.yaml": installer_manifest,
     }
 
