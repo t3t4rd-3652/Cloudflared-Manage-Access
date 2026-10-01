@@ -168,6 +168,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "name": body["name"],
                     "client_id": f"{uuid.uuid4().hex}.access",
                     "expires_at": "2027-09-29T00:00:00Z",
+                    "duration": body.get("duration"),
                 }
                 state.service_tokens.append(token)
                 return self._send(200, _ok({**token, "client_secret": "secret-" + uuid.uuid4().hex}))

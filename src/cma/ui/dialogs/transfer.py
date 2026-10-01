@@ -69,9 +69,18 @@ def _buttons(dialog: QDialog, action: str) -> tuple[QDialogButtonBox, QPushButto
 
 
 class ImportDialog(QDialog):
-    def __init__(self, parent: QWidget | None, plan: ImportPlan, path: Path | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None,
+        plan: ImportPlan,
+        path: Path | None = None,
+        existing_names: dict[str, set[str]] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.plan = plan
+        # Noms déjà pris par type (en minuscules) : « Renommer » exige un nom libre (§4.15).
+        self.existing_names = existing_names or {}
+        self._renames: dict[int, str] = {}
         self.setWindowTitle(tr("Importer des données"))
         self.setWindowIcon(app_icon())
         layout = QVBoxLayout(self)
@@ -135,6 +144,17 @@ class ImportDialog(QDialog):
             self.table.setCellWidget(row, 3, combo)
             self._combos.append(combo)
         layout.addWidget(self.table, 1)
+        rename_row = QHBoxLayout()
+        self.rename_label = label(tr("Nom après import"))
+        self.rename_edit = QLineEdit()
+        self.rename_edit.setAccessibleName(tr("Nom après import"))
+        self.rename_error = label("", "error")
+        rename_row.addWidget(self.rename_label)
+        rename_row.addWidget(self.rename_edit, 1)
+        rename_row.addWidget(self.rename_error)
+        layout.addLayout(rename_row)
+        self.rename_edit.textEdited.connect(self._on_rename)
+        self.table.currentCellChanged.connect(lambda *_a: self._refresh())
         if plan.warnings:
             layout.addWidget(label("! " + "\n! ".join(plan.warnings), "warning", wrap=True))
         self.passphrase = QLineEdit()
@@ -178,7 +198,50 @@ class ImportDialog(QDialog):
         self.ok_button.setText(
             tr("Importer 1 élément") if count == 1 else tr("Importer {n} éléments").format(n=count)
         )
-        self.ok_button.setEnabled(count > 0)
+        self._refresh_rename()
+        self.ok_button.setEnabled(count > 0 and not self._rename_problems())
+
+    def _rename_problem(self, row: int) -> str | None:
+        name = self._renames.get(row, "").strip()
+        if not name:
+            return None  # sans nom saisi, un nom libre est dérivé à l'import
+        item = self.plan.items[row]
+        taken = set(self.existing_names.get(item.kind, set()))
+        taken |= {
+            n.strip().lower()
+            for r, n in self._renames.items()
+            if r != row
+            and self.plan.items[r].kind == item.kind
+            and self._combos[r].currentData() == Action.RENAME
+        }
+        return tr("Ce nom est déjà utilisé.") if name.lower() in taken else None
+
+    def _rename_problems(self) -> list[int]:
+        return [
+            row
+            for row, combo in enumerate(self._combos)
+            if combo.currentData() == Action.RENAME and self._rename_problem(row) is not None
+        ]
+
+    def _refresh_rename(self) -> None:
+        row = self.table.currentRow()
+        renaming = 0 <= row < len(self._combos) and self._combos[row].currentData() == Action.RENAME
+        for widget in (self.rename_label, self.rename_edit, self.rename_error):
+            widget.setVisible(renaming)
+        if not renaming:
+            return
+        item = self.plan.items[row]
+        if self.rename_edit.property("row") != row:
+            self.rename_edit.setProperty("row", row)
+            self.rename_edit.setText(self._renames.get(row, ""))
+            self.rename_edit.setPlaceholderText(tr("{name} (copie)").format(name=item.name))
+        self.rename_error.setText(self._rename_problem(row) or "")
+
+    def _on_rename(self, text: str) -> None:
+        row = self.table.currentRow()
+        if row >= 0:
+            self._renames[row] = text
+        self._refresh()
 
     def _menu(self, pos: QPoint) -> None:
         row = self.table.rowAt(pos.y())
@@ -194,8 +257,13 @@ class ImportDialog(QDialog):
         menu.deleteLater()
 
     def _accept(self) -> None:
-        for combo, item in zip(self._combos, self.plan.items, strict=True):
+        if self._rename_problems():
+            return
+        for row, (combo, item) in enumerate(zip(self._combos, self.plan.items, strict=True)):
             item.action = combo.currentData()
+            item.rename_to = (
+                (self._renames.get(row) or "").strip() or None if item.action == Action.RENAME else None
+            )
         if self.plan.needs_passphrase and self.passphrase.text():
             try:
                 self.plan.unlock(self.passphrase.text())
@@ -216,7 +284,13 @@ def run_import(ctx: GuiContext, parent: QWidget | None) -> None:
     except ImportError_ as exc:
         ctx.notify("error", tr("Ce fichier n'est pas un export CMA reconnu.") + f" ({exc})")
         return
-    dialog = ImportDialog(parent, plan, Path(path))
+    config = ctx.config()
+    names = {
+        "token": {t.name.lower() for t in config.tokens},
+        "cloudflare": {p.name.lower() for p in config.cloudflare_profiles},
+        "ssh": {p.name.lower() for p in config.ssh_profiles},
+    }
+    dialog = ImportDialog(parent, plan, Path(path), names)
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return
     try:

@@ -11,7 +11,7 @@ import urllib.error
 from collections.abc import Callable
 from datetime import datetime
 
-from PySide6.QtCore import QPoint, Qt, QUrl
+from PySide6.QtCore import QPoint, Qt, QUrl, Signal
 from PySide6.QtGui import QBrush, QColor, QDesktopServices, QKeySequence, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -44,6 +44,7 @@ from cma.i18n import tr
 from cma.ui.context import GuiContext
 from cma.ui.format import last_read
 from cma.ui.icons import app_icon
+from cma.ui.state import remember_header
 from cma.ui.theme import current_tokens, status_colors
 from cma.ui.views.common import confirm
 from cma.ui.widgets import (
@@ -66,6 +67,11 @@ PERMISSIONS = (
 )
 TUNNEL_ROLE = 256
 RULE_ROLE = 257
+
+
+def token_durations() -> list[tuple[str, str]]:
+    """Durées proposées, au format de l'API Cloudflare (« 8760h ») ; 1 an est la valeur par défaut de l'API."""
+    return [(tr("1 an"), "8760h"), (tr("2 ans"), "17520h"), (tr("3 ans"), "26280h"), (tr("6 mois"), "4380h")]
 
 
 def plural(n: int, one: str, many: str) -> str:
@@ -399,7 +405,7 @@ class AllowDialog(QDialog):
 
 
 class CreateTokenDialog(QDialog):
-    """Nom du token ; la durée est celle qu'utilise le moteur ; le secret n'est jamais affiché (§4.25)."""
+    """Nom et durée de validité du token ; le secret n'est jamais affiché (§4.25)."""
 
     def __init__(self, parent: QWidget | None, account: str, persistent: bool) -> None:
         super().__init__(parent)
@@ -417,7 +423,11 @@ class CreateTokenDialog(QDialog):
         self.name.setAccessibleName(tr("Nom"))
         self.name.setPlaceholderText("Production")
         form.addRow(tr("Nom"), self.name)
-        form.addRow(tr("Durée de validité"), label(tr("1 an (8 760 h)")))
+        self.duration = QComboBox()
+        self.duration.setAccessibleName(tr("Durée de validité"))
+        for text, value in token_durations():
+            self.duration.addItem(text, value)
+        form.addRow(tr("Durée de validité"), self.duration)
         layout.addLayout(form)
         layout.addWidget(
             label(
@@ -441,8 +451,8 @@ class CreateTokenDialog(QDialog):
         self.name.textChanged.connect(lambda text: self.ok_button.setEnabled(bool(text.strip())))
         self.ok_button.setEnabled(False)
 
-    def value(self) -> str:
-        return self.name.text().strip()
+    def value(self) -> tuple[str, str]:
+        return self.name.text().strip(), str(self.duration.currentData())
 
 
 # Fonctions de module : les tests les remplacent pour ne pas ouvrir de boîte modale.
@@ -458,17 +468,35 @@ def ask_allow(parent: QWidget, app: AccessApp, tokens: list[ServiceToken]) -> Se
     return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
 
 
-def ask_create_token(parent: QWidget, account: str, persistent: bool) -> str | None:
+def ask_create_token(parent: QWidget, account: str, persistent: bool) -> tuple[str, str] | None:
     dialog = CreateTokenDialog(parent, account, persistent)
     return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
+
+
+def publish_summary(result: PublishResult) -> str:
+    """« Nom d'hôte publié ; protection Access non créée ; profil CMA créé. » puis le détail des échecs."""
+    labels = {
+        "hostname": (tr("nom d'hôte publié"), tr("nom d'hôte non publié")),
+        "access": (tr("protection Access créée"), tr("protection Access non créée")),
+        "token": (tr("service token autorisé"), tr("service token non autorisé")),
+        "profile": (tr("profil CMA créé"), tr("profil CMA non créé")),
+    }
+    parts = [labels[step.name][0 if step.ok else 1] for step in result.steps if step.name in labels]
+    text = " ; ".join(parts)
+    text = (text[:1].upper() + text[1:] + ".") if text else ""
+    details = [step.detail for step in result.steps if not step.ok and step.detail]
+    return "\n".join([text, *details])
 
 
 # --- Vue ----------------------------------------------------------------------------------------------------
 
 
 class CloudView(QWidget):
+    publish_progress = Signal(str)
+
     def __init__(self, ctx: GuiContext, open_profile: Callable[[str], None] | None = None) -> None:
         super().__init__()
+        self.publish_progress.connect(lambda text: self.status.setText(text))
         self.ctx = ctx
         self.open_profile = open_profile
         self.overview: Overview | None = None
@@ -604,6 +632,7 @@ class CloudView(QWidget):
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
         header.resizeSection(1, 260)
         header.resizeSection(2, 120)
+        remember_header(header, "cloud-tunnels")
         self.tree.itemSelectionChanged.connect(self._update_tunnel_actions)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._tree_menu)
@@ -640,6 +669,7 @@ class CloudView(QWidget):
         self.apps = _table([tr("Nom"), tr("Domaine"), tr("Type")], tr("Applications Access"))
         self.apps.horizontalHeader().resizeSection(0, 220)
         self.apps.horizontalHeader().resizeSection(1, 280)
+        remember_header(self.apps.horizontalHeader(), "cloud-apps")
         self.apps.itemSelectionChanged.connect(self._update_app_actions)
         protect_empty = primary_button(tr("Protéger un nom d'hôte…"), "shield-check")
         protect_empty.clicked.connect(self.protect_hostname)
@@ -682,6 +712,7 @@ class CloudView(QWidget):
         header = self.remote_tokens.horizontalHeader()
         for column, width in enumerate((200, 280, 120)):
             header.resizeSection(column, width)
+        remember_header(header, "cloud-tokens")
         create_empty = primary_button(tr("Créer un service token…"), "plus")
         create_empty.clicked.connect(self.create_token)
         self.tokens_empty = EmptyState(
@@ -984,12 +1015,15 @@ class CloudView(QWidget):
         self.status.setText(tr("Publication de {host}…").format(host=request.hostname))
 
         def done(result: PublishResult) -> None:
-            parts = [tr("Service publié : {host}.").format(host=result.rule.hostname)]
-            if result.app is not None:
-                parts.append(tr("Protégé par Access."))
-            if result.profile is not None:
-                parts.append(tr("Profil CMA créé."))
-            self.ctx.notify("success", " ".join(parts), action=self._open_action(result.profile))
+            if result.complete:
+                parts = [tr("Service publié : {host}.").format(host=result.rule.hostname)]
+                if result.app is not None:
+                    parts.append(tr("Protégé par Access."))
+                if result.profile is not None:
+                    parts.append(tr("Profil CMA créé."))
+                self.ctx.notify("success", " ".join(parts), action=self._open_action(result.profile))
+            else:
+                self.ctx.notify("warning", publish_summary(result), action=self._open_action(result.profile))
             self.refresh()
 
         def failed(error: BaseException) -> None:
@@ -1002,7 +1036,7 @@ class CloudView(QWidget):
             )
             self.refresh()
 
-        self.ctx.run(self.admin.publish(request), done, failed)
+        self.ctx.run(self.admin.publish(request, self.publish_progress.emit), done, failed)
 
     def unpublish_selected(self) -> None:
         item = self._selected_item()
@@ -1097,8 +1131,9 @@ class CloudView(QWidget):
 
     def create_token(self) -> None:
         account = self.account.currentText() or "—"
-        name = ask_create_token(self, account, self.ctx.core.secrets.persistent)
-        name = (name or "").strip()
+        answer = ask_create_token(self, account, self.ctx.core.secrets.persistent)
+        name, duration = answer if answer is not None else ("", "")
+        name = name.strip()
         if not name:
             return
         self.status.setText(tr("Création du service token…"))
@@ -1119,4 +1154,4 @@ class CloudView(QWidget):
             )
             self.refresh()
 
-        self.ctx.run(self.admin.create_service_token(name), done, failed)
+        self.ctx.run(self.admin.create_service_token(name, duration=duration), done, failed)

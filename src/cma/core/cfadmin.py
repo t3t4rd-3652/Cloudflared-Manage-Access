@@ -72,10 +72,24 @@ class PublishRequest:
 
 
 @dataclass(frozen=True)
+class PublishStep:
+    """Résultat d'une étape de la publication : « hostname », « access », « token » ou « profile »."""
+
+    name: str
+    ok: bool
+    detail: str = ""
+
+
+@dataclass(frozen=True)
 class PublishResult:
     rule: IngressRule
     app: AccessApp | None
     profile: CloudflareProfile | None
+    steps: tuple[PublishStep, ...] = ()
+
+    @property
+    def complete(self) -> bool:
+        return all(step.ok for step in self.steps)
 
 
 class CloudflareAdmin:
@@ -246,24 +260,54 @@ class CloudflareAdmin:
 
     # --- Publication ----------------------------------------------------------------------------------
 
-    async def publish(self, request: PublishRequest) -> PublishResult:
-        """Publie `hostname → service` sur le tunnel, le protège par Access et crée le profil CMA."""
+    async def publish(
+        self, request: PublishRequest, progress: Callable[[str], None] | None = None
+    ) -> PublishResult:
+        """Publie `hostname → service` sur le tunnel, le protège par Access et crée le profil CMA.
+
+        Si la publication du nom d'hôte échoue, rien n'est créé et l'erreur remonte. Après elle, chaque étape est
+        tentée et son résultat rapporté : un échec d'Access n'efface pas un nom d'hôte déjà publié.
+        """
+
+        def report(text: str) -> None:
+            if progress is not None:
+                progress(text)
+
         api = self.api()
         account = self.account_id()
+        report(tr("Publication du nom d'hôte…"))
         rule = await asyncio.to_thread(
             api.publish_hostname, account, request.tunnel, request.hostname, request.service
         )
+        steps = [PublishStep("hostname", True)]
         app: AccessApp | None = None
         if request.protect:
-            app = await self.protect_hostname(rule.hostname)
+            report(tr("Configuration d'Access…"))
+            try:
+                app = await self.protect_hostname(rule.hostname)
+                steps.append(PublishStep("access", True))
+            except Exception as exc:
+                steps.append(PublishStep("access", False, str(exc)))
             if request.token_id:
-                await self.allow_token(app, request.token_id)
+                if app is None:
+                    steps.append(PublishStep("token", False, tr("Application Access absente.")))
+                else:
+                    try:
+                        await self.allow_token(app, request.token_id)
+                        steps.append(PublishStep("token", True))
+                    except Exception as exc:
+                        steps.append(PublishStep("token", False, str(exc)))
         profile: CloudflareProfile | None = None
         if request.create_profile:
-            token_id = request.token_id if request.protect else None
-            created = self.import_profiles([(request.tunnel, rule)], token_id=token_id)
-            profile = created[0] if created else None
-        return PublishResult(rule, app, profile)
+            report(tr("Création du profil CMA…"))
+            try:
+                token_id = request.token_id if request.protect else None
+                created = self.import_profiles([(request.tunnel, rule)], token_id=token_id)
+                profile = created[0] if created else None
+                steps.append(PublishStep("profile", True))
+            except Exception as exc:
+                steps.append(PublishStep("profile", False, str(exc)))
+        return PublishResult(rule, app, profile, tuple(steps))
 
     async def unpublish(self, tunnel: Tunnel, hostname: str) -> None:
         api = self.api()

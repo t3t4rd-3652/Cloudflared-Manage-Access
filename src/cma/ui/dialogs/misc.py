@@ -34,7 +34,7 @@ from cma.i18n import tr
 from cma.ui.context import GuiContext
 from cma.ui.dialogs.prompts import key_type_label
 from cma.ui.icons import app_icon
-from cma.ui.theme import mono_font
+from cma.ui.state import remember_header
 from cma.ui.views.common import confirm
 from cma.ui.widgets import button, copy_to_clipboard, label, primary_button, title
 
@@ -71,7 +71,7 @@ def show_text(parent: QWidget | None, window_title: str, intro: str, text: str) 
     layout.addWidget(label(intro, "muted", wrap=True))
     editor = QPlainTextEdit(text)
     editor.setReadOnly(True)
-    editor.setFont(mono_font())
+    editor.setProperty("role", "code")
     editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
     editor.setAccessibleName(window_title)
     layout.addWidget(editor, 1)
@@ -223,6 +223,7 @@ class KnownHostsDialog(QDialog):
         self.table = _table([tr("Serveur"), tr("Type"), tr("Empreinte SHA-256")], tr("Serveurs de confiance"))
         self.table.horizontalHeader().resizeSection(0, 240)
         self.table.horizontalHeader().resizeSection(1, 100)
+        remember_header(self.table.horizontalHeader(), "known-hosts")
         self.table.itemSelectionChanged.connect(self._on_selection)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._menu)
@@ -416,6 +417,7 @@ class KeysDialog(QDialog):
         )
         for column, width in enumerate((200, 90, 300, 110)):
             self.table.horizontalHeader().resizeSection(column, width)
+        remember_header(self.table.horizontalHeader(), "ssh-keys")
         self.table.itemSelectionChanged.connect(self._on_selection)
         self.table.doubleClicked.connect(lambda _i: self._on_selection())
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)

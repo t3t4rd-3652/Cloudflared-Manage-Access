@@ -16,6 +16,7 @@ from cma.core.manager import SessionManager
 from cma.core.models import Config
 from cma.i18n import tr
 from cma.paths import AppPaths
+from cma.ui import state as ui_state
 from cma.ui.bridge import EngineBridge, GuiPrompter, TaskRunner
 from cma.ui.theme import ThemeManager
 
@@ -43,6 +44,9 @@ class GuiContext:
     prompter: GuiPrompter
     _notifier: Notifier | None = field(default=None, repr=False)
     debug: bool = False
+
+    def __post_init__(self) -> None:
+        ui_state.configure(self.core.paths.data_dir / "ui-state.ini")
 
     @property
     def store(self) -> ConfigStore:

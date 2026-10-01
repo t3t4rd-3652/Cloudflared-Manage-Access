@@ -57,6 +57,7 @@ class ImportItem:
     incoming: ServiceToken | CloudflareProfile | SshProfile
     existing: ServiceToken | CloudflareProfile | SshProfile | None
     action: Action
+    rename_to: str | None = None
 
     @property
     def name(self) -> str:
@@ -306,9 +307,13 @@ def apply_import(plan: ImportPlan, store: ConfigStore, secrets: SecretStore) -> 
                     pool[index] = incoming
                     counters["replaced"] += 1
                 else:
-                    if item.action == Action.RENAME or any(
+                    wanted = (item.rename_to or "").strip() if item.action == Action.RENAME else ""
+                    if wanted:
+                        incoming.name = wanted
+                    if (item.action == Action.RENAME and not wanted) or any(
                         x.name.lower() == incoming.name.lower() for x in pool
                     ):
+                        # Nom demandé déjà pris (ou aucun nom donné) : un nom unique est dérivé.
                         incoming.name = unique_name(incoming.name, [x.name for x in pool])
                     if any(x.id == incoming.id for x in pool):
                         incoming.id = new_id()

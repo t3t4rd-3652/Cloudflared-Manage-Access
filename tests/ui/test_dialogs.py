@@ -334,3 +334,29 @@ def test_portable_mode_uses_the_encrypted_vault(qapp, monkeypatch, tmp_path):
     dialog = misc.SecretStoreDialog(None, tmp_path / "absent.json", portable=True)
     assert dialog.findChildren(type(dialog.hint))  # construit sans erreur en mode portable
     dialog.deleteLater()
+
+
+def test_import_dialog_rename_requires_a_free_name(qtbot, gui):
+    from cma.core.transfer import Action, build_export, plan_import
+
+    ctx, window = gui
+    ctx.update_config(
+        lambda c: c.tokens.extend(
+            [ServiceToken(name="T", client_id="t"), ServiceToken(name="U", client_id="u")]
+        )
+    )
+    plan = plan_import(build_export(ctx.config(), ctx.core.secrets), ctx.config())
+    dialog = transfer.ImportDialog(window, plan, None, {"token": {"t", "u"}})
+    qtbot.addWidget(dialog)
+    combo = dialog._combos[0]
+    assert combo.currentData() == Action.SKIP  # même objet : « Ignorer » par prudence
+    combo.setCurrentIndex(combo.findData(Action.RENAME))
+    dialog.table.setCurrentCell(0, 0)
+    assert dialog.rename_edit.isVisibleTo(dialog)
+    dialog.rename_edit.textEdited.emit("u")
+    assert dialog.rename_error.text() and not dialog.ok_button.isEnabled()
+    dialog.rename_edit.setText("T équipe")
+    dialog.rename_edit.textEdited.emit("T équipe")
+    assert not dialog.rename_error.text() and dialog.ok_button.isEnabled()
+    dialog._accept()
+    assert plan.items[0].rename_to == "T équipe"

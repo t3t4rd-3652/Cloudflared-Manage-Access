@@ -44,7 +44,8 @@ from cma.core.events import LogLine
 from cma.core.sessions import SessionInfo
 from cma.i18n import tr
 from cma.ui.context import GuiContext
-from cma.ui.theme import current_tokens, mono_font
+from cma.ui.state import remember_header
+from cma.ui.theme import current_tokens
 from cma.ui.widgets import (
     EmptyState,
     add_shortcut,
@@ -258,13 +259,14 @@ class LogsView(QWidget):
         self.table.verticalHeader().setDefaultSectionSize(28)
         self.table.setWordWrap(False)
         self.table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        self.table.setFont(mono_font())
+        self.table.setProperty("role", "mono")
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         for column, width in enumerate((88, 144, 210)):
             header.resizeSection(column, width)
         header.setStretchLastSection(True)
         header.setMinimumSectionSize(64)
+        remember_header(header, "logs")
         self.table.doubleClicked.connect(lambda _i: self.show_detail(expand=True))
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._context_menu)
@@ -291,7 +293,7 @@ class LogsView(QWidget):
         self.detail.setReadOnly(True)
         self.detail.setAccessibleName(tr("Message sélectionné"))
         self.detail.setPlaceholderText(tr("Sélectionnez un événement pour lire le message complet."))
-        self.detail.setFont(mono_font())
+        self.detail.setProperty("role", "code")
         self.detail.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
         self.splitter = QSplitter(Qt.Orientation.Vertical)
         self.splitter.addWidget(self.table_stack)

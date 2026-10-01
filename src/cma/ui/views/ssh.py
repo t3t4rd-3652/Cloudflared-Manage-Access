@@ -60,6 +60,7 @@ from cma.ui.dialogs.redirect import RedirectDialog
 from cma.ui.dialogs.transfer import run_export, run_import
 from cma.ui.format import last_read
 from cma.ui.icons import set_icon
+from cma.ui.state import remember_header
 from cma.ui.theme import current_tokens, state_colors
 from cma.ui.views.common import Action, ListEntry, ProfileList, ask_unsaved, confirm
 from cma.ui.widgets import (
@@ -164,16 +165,15 @@ class PortsTab(QWidget):
         self.filter.setAccessibleName(tr("Filtrer les ports"))
         self.filter.setClearButtonEnabled(True)
         filters.addWidget(self.filter, 1)
-        meta = QVBoxLayout()
-        meta.setSpacing(0)
+        layout.addLayout(filters)
+        # Métadonnées sous le filtre : à 980 px, elles ne lui volent plus sa largeur (§4.5).
+        meta = QHBoxLayout()
         self.status = label("", "meta")
-        self.status.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.read_at = label("", "meta")
+        self.read_at = label("", "meta", wrap=True)
         self.read_at.setAlignment(Qt.AlignmentFlag.AlignRight)
         meta.addWidget(self.status)
-        meta.addWidget(self.read_at)
-        filters.addLayout(meta)
-        layout.addLayout(filters)
+        meta.addWidget(self.read_at, 1)
+        layout.addLayout(meta)
         self.warnings = label("", "warning", wrap=True)
         self.warnings.hide()
         layout.addWidget(self.warnings)
@@ -210,6 +210,7 @@ class PortsTab(QWidget):
         header.resizeSection(1, 150)
         header.resizeSection(3, 110)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        remember_header(header, "ssh-ports")
         self.table.doubleClicked.connect(lambda _i: self.redirect_selected())
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._context_menu)
@@ -363,6 +364,7 @@ class ForwardsTab(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        remember_header(self.table.horizontalHeader(), "ssh-forwards")
         self.table.itemSelectionChanged.connect(self._update_buttons)
         self.table.doubleClicked.connect(lambda _i: self._edit())
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)

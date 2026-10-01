@@ -8,6 +8,7 @@ Les sessions affichées sont simulées : aucun processus n'est lancé.
 
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 from datetime import datetime, timedelta
@@ -243,7 +244,8 @@ def main() -> int:
         theme.set_theme(theme_name)
         window = MainWindow(ctx)
         window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
-        window.resize(1240, 780)
+        width, height = (int(v) for v in os.environ.get("CMA_CAPTURE_SIZE", "1240x780").split("x"))
+        window.resize(width, height)
         window.show()
         for info in demo_sessions(ctx):
             window.dashboard._on_session(info)

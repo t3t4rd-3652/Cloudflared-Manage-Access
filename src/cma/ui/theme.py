@@ -306,7 +306,7 @@ QLabel#SectionTitle, QLabel[role="section"] {{ font-size: 11pt; font-weight: 600
 QLabel[role="group"] {{ color: {t.muted}; font-size: 9.5pt; font-weight: 600; }}
 QLabel[role="muted"], QLabel[role="meta"] {{ color: {t.muted}; }}
 QLabel[role="meta"] {{ font-size: 9.5pt; }}
-QLabel[role="mono"], QPlainTextEdit[role="code"] {{ font-family: "{mono}"; font-size: 10pt; }}
+QLabel[role="mono"], QPlainTextEdit[role="code"], QTableView[role="mono"] {{ font-family: "{mono}"; font-size: 10pt; }}
 QLabel[role="error"] {{ color: {t.danger}; }}
 QLabel[role="warning"] {{ color: {t.warning}; }}
 QLabel[role="success"] {{ color: {t.success}; }}

@@ -193,3 +193,23 @@ async def test_admin_refuses_an_unknown_token(admin, store):
 
 def test_fake_state_is_isolated():
     assert FakeCloudflare().service_tokens == []
+
+
+async def test_admin_publish_reports_each_step_and_partial_failures(cf, admin, store):
+    await admin.connect(TOKEN)
+    seen: list[str] = []
+    result = await admin.publish(
+        PublishRequest(
+            Tunnel("t2", "labo", "down"), "pg.lab.exemple.fr", "tcp://localhost:5432", token_id="absent"
+        ),
+        progress=seen.append,
+    )
+    assert seen == ["Publication du nom d'hôte…", "Configuration d'Access…", "Création du profil CMA…"]
+    assert [(s.name, s.ok) for s in result.steps] == [
+        ("hostname", True),
+        ("access", True),
+        ("token", False),
+        ("profile", True),
+    ]
+    assert not result.complete and "introuvable" in result.steps[2].detail
+    assert result.profile is not None  # le nom d'hôte publié n'est pas défait par l'échec du token

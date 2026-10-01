@@ -52,9 +52,10 @@ def test_cloud_view_full_flow(qtbot, gui, cf, monkeypatch):
     assert len(ctx.config().cloudflare_profiles) == 3
 
     # Service token créé chez Cloudflare et rangé dans le coffre.
-    monkeypatch.setattr(cloud_module, "ask_create_token", lambda *_a: "Robot")
+    monkeypatch.setattr(cloud_module, "ask_create_token", lambda *_a: ("Robot", "17520h"))
     view.create_token()
     qtbot.waitUntil(lambda: view.remote_tokens.rowCount() == 1, timeout=10000)
+    assert cf.state.service_tokens[0]["duration"] == "17520h"
     token = ctx.config().tokens[0]
     assert ctx.core.secrets.get(token.secret_key).startswith("secret-")
     assert view.remote_tokens.item(0, 3).text() == "Oui"
@@ -183,4 +184,24 @@ def test_cloud_secondary_dialogs(qtbot, gui):
     qtbot.addWidget(create)
     assert not create.ok_button.isEnabled()
     create.name.setText(" Robot ")
-    assert create.ok_button.isEnabled() and create.value() == "Robot"
+    create.duration.setCurrentIndex(create.duration.findData("17520h"))
+    assert create.ok_button.isEnabled() and create.value() == ("Robot", "17520h")
+
+
+def test_publish_summary_lists_each_step():
+    from cma.core.cfadmin import PublishResult, PublishStep
+    from cma.core.cfapi import IngressRule
+
+    result = PublishResult(
+        IngressRule("a.exemple.fr", "tcp://localhost:22"),
+        None,
+        None,
+        (
+            PublishStep("hostname", True),
+            PublishStep("access", False, "refusé"),
+            PublishStep("profile", False),
+        ),
+    )
+    assert cloud_module.publish_summary(result) == (
+        "Nom d'hôte publié ; protection Access non créée ; profil CMA non créé.\nrefusé"
+    )

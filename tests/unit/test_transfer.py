@@ -105,6 +105,29 @@ def test_conflicts_replace_rename_and_skip(store, secrets, filled):
     assert renamed.via_cloudflare_profile == profile.id
 
 
+def test_rename_uses_the_chosen_name(store, secrets, filled):
+    data = build_export(store.snapshot(), secrets)
+    plan = plan_import(data, store.snapshot())
+    nas = next(item for item in plan.items if item.name == "NAS")
+    nas.action = Action.RENAME
+    nas.rename_to = "NAS équipe"
+    for item in plan.items:
+        if item is not nas:
+            item.action = Action.SKIP
+    apply_import(plan, store, secrets)
+    assert sorted(p.name for p in store.snapshot().ssh_profiles) == ["NAS", "NAS équipe"]
+
+    # Nom choisi déjà pris : un nom unique en est dérivé, sans écraser l'existant.
+    plan = plan_import(data, store.snapshot())
+    nas = next(item for item in plan.items if item.name == "NAS")
+    nas.action, nas.rename_to = Action.RENAME, "NAS équipe"
+    for item in plan.items:
+        if item is not nas:
+            item.action = Action.SKIP
+    apply_import(plan, store, secrets)
+    assert "NAS équipe (2)" in [p.name for p in store.snapshot().ssh_profiles]
+
+
 def test_same_name_different_id_is_renamed_by_default(store, secrets, filled):
     data = {
         "format": "cma-export",

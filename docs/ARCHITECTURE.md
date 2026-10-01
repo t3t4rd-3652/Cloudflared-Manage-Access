@@ -106,7 +106,7 @@ dans le thread principal, la réponse revient au moteur par `call_soon_threadsaf
 
 ## Données
 
-Format de `config.json` : voir `Config` dans `models.py`, ou l'annexe B de [PLAN-AMELIORATION.md](PLAN-AMELIORATION.md).
+Format de `config.json` : voir `Config` dans `models.py`, ou l'annexe B de [archive/PLAN-AMELIORATION.md](archive/PLAN-AMELIORATION.md).
 Chaque évolution du schéma incrémente `schema_version` et ajoute une migration testée.
 
 ## Qualité
