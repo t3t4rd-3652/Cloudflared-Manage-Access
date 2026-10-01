@@ -230,7 +230,8 @@ def update_mode() -> str | None:
     if sys.platform != "win32" or not is_frozen() or portable_data_dir() is None:
         return None
     # Scoop remplace lui-même les fichiers et garde data/ : ne pas lui couper l'herbe sous le pied.
-    if "\\scoop\\apps\\" in str(Path(sys.executable).resolve()).lower():
+    parts = [part.lower() for part in Path(sys.executable).resolve().parts]
+    if any(parts[i : i + 2] == ["scoop", "apps"] for i in range(len(parts) - 1)):
         return "scoop"
     return "portable"
 

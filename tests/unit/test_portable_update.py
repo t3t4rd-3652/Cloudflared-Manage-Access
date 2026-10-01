@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import sys
 import zipfile
 from pathlib import Path
 
@@ -41,8 +40,7 @@ def test_update_mode(monkeypatch, tmp_path):
         tmp_path / "scoop" / "apps" / "cloudflared-manage-access" / "current" / "CloudflaredManageAccess.exe"
     )
     monkeypatch.setattr(updates.sys, "executable", str(scoop))
-    if sys.platform == "win32":
-        assert updates.update_mode() == "scoop"
+    assert updates.update_mode() == "scoop"
     monkeypatch.setattr(updates, "portable_data_dir", lambda: None)
     assert updates.update_mode() is None
 
