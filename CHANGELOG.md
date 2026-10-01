@@ -9,6 +9,9 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
   service tokens, avec ce qui demande attention), icônes par type de service, états et expirations en couleur.
 - Connexion à l'API en trois étapes, avec la liste des permissions à cocher, dont « Account Settings : Read »
   (sans elle, Cloudflare ne renvoie aucun compte).
+- Tunnels présentés en cartes plutôt qu'en tableau : une carte par tunnel (état en pastille, nombre de noms
+  d'hôte protégés), une ligne par nom d'hôte avec son service et des badges « Access », « Non protégé » et
+  « Profil CMA ». Menu contextuel : « Ouvrir dans le navigateur » pour les services web.
 
 ## [2.1.0] - 2026-10-01
 

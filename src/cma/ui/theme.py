@@ -384,6 +384,11 @@ QTreeView::branch {{ background: transparent; }}
 QTreeView::branch:selected {{ background-color: {t.selected}; }}
 QTreeView::item {{ border-left: 3px solid transparent; }}
 QTreeView::item:selected {{ border-left: 3px solid {t.accent}; }}
+QTreeView#CardTree {{ background: transparent; border: none; outline: none; }}
+QTreeView#CardTree::item, QTreeView#CardTree::item:hover, QTreeView#CardTree::item:selected {{
+    background: transparent; border: none; padding: 0; min-height: 0;
+}}
+QTreeView#CardTree::branch {{ background: transparent; border: none; }}
 QListView#Navigation {{ background-color: transparent; border: none; outline: none; }}
 QListView#Navigation::item {{
     min-height: 36px; padding: 2px 10px; margin: 1px 8px; border-radius: 6px;
