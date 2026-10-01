@@ -2,6 +2,14 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Modifié
+- Vue Cloudflare redessinée : en-tête du compte, tuiles de chiffres clés (tunnels, noms d'hôte, applications,
+  service tokens, avec ce qui demande attention), icônes par type de service, états et expirations en couleur.
+- Connexion à l'API en trois étapes, avec la liste des permissions à cocher, dont « Account Settings : Read »
+  (sans elle, Cloudflare ne renvoie aucun compte).
+
 ## [2.1.0] - 2026-10-01
 
 ### Ajouté

@@ -11,8 +11,8 @@ import urllib.error
 from collections.abc import Callable
 from datetime import datetime
 
-from PySide6.QtCore import QPoint, Qt, QUrl, Signal
-from PySide6.QtGui import QBrush, QColor, QDesktopServices, QKeySequence, QShowEvent
+from PySide6.QtCore import QPoint, QSize, Qt, QUrl, Signal
+from PySide6.QtGui import QBrush, QColor, QDesktopServices, QFont, QKeySequence, QMouseEvent, QShowEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -22,8 +22,10 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
+    QLabel,
     QLineEdit,
     QMenu,
     QPushButton,
@@ -43,9 +45,9 @@ from cma.core.models import CloudflareProfile, ServiceToken
 from cma.i18n import tr
 from cma.ui.context import GuiContext
 from cma.ui.format import last_read
-from cma.ui.icons import app_icon
+from cma.ui.icons import app_icon, set_glyph, token_icon
 from cma.ui.state import remember_header
-from cma.ui.theme import current_tokens, status_colors
+from cma.ui.theme import current_tokens, mono_font, status_colors
 from cma.ui.views.common import confirm
 from cma.ui.widgets import (
     EmptyState,
@@ -53,18 +55,12 @@ from cma.ui.widgets import (
     add_shortcut,
     button,
     copy_to_clipboard,
+    hline,
     label,
     primary_button,
     title,
 )
 
-PERMISSIONS = (
-    "Compte › Cloudflare Tunnel : Modifier",
-    "Compte › Access: Apps and Policies : Modifier",
-    "Compte › Access: Service Tokens : Modifier",
-    "Zone › DNS : Modifier",
-    "Zone › Zone : Lire",
-)
 TUNNEL_ROLE = 256
 RULE_ROLE = 257
 
@@ -102,6 +98,16 @@ def expiry_label(value: str) -> str:
         return datetime.fromisoformat(value[:10]).strftime("%d/%m/%Y")
     except ValueError:
         return value or "—"
+
+
+def expiry_status(value: str) -> str | None:
+    """Teinte de la date d'expiration : « danger » si dépassée, « warning » à moins de 30 jours."""
+    try:
+        expires = datetime.fromisoformat(value[:10])
+    except ValueError:
+        return None
+    days = (expires - datetime.now()).days
+    return "danger" if days < 0 else "warning" if days < 30 else None
 
 
 def describe_api_error(error: BaseException) -> str:
@@ -488,6 +494,82 @@ def publish_summary(result: PublishResult) -> str:
     return "\n".join([text, *details])
 
 
+PERMISSION_GROUPS = (
+    (
+        "Compte",
+        (
+            "Account Settings : Read",
+            "Cloudflare Tunnel : Edit",
+            "Access: Apps and Policies : Edit",
+            "Access: Service Tokens : Edit",
+        ),
+    ),
+    ("Zone", ("DNS : Edit", "Zone : Read")),
+)
+DATABASE_PORTS = {"1433", "1521", "3306", "5432", "6379", "27017"}
+
+
+def service_icon(service: str) -> str:
+    """Icône d'un service publié, d'après son schéma (ssh://, rdp://, http://…) et son port."""
+    scheme, _, rest = service.partition("://")
+    scheme = scheme.lower()
+    if scheme == "tcp" and rest.rsplit(":", 1)[-1].strip("/") in DATABASE_PORTS:
+        return "database"
+    return {
+        "ssh": "terminal-2",
+        "rdp": "device-desktop",
+        "http": "world-www",
+        "https": "world-www",
+        "smb": "folder",
+        "tcp": "plug-connected",
+        "unix": "plug-connected",
+    }.get(scheme, "link")
+
+
+class StatTile(QFrame):
+    """Chiffre clé du compte (tunnels, noms d'hôte…) ; un clic ouvre l'onglet correspondant."""
+
+    clicked = Signal()
+
+    def __init__(self, icon_name: str, caption: str) -> None:
+        super().__init__()
+        self.setProperty("role", "tile")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMinimumWidth(150)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(12)
+        self.glyph = QLabel()
+        set_glyph(self.glyph, icon_name, "accent", 24)
+        layout.addWidget(self.glyph, 0, Qt.AlignmentFlag.AlignTop)
+        texts = QVBoxLayout()
+        texts.setSpacing(0)
+        self.value = QLabel("—")
+        self.value.setStyleSheet("font-size: 18pt; font-weight: 600;")
+        self.caption = label(caption, "muted")
+        self.detail = label("", "meta")
+        texts.addWidget(self.value)
+        texts.addWidget(self.caption)
+        texts.addWidget(self.detail)
+        layout.addLayout(texts, 1)
+        self._caption = caption
+
+    def set_values(self, value: int | None, detail: str = "", tone: str | None = None) -> None:
+        self.value.setText("—" if value is None else str(value))
+        self.detail.setText(detail)
+        self.detail.setVisible(bool(detail))
+        if tone is not None:
+            self.detail.setStyleSheet(f"color: {status_colors(tone, current_tokens())[0]};")
+        else:
+            self.detail.setStyleSheet("")
+        self.setAccessibleName(f"{self._caption} : {self.value.text()}" + (f", {detail}" if detail else ""))
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
 # --- Vue ----------------------------------------------------------------------------------------------------
 
 
@@ -522,41 +604,98 @@ class CloudView(QWidget):
     def _build_login(self) -> QWidget:
         card = QFrame()
         card.setObjectName("Card")
-        card.setMaximumWidth(680)
+        card.setMaximumWidth(720)
         box = QVBoxLayout(card)
-        box.setContentsMargins(24, 20, 24, 20)
-        box.setSpacing(10)
-        box.addWidget(title(tr("Connexion à l'API Cloudflare"), "SectionTitle"))
-        form = QFormLayout()
-        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        self.token_field = SecretField(tr("jeton d'API Cloudflare"), subject=tr("jeton d'API"))
-        form.addRow(tr("Jeton d'API"), self.token_field)
-        box.addLayout(form)
-        box.addWidget(
+        box.setContentsMargins(28, 24, 28, 24)
+        box.setSpacing(14)
+        header = QHBoxLayout()
+        header.setSpacing(14)
+        glyph = QLabel()
+        set_glyph(glyph, "cloud-cog", "accent", 40)
+        header.addWidget(glyph, 0, Qt.AlignmentFlag.AlignTop)
+        heading = QVBoxLayout()
+        heading.setSpacing(2)
+        heading.addWidget(title(tr("Connecter votre compte Cloudflare"), "SectionTitle"))
+        heading.addWidget(
             label(
-                tr("Permissions nécessaires :") + "\n• " + "\n• ".join(PERMISSIONS),
+                tr("Tunnels, noms d'hôte publiés, applications Access et service tokens, gérés depuis CMA."),
+                "muted",
                 wrap=True,
-                selectable=True,
             )
         )
-        box.addWidget(
-            label(tr("Limitez le jeton aux comptes et zones que vous souhaitez gérer."), "muted", wrap=True)
-        )
-        box.addWidget(label(tr("Secret conservé dans le coffre de cet ordinateur."), "muted", wrap=True))
-        self.login_error = label("", "error", wrap=True)
-        self.login_error.hide()
-        box.addWidget(self.login_error)
-        row = QHBoxLayout()
+        header.addLayout(heading, 1)
+        box.addLayout(header)
+        box.addWidget(hline())
+
+        def step(number: int, text: str) -> QHBoxLayout:
+            row = QHBoxLayout()
+            row.setSpacing(10)
+            badge = QLabel(str(number))
+            badge.setFixedSize(24, 24)
+            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            tokens = current_tokens()
+            badge.setStyleSheet(
+                f"background: {tokens.accent}; color: {tokens.on_accent}; border-radius: 12px; font-weight: 600;"
+            )
+            row.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
+            row.addWidget(label(text, wrap=True), 1)
+            return row
+
+        first = step(1, tr("Créez un jeton d'API personnalisé dans votre profil Cloudflare."))
         create = button(tr("Créer un jeton d'API ↗"), link=True)
         create.setToolTip(TOKENS_PAGE)
         create.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(TOKENS_PAGE)))
+        first.addWidget(create, 0, Qt.AlignmentFlag.AlignTop)
+        box.addLayout(first)
+        box.addLayout(step(2, tr("Donnez-lui ces permissions, limitées à votre compte et à vos zones :")))
+        permissions = QGridLayout()
+        permissions.setContentsMargins(34, 0, 0, 0)
+        permissions.setHorizontalSpacing(24)
+        permissions.setVerticalSpacing(4)
+        for column, (scope, items) in enumerate(PERMISSION_GROUPS):
+            permissions.addWidget(label(tr("Compte") if scope == "Compte" else scope, "meta"), 0, column)
+            for row, item in enumerate(items, start=1):
+                line = QHBoxLayout()
+                line.setSpacing(6)
+                check = QLabel()
+                set_glyph(check, "circle-check", "success", 16)
+                line.addWidget(check)
+                line.addWidget(label(item, selectable=True))
+                line.addStretch()
+                holder = QWidget()
+                holder.setLayout(line)
+                line.setContentsMargins(0, 0, 0, 0)
+                permissions.addWidget(holder, row, column)
+        box.addLayout(permissions)
+        box.addLayout(step(3, tr("Collez-le ici :")))
+        token_row = QHBoxLayout()
+        token_row.setContentsMargins(34, 0, 0, 0)
+        self.token_field = SecretField(tr("jeton d'API Cloudflare"), subject=tr("jeton d'API"))
+        self.token_field.setAccessibleName(tr("Jeton d'API"))
+        token_row.addWidget(self.token_field, 1)
         self.connect_button = primary_button(tr("Se connecter"), "plug-connected")
         self.connect_button.clicked.connect(lambda: self.connect_account())
-        row.addWidget(create)
-        row.addStretch()
-        row.addWidget(self.connect_button)
-        box.addLayout(row)
+        token_row.addWidget(self.connect_button)
+        box.addLayout(token_row)
+        self.login_error = label("", "error", wrap=True)
+        self.login_error.hide()
+        box.addWidget(self.login_error)
+        box.addWidget(hline())
+        footer = QHBoxLayout()
+        lock = QLabel()
+        set_glyph(lock, "lock", "muted", 16)
+        footer.addWidget(lock)
+        footer.addWidget(
+            label(
+                tr(
+                    "Le jeton est vérifié puis conservé dans le coffre de cet ordinateur ; il n'est jamais affiché."
+                ),
+                "muted",
+                wrap=True,
+            ),
+            1,
+        )
+        box.addLayout(footer)
         self.token_field.edit.returnPressed.connect(lambda: self.connect_account())
         host = QWidget()
         outer = QHBoxLayout(host)
@@ -573,33 +712,57 @@ class CloudView(QWidget):
         host = QWidget()
         outer = QVBoxLayout(host)
         outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(8)
-        bar = QHBoxLayout()
-        bar.addWidget(label(tr("Compte")))
+        outer.setSpacing(12)
+        header = QFrame()
+        header.setObjectName("Card")
+        bar = QHBoxLayout(header)
+        bar.setContentsMargins(18, 14, 18, 14)
+        bar.setSpacing(14)
+        avatar = QLabel()
+        set_glyph(avatar, "cloud", "accent", 32)
+        bar.addWidget(avatar, 0, Qt.AlignmentFlag.AlignVCenter)
+        names = QVBoxLayout()
+        names.setSpacing(2)
+        self.account_name = title("", "ObjectTitle")
+        names.addWidget(self.account_name)
+        self.status = label("", "meta")
+        names.addWidget(self.status)
+        self.read_label = label("", "meta")
+        names.addWidget(self.read_label)
+        bar.addLayout(names, 1)
         self.account = QComboBox()
         self.account.setAccessibleName(tr("Compte Cloudflare"))
-        self.account.setMinimumWidth(240)
+        self.account.setMinimumWidth(220)
+        self.account.setToolTip(tr("Changer de compte"))
         self.account.activated.connect(self._account_chosen)
-        bar.addWidget(self.account)
+        bar.addWidget(self.account, 0, Qt.AlignmentFlag.AlignVCenter)
         self.refresh_button = button(tr("Actualiser"), "refresh", tooltip=tr("Relire le compte (F5)"))
         self.refresh_button.clicked.connect(self.refresh)
-        bar.addWidget(self.refresh_button)
-        bar.addStretch()
+        bar.addWidget(self.refresh_button, 0, Qt.AlignmentFlag.AlignVCenter)
         forget = button(tr("Oublier le jeton…"), "key-off")
         forget.clicked.connect(self.forget)
-        bar.addWidget(forget)
-        outer.addLayout(bar)
-        self.status = label("", "meta")
-        outer.addWidget(self.status)
+        bar.addWidget(forget, 0, Qt.AlignmentFlag.AlignVCenter)
+        outer.addWidget(header)
+        tiles = QHBoxLayout()
+        tiles.setSpacing(10)
+        self.stat_tunnels = StatTile("cloud", tr("Tunnels"))
+        self.stat_hostnames = StatTile("world-www", tr("Noms d'hôte publiés"))
+        self.stat_apps = StatTile("shield-check", tr("Applications Access"))
+        self.stat_tokens = StatTile("key", tr("Service tokens"))
+        for index, tile in enumerate(
+            (self.stat_tunnels, self.stat_hostnames, self.stat_apps, self.stat_tokens)
+        ):
+            tab = max(0, index - 1)
+            tile.clicked.connect(lambda t=tab: self.tabs.setCurrentIndex(t))
+            tiles.addWidget(tile, 1)
+        outer.addLayout(tiles)
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.tabs.setProperty("role", "plain")
-        self.tabs.addTab(self._build_tunnels(), tr("Tunnels"))
-        self.tabs.addTab(self._build_apps(), tr("Applications Access"))
-        self.tabs.addTab(self._build_tokens(), tr("Service tokens"))
+        self.tabs.addTab(self._build_tunnels(), token_icon("cloud"), tr("Tunnels"))
+        self.tabs.addTab(self._build_apps(), token_icon("shield-check"), tr("Applications Access"))
+        self.tabs.addTab(self._build_tokens(), token_icon("key"), tr("Service tokens"))
         outer.addWidget(self.tabs, 1)
-        self.read_label = label("", "meta")
-        outer.addWidget(self.read_label)
         return host
 
     def _build_tunnels(self) -> QWidget:
@@ -825,9 +988,14 @@ class CloudView(QWidget):
 
     def _show_summary(self) -> None:
         overview = self.overview
+        account = self.account.currentData()
+        self.account_name.setText(account.name if isinstance(account, Account) else tr("Compte Cloudflare"))
+        self.account.setVisible(self.account.count() > 1)
         if overview is None:
             self.status.setText("")
             self.read_label.setText("")
+            for tile in (self.stat_tunnels, self.stat_hostnames, self.stat_apps, self.stat_tokens):
+                tile.set_values(None)
             return
         hostnames = sum(len(v.hostnames) for v in overview.tunnels)
         self.status.setText(
@@ -840,6 +1008,32 @@ class CloudView(QWidget):
             )
         )
         self.read_label.setText(last_read(self.read_at))
+        healthy = sum(1 for v in overview.tunnels if v.tunnel.status == "healthy")
+        troubled = len(overview.tunnels) - healthy
+        if not overview.tunnels:
+            self.stat_tunnels.set_values(0)
+        elif troubled:
+            self.stat_tunnels.set_values(
+                len(overview.tunnels), tr("{n} à vérifier").format(n=troubled), "warning"
+            )
+        else:
+            self.stat_tunnels.set_values(len(overview.tunnels), tr("tous en ligne"), "success")
+        self.stat_hostnames.set_values(
+            hostnames, plural(len(overview.zones), tr("{n} domaine"), tr("{n} domaines"))
+        )
+        protected = {a.domain.split("/")[0] for a in overview.apps}
+        published = {r.hostname for v in overview.tunnels for r in v.hostnames}
+        unprotected = len(published - protected)
+        self.stat_apps.set_values(
+            len(overview.apps),
+            tr("{n} sans protection").format(n=unprotected) if unprotected else "",
+            "warning" if unprotected else None,
+        )
+        local = {t.client_id for t in self.ctx.config().tokens}
+        in_cma = sum(1 for t in overview.tokens if t.client_id in local)
+        self.stat_tokens.set_values(
+            len(overview.tokens), tr("{n} dans CMA").format(n=in_cma) if overview.tokens else ""
+        )
 
     def _fill(self, overview: Overview | None) -> None:
         self.overview = overview
@@ -852,18 +1046,38 @@ class CloudView(QWidget):
             self._update_app_actions()
             return
         tokens = current_tokens()
+        bold = QFont(self.tree.font())
+        bold.setWeight(QFont.Weight.DemiBold)
+        mono = mono_font(9.5)
         for view in sorted(overview.tunnels, key=lambda v: v.tunnel.name.lower()):
             text, tone, symbol = tunnel_state(view.tunnel.status)
-            parent = QTreeWidgetItem([view.tunnel.name, "", f"{symbol} {text}"])
+            count = plural(len(view.hostnames), tr("{n} nom d'hôte"), tr("{n} noms d'hôte"))
+            parent = QTreeWidgetItem([view.tunnel.name, count, f"{symbol} {text}"])
             parent.setToolTip(2, view.tunnel.status)
             parent.setData(0, TUNNEL_ROLE, view.tunnel)
-            parent.setForeground(2, QBrush(QColor(status_colors(tone, tokens)[0])))
+            color = QBrush(QColor(status_colors(tone, tokens)[0]))
+            parent.setForeground(2, color)
+            parent.setForeground(1, QBrush(QColor(tokens.muted)))
+            parent.setIcon(
+                0,
+                token_icon(
+                    "cloud",
+                    {"success": "success", "warning": "warning", "danger": "danger"}.get(tone, "muted"),
+                ),
+            )
+            parent.setFont(0, bold)
+            parent.setFont(2, bold)
+            parent.setSizeHint(0, QSize(0, 36))
             for rule in view.hostnames:
                 child = QTreeWidgetItem([rule.hostname, rule.service, "—"])
+                child.setIcon(0, token_icon(service_icon(rule.service), "muted"))
+                child.setFont(1, mono)
+                child.setForeground(2, QBrush(QColor(tokens.muted)))
                 child.setToolTip(2, tr("État porté par le tunnel {name}").format(name=view.tunnel.name))
                 child.setToolTip(1, rule.service)
                 child.setData(0, TUNNEL_ROLE, view.tunnel)
                 child.setData(0, RULE_ROLE, rule)
+                child.setSizeHint(0, QSize(0, 32))
                 parent.addChild(child)
             self.tree.addTopLevelItem(parent)
             parent.setExpanded(True)
@@ -875,6 +1089,12 @@ class CloudView(QWidget):
                 item = QTableWidgetItem(value)
                 item.setToolTip(value)
                 item.setData(TUNNEL_ROLE, app)
+                if column == 0:
+                    item.setIcon(token_icon("shield-check", "accent"))
+                elif column == 1:
+                    item.setFont(mono)
+                else:
+                    item.setForeground(QBrush(QColor(tokens.muted)))
                 self.apps.setItem(row, column, item)
         self.apps_stack.setCurrentWidget(self.apps if overview.apps else self.apps_empty)
         local = {t.client_id: t for t in self.ctx.config().tokens}
@@ -883,15 +1103,24 @@ class CloudView(QWidget):
             self.remote_tokens.insertRow(row)
             mine = local.get(token.client_id)
             if mine is None:
-                in_cma = tr("Non")
+                in_cma, in_tone = tr("Non"), "neutral"
             elif self.ctx.core.secrets.get(mine.secret_key):
-                in_cma = tr("Oui")
+                in_cma, in_tone = tr("Oui"), "success"
             else:
-                in_cma = tr("Secret indisponible")
+                in_cma, in_tone = tr("Secret indisponible"), "warning"
+            expiry_tone = expiry_status(token.expires_at)
             values = (token.name, token.client_id, expiry_label(token.expires_at), in_cma)
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
                 item.setToolTip(value)
+                if column == 0:
+                    item.setIcon(token_icon("key", "accent"))
+                elif column == 1:
+                    item.setFont(mono)
+                elif column == 2 and expiry_tone:
+                    item.setForeground(QBrush(QColor(status_colors(expiry_tone, tokens)[0])))
+                elif column == 3:
+                    item.setForeground(QBrush(QColor(status_colors(in_tone, tokens)[0])))
                 self.remote_tokens.setItem(row, column, item)
         self.tokens_stack.setCurrentWidget(self.remote_tokens if overview.tokens else self.tokens_empty)
         self._update_tunnel_actions()

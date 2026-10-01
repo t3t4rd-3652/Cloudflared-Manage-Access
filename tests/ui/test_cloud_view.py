@@ -38,6 +38,11 @@ def test_cloud_view_full_flow(qtbot, gui, cf, monkeypatch):
     assert ctx.core.secrets.get(TOKEN_SECRET_KEY) == TOKEN
     assert view.token_field.text() == ""
     assert "3 noms d'hôte" in view.status.text()
+    assert view.stat_hostnames.value.text() == "3" and view.stat_tunnels.value.text() == "2"
+    assert view.account_name.text() and view.stat_tunnels.detail.text()
+    view.stat_apps.clicked.emit()
+    assert view.tabs.currentIndex() == 1
+    view.tabs.setCurrentIndex(0)
     assert view.read_label.text().startswith("Dernière lecture")
 
     # Import d'un nom d'hôte sélectionné, puis de tout le reste.
@@ -205,3 +210,19 @@ def test_publish_summary_lists_each_step():
     assert cloud_module.publish_summary(result) == (
         "Nom d'hôte publié ; protection Access non créée ; profil CMA non créé.\nrefusé"
     )
+
+
+def test_cloud_presentation_helpers():
+    from datetime import datetime, timedelta
+
+    assert cloud_module.service_icon("ssh://localhost:22") == "terminal-2"
+    assert cloud_module.service_icon("tcp://localhost:27017") == "database"
+    assert cloud_module.service_icon("tcp://localhost:9000") == "plug-connected"
+    assert cloud_module.service_icon("https://intranet") == "world-www"
+    assert cloud_module.service_icon("http_status:404") == "link"
+    soon = (datetime.now() + timedelta(days=10)).strftime("%Y-%m-%d")
+    past = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    later = (datetime.now() + timedelta(days=400)).strftime("%Y-%m-%d")
+    assert cloud_module.expiry_status(soon) == "warning"
+    assert cloud_module.expiry_status(past) == "danger"
+    assert cloud_module.expiry_status(later) is None and cloud_module.expiry_status("") is None

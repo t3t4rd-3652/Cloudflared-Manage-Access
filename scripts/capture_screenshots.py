@@ -318,6 +318,13 @@ def main() -> int:
             for _ in range(5):
                 app.processEvents()
             window.grab().save(str(output / f"{key}-{suffix}.png"))
+            if key == "cloud":
+                # Page de connexion (sans jeton), puis retour au compte de démonstration.
+                window.cloud.stack.setCurrentIndex(0)
+                for _ in range(5):
+                    app.processEvents()
+                window.grab().save(str(output / f"cloud-connexion-{suffix}.png"))
+                window.cloud.stack.setCurrentIndex(1)
         window.quitting = True
         window.close()
         window.deleteLater()
