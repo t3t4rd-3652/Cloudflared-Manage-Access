@@ -10,6 +10,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cma.core import dpapi
 from cma.core.migrations import V1_FILES, V1_LEFTOVERS, MigrationReport, delete_v1_files
 from cma.core.ssh.hostkeys import KnownHostsFile
 from cma.core.ssh.keys import KeyInfo, KeySource, delete_key, generate_key, list_keys, public_key_line
@@ -607,6 +609,14 @@ class SecretStoreDialog(QDialog):
         self.confirmation_label = label(tr("Confirmation"))
         form.addRow(self.confirmation_label, self.confirmation)
         layout.addLayout(form)
+        self.remember = QCheckBox(tr("Mémoriser la phrase de passe sur ce poste (compte Windows)"))
+        self.remember.setToolTip(
+            tr(
+                "Chiffrée par Windows pour votre compte sur cet ordinateur : sur un autre poste, "
+                "la phrase de passe sera redemandée."
+            )
+        )
+        layout.addWidget(self.remember)
         self.hint = label("", "muted", wrap=True)
         layout.addWidget(self.hint)
         self.error = label("", "error", wrap=True)
@@ -633,6 +643,7 @@ class SecretStoreDialog(QDialog):
         self.passphrase.setVisible(not memory)
         self.confirmation.setVisible(creating)
         self.confirmation_label.setVisible(creating)
+        self.remember.setVisible(dpapi.available() and not memory)
         if memory:
             self.hint.setText(
                 tr("Les secrets seront perdus à la fermeture de CMA. Vous devrez les saisir à nouveau.")
@@ -664,11 +675,19 @@ class SecretStoreDialog(QDialog):
         self.accept()
 
 
+def choose_secret_store_ex(
+    parent: QWidget | None, encrypted_file: Path, *, portable: bool = False
+) -> tuple[str | None, bool]:
+    """(phrase de passe du coffre chiffré ou None pour la mémoire, mémoriser sur ce poste)."""
+    dialog = SecretStoreDialog(parent, encrypted_file, portable=portable)
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return None, False
+    remember = dialog.remember.isChecked() and dialog.passphrase_value is not None
+    return dialog.passphrase_value, remember
+
+
 def choose_secret_store(
     parent: QWidget | None, encrypted_file: Path, *, portable: bool = False
 ) -> str | None:
     """Renvoie la phrase de passe du coffre chiffré, ou None pour garder les secrets en mémoire."""
-    dialog = SecretStoreDialog(parent, encrypted_file, portable=portable)
-    if dialog.exec() != QDialog.DialogCode.Accepted:
-        return None
-    return dialog.passphrase_value
+    return choose_secret_store_ex(parent, encrypted_file, portable=portable)[0]

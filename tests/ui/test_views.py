@@ -538,3 +538,30 @@ def test_session_card_shows_the_service_test(qtbot, gui):
         fake_info(state=SessionState.LISTENING, probe_ok=None, probe_message="Silence.")
     )
     assert card.probe.text().startswith("?")
+
+
+def test_interface_lock_with_an_encrypted_vault(qtbot, gui, tmp_path, monkeypatch):
+    from cma.core.secrets import EncryptedFileSecretStore
+
+    ctx, window = gui
+    monkeypatch.setattr(
+        ctx.core, "secrets", EncryptedFileSecretStore(tmp_path / "coffre.json", "phrase-longue")
+    )
+    assert window.can_lock()
+    window.lock_now()
+    assert window.locked and window._lock_panel.isVisible() is window.isVisible()
+    window._lock_panel.passphrase.setText("mauvaise")
+    window._lock_panel.try_unlock()
+    assert window.locked and window._lock_panel.error.text()
+    window._lock_panel.passphrase.setText("phrase-longue")
+    window._lock_panel.try_unlock()
+    assert not window.locked
+    import cma.ui.lock as lock_module
+
+    monkeypatch.setattr(lock_module, "_system_idle_seconds", lambda: None)
+    ctx.update_config(lambda c: setattr(c.settings, "lock_after_minutes", 5))
+    window.idle.last_input -= 6 * 60
+    window.check_idle()
+    assert window.locked
+    window.unlock()
+    assert "Verrouiller CMA" in [e.text for e in window.palette_entries()]

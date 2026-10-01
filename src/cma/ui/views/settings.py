@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from cma import REPO_URL, __version__
+from cma.core import dpapi
 from cma.core.cloudflared.binary import (
     DOWNLOAD_PAGE,
     ReleaseInfo,
@@ -41,6 +42,7 @@ from cma.core.cloudflared.binary import (
 from cma.core.diagnostics import build_report
 from cma.core.migrations import find_v1_files
 from cma.core.models import Config, KnownHostsMode, Theme
+from cma.core.secrets import EncryptedFileSecretStore
 from cma.core.updates import (
     UpdateInfo,
     can_self_update,
@@ -262,6 +264,36 @@ class SettingsView(QWidget):
         form.addRow(tr("Dossier"), self.data_dir)
         self.vault = label(self._vault_text(), "muted", wrap=True)
         form.addRow(tr("Coffre des secrets"), self.vault)
+        encrypted = isinstance(self.ctx.core.secrets, EncryptedFileSecretStore)
+        self.lock_after = QComboBox()
+        self.lock_after.setAccessibleName(tr("Verrouiller l'interface après inactivité"))
+        for text, minutes in (
+            (tr("Jamais"), 0),
+            (tr("5 minutes"), 5),
+            (tr("15 minutes"), 15),
+            (tr("30 minutes"), 30),
+            (tr("1 heure"), 60),
+        ):
+            self.lock_after.addItem(text, minutes)
+        self.lock_after.setEnabled(encrypted)
+        self.lock_after.currentIndexChanged.connect(
+            lambda _i: self._set("lock_after_minutes", int(self.lock_after.currentData() or 0))
+        )
+        form.addRow(tr("Verrouiller l'interface après inactivité"), self.lock_after)
+        form.addRow(
+            label(
+                tr("Ctrl+L verrouille aussitôt. Les sessions continuent pendant le verrouillage.")
+                if encrypted
+                else tr(
+                    "Disponible avec un coffre chiffré (version portable ou sans Gestionnaire d'identifiants)."
+                ),
+                "muted",
+                wrap=True,
+            )
+        )
+        self.forget_remembered = button(tr("Oublier la phrase de passe mémorisée sur ce poste"), "key-off")
+        self.forget_remembered.clicked.connect(self._forget_remembered)
+        form.addRow(self.forget_remembered)
         row = QHBoxLayout()
         for text, icon_name, callback in (
             (tr("Ouvrir le dossier"), "folder-open", lambda: self._open(self.ctx.paths.data_dir)),
@@ -346,11 +378,18 @@ class SettingsView(QWidget):
         self.port_min.setValue(settings.auto_port_min)
         self.port_max.setValue(settings.auto_port_max)
         self.known_hosts.setCurrentIndex(max(0, self.known_hosts.findData(settings.known_hosts)))
+        self.lock_after.setCurrentIndex(max(0, self.lock_after.findData(settings.lock_after_minutes)))
+        self.forget_remembered.setVisible(dpapi.remembered_passphrase(self.ctx.paths.data_dir) is not None)
         self.v1_button.setVisible(
             bool(find_v1_files(self.ctx.paths.data_dir)) or any(self.ctx.paths.data_dir.glob("backup-v1-*"))
         )
         self._loading = False
         self.refresh_cloudflared_version()
+
+    def _forget_remembered(self) -> None:
+        dpapi.forget_passphrase(self.ctx.paths.data_dir)
+        self.forget_remembered.hide()
+        self.ctx.notify("success", tr("Phrase de passe oubliée : elle sera demandée au prochain démarrage."))
 
     def _set(self, key: str, value: Any) -> None:
         if self._loading:

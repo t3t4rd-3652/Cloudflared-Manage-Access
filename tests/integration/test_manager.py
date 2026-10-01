@@ -359,7 +359,7 @@ async def test_guided_diagnosis(manager, store, secrets, monkeypatch):
 
     token = ServiceToken(name="T", client_id="t.access")
     store.update(lambda c: c.tokens.append(token))
-    secrets.set(token.secret_key, "secret")
+    secrets.set(token.secret_key, "valeur-secrete-du-diagnostic")
     profile = add(
         store,
         CloudflareProfile(

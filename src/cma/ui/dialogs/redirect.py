@@ -1,4 +1,9 @@
-"""Nouvelle redirection ou modification d'une redirection SSH (spécification §4.14, D6)."""
+"""Nouvelle redirection ou modification d'une redirection SSH (spécification §4.14, D6).
+
+Trois types : locale (-L, vers une cible vue du serveur), proxy SOCKS (-D, cibles choisies par l'application
+cliente) et inverse (-R, le serveur écoute et renvoie vers ce poste). Depuis un port découvert, le type est
+forcément « locale ».
+"""
 
 from __future__ import annotations
 
@@ -19,7 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from cma.core.models import SavedForward, new_id
+from cma.core.models import ForwardKind, SavedForward, new_id
 from cma.core.netutil import format_host_port
 from cma.core.ssh.discovery import RemotePort
 from cma.i18n import tr
@@ -33,6 +38,19 @@ class RedirectChoice:
     forward: SavedForward
     save: bool
     start: bool
+
+
+def kinds() -> list[tuple[str, ForwardKind]]:
+    return [
+        (tr("Locale : un port de ce poste vers une cible vue du serveur"), "local"),
+        (tr("Proxy SOCKS : les applications choisissent leur cible, qui sort depuis le serveur"), "socks"),
+        (tr("Inverse : le serveur écoute et renvoie vers ce poste"), "remote"),
+    ]
+
+
+def _int(text: str) -> int | None:
+    text = text.strip()
+    return int(text) if text.isdigit() else None
 
 
 class RedirectDialog(QDialog):
@@ -67,20 +85,32 @@ class RedirectDialog(QDialog):
         self.setMinimumWidth(560)
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
-        layout.addWidget(label(tr("La destination est vue depuis le serveur SSH."), "muted", wrap=True))
         form = QFormLayout()
         form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+        self.form = form
+        self.kind = QComboBox()
+        self.kind.setAccessibleName(tr("Type de redirection"))
+        for text, value in kinds():
+            self.kind.addItem(text, value)
+        self.kind.setCurrentIndex(max(0, self.kind.findData(existing.kind if existing else "local")))
+        self.kind.setEnabled(remote is None)
+        form.addRow(tr("Type"), self.kind)
+        self.help = label("", "muted", wrap=True)
+        form.addRow(self.help)
+
         self.remote_host = QLineEdit(
             existing.remote_host if existing else (remote.forward_host if remote else "127.0.0.1")
         )
-        self.remote_port = QLineEdit(
-            str(existing.remote_port if existing else (remote.port if remote else ""))
-        )
+        initial_remote = existing.remote_port if existing else (remote.port if remote else None)
+        self.remote_port = QLineEdit(str(initial_remote) if initial_remote else "")
         self.remote_port.setValidator(QIntValidator(1, 65535, self))
-        destination = QHBoxLayout()
+        self.destination = QWidget()
+        destination = QHBoxLayout(self.destination)
+        destination.setContentsMargins(0, 0, 0, 0)
         destination.addWidget(self.remote_host, 3)
         destination.addWidget(self.remote_port, 1)
-        form.addRow(tr("Hôte vu du serveur · Port distant"), destination)
+        self.destination_label = label(tr("Hôte vu du serveur · Port distant"))
+        form.addRow(self.destination_label, self.destination)
         self.remote_host.setAccessibleName(tr("Hôte vu du serveur"))
         self.remote_port.setAccessibleName(tr("Port distant"))
         if remote is not None and not existing and ("0.0.0.0" in remote.bind or "::" in remote.bind):
@@ -102,6 +132,20 @@ class RedirectDialog(QDialog):
         else:
             self.local_port.set_value(ctx.manager.suggest_local_port(preferred))
         form.addRow(tr("Port local"), self.local_port)
+        # Inverse : la cible est un service joignable depuis ce poste, pas un port libre.
+        is_remote = existing is not None and existing.kind == "remote"
+        self.target_host = QLineEdit(existing.local_host if existing and is_remote else "127.0.0.1")
+        self.target_host.setAccessibleName(tr("Hôte cible depuis ce poste"))
+        self.target_port = QLineEdit(str(existing.local_port) if existing and is_remote else "")
+        self.target_port.setValidator(QIntValidator(1, 65535, self))
+        self.target_port.setAccessibleName(tr("Port cible"))
+        self.target = QWidget()
+        target_row = QHBoxLayout(self.target)
+        target_row.setContentsMargins(0, 0, 0, 0)
+        target_row.addWidget(self.target_host, 3)
+        target_row.addWidget(self.target_port, 1)
+        form.addRow(tr("Cible depuis ce poste · Port"), self.target)
+
         self.scheme = QComboBox()
         self.scheme.addItem(tr("Aucun (TCP)"), None)
         self.scheme.addItem("HTTP", "http")
@@ -147,56 +191,105 @@ class RedirectDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         self.choice: RedirectChoice | None = None
-        for widget in (self.remote_host, self.remote_port):
+        for widget in (self.remote_host, self.remote_port, self.target_host, self.target_port):
             widget.textChanged.connect(self._refresh)
         self.local_port.changed.connect(self._refresh)
         self.local_port.edit.textChanged.connect(self._refresh)
         self.save.toggled.connect(self._refresh)
         self.start.toggled.connect(self._refresh)
-        self._refresh()
+        self.kind.currentIndexChanged.connect(self._kind_changed)
+        self._kind_changed()
         self.resize(640, self.sizeHint().height())
 
-    def _refresh(self, *_args: object) -> None:
-        local = self.local_port.value()
-        remote_port = self.remote_port.text().strip()
-        target = format_host_port(
-            self.remote_host.text().strip() or "?", int(remote_port) if remote_port.isdigit() else 0
-        )
-        where = tr(" depuis {server}").format(server=self.server) if self.server else ""
-        self.summary.setText(
-            tr("Local : {local} → {target}{where}").format(
-                local=f"127.0.0.1:{local if local is not None else '?'}",
-                target=target if remote_port.isdigit() else "?",
-                where=where,
+    def current_kind(self) -> ForwardKind:
+        return self.kind.currentData() or "local"
+
+    def _kind_changed(self, *_args: object) -> None:
+        kind = self.current_kind()
+        self.form.setRowVisible(self.destination, kind != "socks")
+        self.form.setRowVisible(self.local_port, kind != "remote")
+        self.form.setRowVisible(self.target, kind == "remote")
+        if kind == "remote":
+            self.destination_label.setText(tr("Adresse d'écoute sur le serveur · Port"))
+            if not self.existing and self.remote_host.text() == "127.0.0.1":
+                self.remote_host.setText("localhost")
+            self.help.setText(
+                tr(
+                    "Le serveur ouvre ce port ; chaque connexion qui y arrive est renvoyée vers la cible ci-dessous, "
+                    "jointe depuis ce poste. « localhost » le limite au serveur lui-même."
+                )
             )
-        )
+        elif kind == "socks":
+            self.help.setText(
+                tr(
+                    "Réglez le navigateur ou l'application sur le proxy SOCKS 127.0.0.1 et ce port : les connexions "
+                    "sortiront depuis le serveur."
+                )
+            )
+        else:
+            self.destination_label.setText(tr("Hôte vu du serveur · Port distant"))
+            if not self.existing and self.remote_host.text() == "localhost":
+                self.remote_host.setText("127.0.0.1")
+            self.help.setText(tr("La destination est vue depuis le serveur SSH."))
+        self._refresh()
+
+    def _ports(self) -> tuple[int | None, int | None]:
+        """(port local, ou port cible pour une redirection inverse ; port distant) selon le type."""
+        kind = self.current_kind()
+        local = self.local_port.value() if kind != "remote" else _int(self.target_port.text())
+        remote = _int(self.remote_port.text()) if kind != "socks" else None
+        return local, remote
+
+    def _refresh(self, *_args: object) -> None:
+        kind = self.current_kind()
+        local, remote_port = self._ports()
+        where = tr(" depuis {server}").format(server=self.server) if self.server else ""
+        local_text = f"127.0.0.1:{local if local is not None else '?'}"
+        if kind == "socks":
+            text = tr("SOCKS sur {local}, sorties{where}").format(local=local_text, where=where)
+        elif kind == "remote":
+            remote = (
+                format_host_port(self.remote_host.text().strip() or "?", remote_port) if remote_port else "?"
+            )
+            target = format_host_port(self.target_host.text().strip() or "?", local) if local else "?"
+            text = tr("Serveur : {remote} → {target} sur ce poste").format(remote=remote, target=target)
+        else:
+            target = (
+                format_host_port(self.remote_host.text().strip() or "?", remote_port) if remote_port else "?"
+            )
+            text = tr("Local : {local} → {target}{where}").format(
+                local=local_text, target=target, where=where
+            )
+        self.summary.setText(text)
         if self.existing is not None:
             self.ok_button.setText(tr("Enregistrer"))
             self.ok_button.setEnabled(True)
             return
         save, start = self.save.isChecked(), self.start.isChecked()
         if save and start:
-            text = tr("Créer et démarrer")
+            button_text = tr("Créer et démarrer")
         elif save:
-            text = tr("Créer")
+            button_text = tr("Créer")
         elif start:
-            text = tr("Démarrer")
+            button_text = tr("Démarrer")
         else:
-            text = tr("Choisissez au moins une action.")
-        self.ok_button.setText(text)
+            button_text = tr("Choisissez au moins une action.")
+        self.ok_button.setText(button_text)
         self.ok_button.setEnabled(save or start)
 
     def _accept(self) -> None:
-        local = self.local_port.value()
-        remote_port = self.remote_port.text().strip()
-        if local is None or not remote_port.isdigit():
+        kind = self.current_kind()
+        local, remote_port = self._ports()
+        if local is None or (kind != "socks" and remote_port is None):
             self.error.setText(tr("Ports distant et local requis."))
             return
         try:
             forward = SavedForward(
                 id=self.existing.id if self.existing else new_id(),
-                remote_host=self.remote_host.text(),
-                remote_port=int(remote_port),
+                kind=kind,
+                remote_host=self.remote_host.text() if kind != "socks" else "127.0.0.1",
+                remote_port=remote_port,
+                local_host=self.target_host.text() if kind == "remote" else "127.0.0.1",
                 local_port=local,
                 scheme=self.scheme.currentData(),
                 label=self.label_edit.text().strip(),

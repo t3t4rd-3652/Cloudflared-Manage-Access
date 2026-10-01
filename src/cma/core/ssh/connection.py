@@ -51,6 +51,7 @@ class SshConnectionManager:
         bus: EventBus,
         cloudflare_bridge: CloudflareBridge | None = None,
         on_password_remembered: Callable[[str], None] | None = None,
+        profiles: Callable[[str], SshProfile | None] | None = None,
     ) -> None:
         self._paths = paths
         self._settings = settings
@@ -59,6 +60,7 @@ class SshConnectionManager:
         self._bus = bus
         self._bridge = cloudflare_bridge
         self._on_password_remembered = on_password_remembered
+        self._profiles = profiles
         self._connections: dict[str, asyncssh.SSHClientConnection] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._passwords: dict[str, str] = {}
@@ -84,14 +86,14 @@ class SshConnectionManager:
 
     # --- Connexion --------------------------------------------------------------------
 
-    async def get(self, profile: SshProfile) -> asyncssh.SSHClientConnection:
+    async def get(self, profile: SshProfile, _chain: tuple[str, ...] = ()) -> asyncssh.SSHClientConnection:
         """Connexion du profil, ouverte si besoin. Une seule ouverture à la fois par profil."""
         lock = self._locks.setdefault(profile.id, asyncio.Lock())
         async with lock:
             conn = self._connections.get(profile.id)
             if conn is not None and not _is_closed(conn):
                 return conn
-            conn = await self.open(profile)
+            conn = await self.open(profile, _chain=_chain)
             self._connections[profile.id] = conn
             asyncio.get_running_loop().create_task(self._watch(profile.id, conn))
             return conn
@@ -103,13 +105,31 @@ class SshConnectionManager:
             log.info("Connexion SSH fermée (profil %s)", profile_id)
             self._publish(profile_id, "disconnected")
 
-    async def open(self, profile: SshProfile) -> asyncssh.SSHClientConnection:
+    async def _jump(self, profile: SshProfile, chain: tuple[str, ...]) -> asyncssh.SSHClientConnection:
+        """Connexion du serveur de rebond (ProxyJump), partagée avec ses autres usages."""
+        jump_id = profile.jump_profile
+        assert jump_id is not None
+        if jump_id in (*chain, profile.id) or len(chain) >= 4:
+            raise SshError(tr("Les rebonds SSH forment une boucle ou une chaîne trop longue."), fatal=True)
+        jump = self._profiles(jump_id) if self._profiles is not None else None
+        if jump is None:
+            raise SshError(tr("Le serveur de rebond n'existe plus."), fatal=True)
+        return await self.get(jump, _chain=(*chain, profile.id))
+
+    async def open(
+        self, profile: SshProfile, *, _chain: tuple[str, ...] = ()
+    ) -> asyncssh.SSHClientConnection:
         """Ouvre une nouvelle connexion (hors cache). Lève SshError ou SshCancelled."""
         if not profile.user:
             raise SshError(tr("L'utilisateur SSH n'est pas renseigné."), fatal=True)
         host, port = profile.host, profile.port
         identity_host, identity_port, via = profile.host, profile.port, None
-        if profile.via_cloudflare_profile:
+        tunnel: asyncssh.SSHClientConnection | None = None
+        if profile.jump_profile:
+            if not host:
+                raise SshError(tr("L'hôte SSH n'est pas renseigné."), fatal=True)
+            tunnel = await self._jump(profile, _chain)
+        elif profile.via_cloudflare_profile:
             if self._bridge is None:
                 raise SshError(tr("Passage par Cloudflare indisponible."), fatal=True)
             host, port, cf_hostname = await self._bridge(profile.via_cloudflare_profile)
@@ -128,6 +148,8 @@ class SshConnectionManager:
             "connect_timeout": 20,
             "login_timeout": 60,
         }
+        if tunnel is not None:
+            options["tunnel"] = tunnel
         if profile.auth == SshAuthMode.PASSWORD:
             options.update(client_keys=None, agent_path=None, preferred_auth="keyboard-interactive,password")
         elif profile.auth == SshAuthMode.KEY:

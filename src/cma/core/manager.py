@@ -87,6 +87,7 @@ class SessionManager:
             bus=bus,
             cloudflare_bridge=self._cloudflare_bridge,
             on_password_remembered=self._mark_password_remembered,
+            profiles=lambda profile_id: store.snapshot().ssh_profile(profile_id),
         )
         self.cloudflare = CloudflareAdmin(
             store, secrets, lambda preferred, avoid: self.suggest_local_port(preferred, avoid=avoid)
@@ -328,7 +329,7 @@ class SessionManager:
         if isinstance(profile, SshProfile) and item.forward_id:
             forward = next((f for f in profile.saved_forwards if f.id == item.forward_id), None)
             if forward is not None:
-                return f"{profile.name} · {forward.label or forward.remote_port}"
+                return f"{profile.name} · {forward.short_label}"
         return profile.name
 
     async def _start_item(self, item: LaunchItem) -> list[SessionInfo]:
@@ -439,7 +440,9 @@ class SessionManager:
         if profile is None:
             raise ManagerError(tr("Profil SSH introuvable."))
         config = self.store.snapshot()
-        problems = profile.readiness_problems(config.cloudflare_by_id())
+        problems = profile.readiness_problems(
+            config.cloudflare_by_id(), {p.id: p for p in config.ssh_profiles}
+        )
         if problems:
             raise ManagerError(
                 tr("Profil « {name} » incomplet : {problems}.").format(

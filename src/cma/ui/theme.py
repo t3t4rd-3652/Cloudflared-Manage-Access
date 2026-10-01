@@ -295,6 +295,7 @@ QFrame#Card, QFrame[role="panel"], QFrame[role="session"], QFrame[role="tile"] {
     background-color: {t.surface}; border: 1px solid {t.border}; border-radius: 8px;
 }}
 QFrame[role="session"] QFrame[role="marker"] {{ border: none; border-radius: 2px; }}
+QFrame#LockPanel {{ background-color: {t.window}; }}
 QFrame#EmptyState, QFrame[role="empty"] {{ background-color: transparent; border: none; }}
 QFrame[role="separator"] {{ background-color: {t.border}; border: none; max-height: 1px; min-height: 1px; }}
 QScrollArea#PageScroll, QScrollArea#PageScroll > QWidget > QWidget {{ background: transparent; border: none; }}

@@ -225,23 +225,73 @@ class SshAuthMode(StrEnum):
     AGENT = "agent"
 
 
+ForwardKind = Literal["local", "socks", "remote"]
+
+
+def _host_port(host: str, port: int | None) -> str:
+    host = host.strip("[]")
+    shown = f"[{host}]" if ":" in host else host
+    return f"{shown}:{port}" if port is not None else shown
+
+
 class SavedForward(Model):
-    """Redirection enregistrée dans un profil SSH : port local → hôte:port vu du serveur."""
+    """Redirection enregistrée dans un profil SSH.
+
+    - « local » (-L) : port local → hôte:port vu du serveur ;
+    - « socks » (-D) : proxy SOCKS sur le port local, les connexions sortent depuis le serveur ;
+    - « remote » (-R) : le serveur écoute sur hôte:port et renvoie vers `local_host`:`local_port` de ce poste.
+    """
 
     id: str = Field(default_factory=new_id)
+    kind: ForwardKind = "local"
     remote_host: str = "127.0.0.1"
-    remote_port: Port
+    remote_port: Port | None = None
+    local_host: str = "127.0.0.1"
     local_port: Port
     scheme: Literal["http", "https"] | None = None
     label: str = ""
 
-    @field_validator("remote_host")
+    @field_validator("remote_host", "local_host")
     @classmethod
-    def _check_remote_host(cls, value: str) -> str:
+    def _check_hosts(cls, value: str) -> str:
         value = value.strip().strip("[]") or "127.0.0.1"
         if not is_valid_host(value):
             raise ValueError(tr("Adresse distante invalide"))
         return value
+
+    @model_validator(mode="after")
+    def _check_kind(self) -> SavedForward:
+        if self.kind != "socks" and self.remote_port is None:
+            raise ValueError(tr("Le port distant est requis."))
+        return self
+
+    @property
+    def short_label(self) -> str:
+        """Libellé, ou à défaut le port distant (« SOCKS » pour un proxy dynamique)."""
+        if self.label:
+            return self.label
+        return "SOCKS" if self.kind == "socks" else str(self.remote_port)
+
+    @property
+    def server_side(self) -> str:
+        """Ce que voit le serveur : la cible (-L), « proxy SOCKS » (-D) ou l'adresse d'écoute (-R)."""
+        if self.kind == "socks":
+            return tr("proxy SOCKS")
+        return _host_port(self.remote_host, self.remote_port)
+
+    @property
+    def local_side(self) -> str:
+        return _host_port(self.local_host if self.kind == "remote" else "127.0.0.1", self.local_port)
+
+    def describe(self) -> str:
+        """Une ligne lisible : « 127.0.0.1:8080 → 127.0.0.1:80 », « SOCKS 127.0.0.1:1080 »…"""
+        if self.kind == "socks":
+            return tr("SOCKS sur {local}").format(local=self.local_side)
+        if self.kind == "remote":
+            return tr("serveur {remote} → {local} sur ce poste").format(
+                remote=self.server_side, local=self.local_side
+            )
+        return f"{self.local_side} → {self.server_side}"
 
 
 class SshProfile(Model):
@@ -258,6 +308,8 @@ class SshProfile(Model):
     key_path: str | None = None
     remember_password: bool = False
     via_cloudflare_profile: str | None = None
+    # Rebond SSH (ProxyJump) : la connexion passe d'abord par ce autre profil SSH.
+    jump_profile: str | None = None
     saved_forwards: list[SavedForward] = Field(default_factory=list[SavedForward])
     notes: str = ""
 
@@ -284,7 +336,11 @@ class SshProfile(Model):
     def passphrase_key(self) -> str:
         return f"ssh-passphrase:{self.id}"
 
-    def readiness_problems(self, cloudflare_profiles: dict[str, CloudflareProfile]) -> list[str]:
+    def readiness_problems(
+        self,
+        cloudflare_profiles: dict[str, CloudflareProfile],
+        ssh_profiles: dict[str, SshProfile] | None = None,
+    ) -> list[str]:
         problems: list[str] = []
         if not self.host and not self.via_cloudflare_profile:
             problems.append(tr("l'hôte n'est pas renseigné"))
@@ -294,6 +350,13 @@ class SshProfile(Model):
             problems.append(tr("aucune clé n'est choisie"))
         if self.via_cloudflare_profile and self.via_cloudflare_profile not in cloudflare_profiles:
             problems.append(tr("le profil Cloudflare de passage n'existe plus"))
+        if self.jump_profile:
+            if self.via_cloudflare_profile:
+                problems.append(tr("choisissez soit un passage par Cloudflare, soit un rebond SSH"))
+            if self.jump_profile == self.id:
+                problems.append(tr("un serveur ne peut pas rebondir par lui-même"))
+            elif ssh_profiles is not None and self.jump_profile not in ssh_profiles:
+                problems.append(tr("le serveur de rebond n'existe plus"))
         return problems
 
 
@@ -344,6 +407,8 @@ class Settings(Model):
     onboarding_done: bool = False
     v1_files_handled: bool = False
     tray_hint_shown: bool = False
+    # Coffre chiffré (version portable ou sans trousseau) : verrouillage de l'interface après inactivité.
+    lock_after_minutes: int = Field(default=0, ge=0, le=1440)
     cloudflare_account_id: str | None = None
 
     @model_validator(mode="after")

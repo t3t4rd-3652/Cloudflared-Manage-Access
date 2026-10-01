@@ -43,17 +43,34 @@ def _open_secret_store(paths: AppPaths) -> SecretStore:
     # Version portable : les secrets suivent le dossier data/ (coffre chiffré), pas le trousseau de ce poste.
     if system_keyring() is not None and not paths.portable:
         return open_secret_store()
+    from cma.core import dpapi
     from cma.core.crypto import WrongPassphraseError
-    from cma.ui.dialogs.misc import choose_secret_store
+    from cma.ui.dialogs import misc
 
+    # Phrase de passe mémorisée sur ce poste (DPAPI) : le coffre s'ouvre sans la redemander.
+    remembered = dpapi.remembered_passphrase(paths.data_dir)
+    if remembered and paths.encrypted_secrets_file.exists():
+        try:
+            return EncryptedFileSecretStore(paths.encrypted_secrets_file, remembered)
+        except WrongPassphraseError:
+            dpapi.forget_passphrase(paths.data_dir)
     while True:
-        passphrase = choose_secret_store(None, paths.encrypted_secrets_file, portable=paths.portable)
+        passphrase, remember = misc.choose_secret_store_ex(
+            None, paths.encrypted_secrets_file, portable=paths.portable
+        )
         if passphrase is None:
             return MemorySecretStore(reason="choix de l'utilisateur")
         try:
-            return EncryptedFileSecretStore(paths.encrypted_secrets_file, passphrase)
+            store = EncryptedFileSecretStore(paths.encrypted_secrets_file, passphrase)
         except WrongPassphraseError:
             QMessageBox.warning(None, tr("Coffre chiffré"), tr("Phrase de passe incorrecte."))
+            continue
+        if remember:
+            try:
+                dpapi.remember_passphrase(paths.data_dir, passphrase)
+            except OSError:
+                log.warning("Phrase de passe non mémorisée : DPAPI indisponible")
+        return store
 
 
 class FreezeDetector:

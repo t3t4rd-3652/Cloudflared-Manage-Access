@@ -174,8 +174,10 @@ class LogFilter(QSortFilterProxyModel):
         self.needle = ""
 
     def set_criteria(self, min_level: int, source: str | None, needle: str) -> None:
+        # beginFilterChange/endFilterChange remplacent invalidateFilter(), déprécié depuis Qt 6.10.
+        self.beginFilterChange()
         self.min_level, self.source, self.needle = min_level, source, needle.lower()
-        self.invalidateFilter()
+        self.endFilterChange(QSortFilterProxyModel.Direction.Rows)
 
     def filterAcceptsRow(self, row: int, parent: QModelIndex | QPersistentModelIndex) -> bool:
         line = self._model.lines[row]

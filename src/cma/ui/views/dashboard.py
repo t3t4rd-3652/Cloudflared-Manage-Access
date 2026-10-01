@@ -820,7 +820,7 @@ class DashboardView(QWidget):
         if forwards:
             self.connect_menu.addSection(tr("Redirections SSH enregistrées"))
             for profile, forward in sorted(forwards, key=lambda pf: (not pf[0].favorite, pf[0].name.lower())):
-                text = f"{profile.name} › {forward.label or forward.remote_port}"
+                text = f"{profile.name} › {forward.short_label}"
                 self.connect_menu.addAction(
                     text, lambda pid=profile.id, fw=forward: self.start_forward(pid, fw)
                 )

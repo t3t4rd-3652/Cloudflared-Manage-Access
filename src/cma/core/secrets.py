@@ -8,6 +8,7 @@ un coffre chiffré par phrase de passe (fichier), ou un coffre en mémoire, perd
 from __future__ import annotations
 
 import contextlib
+import hmac
 import logging
 import sys
 import threading
@@ -119,6 +120,10 @@ class EncryptedFileSecretStore(SecretStore):
         self._values: dict[str, str] = {}
         if self._path.exists():
             self._values = dict(decrypt_json(read_json_lenient(self._path), passphrase))
+
+    def matches(self, passphrase: str) -> bool:
+        """Vrai si `passphrase` est celle du coffre ouvert (déverrouillage de l'interface)."""
+        return hmac.compare_digest(passphrase.encode("utf-8"), self._passphrase.encode("utf-8"))
 
     def _flush(self) -> None:
         atomic_write_json(self._path, encrypt_json(self._values, self._passphrase))

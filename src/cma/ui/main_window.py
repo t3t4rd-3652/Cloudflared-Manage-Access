@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QByteArray, QSize, Qt, Signal
-from PySide6.QtGui import QCloseEvent, QKeySequence
+from PySide6.QtCore import QByteArray, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QCloseEvent, QKeySequence, QResizeEvent, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from cma import APP_NAME, __version__
 from cma.core.events import Notification
+from cma.core.secrets import EncryptedFileSecretStore
 from cma.core.sessions import SessionInfo, SessionKind, SessionState
 from cma.i18n import tr
 from cma.ui.a11y import apply_accessible_names
@@ -31,6 +32,7 @@ from cma.ui.dialogs.diagnose import open_diagnosis
 from cma.ui.dialogs.palette import CommandPalette, PaletteEntry
 from cma.ui.dialogs.workspaces import launch_workspace
 from cma.ui.icons import app_icon, set_icon, token_icon
+from cma.ui.lock import IdleWatcher, LockPanel
 from cma.ui.views.cloud import CloudView
 from cma.ui.views.dashboard import RUNNING, TO_CHECK, DashboardView, sessions_summary
 from cma.ui.views.logs import LogsView
@@ -185,6 +187,15 @@ class MainWindow(QMainWindow):
             add_shortcut(self, QKeySequence(f"Ctrl+{index + 1}"), lambda k=key: self.show_view(k))
         add_shortcut(self, QKeySequence("Ctrl+Q"), self.request_quit)
         add_shortcut(self, QKeySequence("Ctrl+K"), self.open_palette)
+        add_shortcut(self, QKeySequence("Ctrl+L"), self.lock_now)
+        # Verrouillage après inactivité (coffre chiffré seulement) : vérifié toutes les 30 s.
+        self._lock_panel: LockPanel | None = None
+        self._disabled_shortcuts: list[QShortcut] = []
+        self.idle = IdleWatcher(self)
+        self._lock_timer = QTimer(self)
+        self._lock_timer.setInterval(30_000)
+        self._lock_timer.timeout.connect(self.check_idle)
+        self._lock_timer.start()
         ctx.theme.changed.connect(self._refresh_nav_icons)
 
         status = self.statusBar()
@@ -313,13 +324,13 @@ class MainWindow(QMainWindow):
                 )
             )
             for forward in server.saved_forwards:
-                name = f"{server.name} › {forward.label or forward.remote_port}"
+                name = f"{server.name} › {forward.short_label}"
                 entries.append(
                     PaletteEntry(
                         section,
                         tr("Connecter « {name} »").format(name=name),
                         lambda s=server, f=forward: dashboard.start_forward(s.id, f),
-                        f"127.0.0.1:{forward.local_port} → {forward.remote_host}:{forward.remote_port}",
+                        forward.describe(),
                         "arrows-right-left",
                         server.group,
                     )
@@ -371,6 +382,8 @@ class MainWindow(QMainWindow):
                 icon="layout-dashboard",
             ),
         ]
+        if self.can_lock():
+            entries.append(PaletteEntry(section, tr("Verrouiller CMA"), self.lock_now, "Ctrl+L", "lock"))
         if running:
             entries.append(
                 PaletteEntry(
@@ -420,6 +433,53 @@ class MainWindow(QMainWindow):
         show_tab = getattr(self.ssh.panel, "show_tab", None)
         if callable(show_tab):
             show_tab(section)
+
+    # --- Verrouillage ------------------------------------------------------------------------------
+
+    @property
+    def locked(self) -> bool:
+        return self._lock_panel is not None
+
+    def can_lock(self) -> bool:
+        return isinstance(self.ctx.core.secrets, EncryptedFileSecretStore)
+
+    def check_idle(self) -> None:
+        minutes = self.ctx.config().settings.lock_after_minutes
+        if minutes and self.can_lock() and not self.locked and self.idle.idle_seconds() >= minutes * 60:
+            self.lock_now()
+
+    def lock_now(self) -> None:
+        store = self.ctx.core.secrets
+        if not isinstance(store, EncryptedFileSecretStore):
+            self.notify("info", tr("Le verrouillage existe avec un coffre chiffré (version portable)."))
+            return
+        if self.locked:
+            return
+        panel = LockPanel(self, store.matches)
+        panel.unlocked.connect(self.unlock)
+        panel.setGeometry(self.rect())
+        panel.show()
+        panel.raise_()
+        self._lock_panel = panel
+        self._disabled_shortcuts = [s for s in self.findChildren(QShortcut) if s.isEnabled()]
+        for shortcut in self._disabled_shortcuts:
+            shortcut.setEnabled(False)
+        panel.passphrase.setFocus()
+
+    def unlock(self) -> None:
+        panel, self._lock_panel = self._lock_panel, None
+        if panel is not None:
+            panel.hide()
+            panel.deleteLater()
+        for shortcut in self._disabled_shortcuts:
+            shortcut.setEnabled(True)
+        self._disabled_shortcuts = []
+        self.idle.reset()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        if self._lock_panel is not None:
+            self._lock_panel.setGeometry(self.rect())
 
     def bring_to_front(self) -> None:
         self.showNormal() if self.isMinimized() else self.show()

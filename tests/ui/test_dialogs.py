@@ -317,6 +317,7 @@ def test_host_key_helpers():
 
 def test_portable_mode_uses_the_encrypted_vault(qapp, monkeypatch, tmp_path):
     import cma.ui.app as app_module
+    from cma.core import dpapi
     from cma.core.secrets import EncryptedFileSecretStore
     from cma.paths import AppPaths
 
@@ -325,14 +326,26 @@ def test_portable_mode_uses_the_encrypted_vault(qapp, monkeypatch, tmp_path):
 
     def choose(_parent, _file, *, portable=False):
         asked.append(portable)
-        return "phrase-longue"
+        return "phrase-longue", dpapi.available()
 
-    monkeypatch.setattr(misc, "choose_secret_store", choose)
+    monkeypatch.setattr(misc, "choose_secret_store_ex", choose)
     store = app_module._open_secret_store(paths)
     assert asked == [True]
-    assert isinstance(store, EncryptedFileSecretStore)
+    assert isinstance(store, EncryptedFileSecretStore) and store.matches("phrase-longue")
+    store.set("cle", "valeur-portable")
+    if dpapi.available():
+        # Phrase de passe mémorisée sur ce poste : le coffre s'ouvre sans rien demander.
+        monkeypatch.setattr(
+            misc, "choose_secret_store_ex", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError)
+        )
+        again = app_module._open_secret_store(paths)
+        assert again.get("cle") == "valeur-portable"
+        dpapi.forget_passphrase(paths.data_dir)
+        assert dpapi.remembered_passphrase(paths.data_dir) is None
     dialog = misc.SecretStoreDialog(None, tmp_path / "absent.json", portable=True)
-    assert dialog.findChildren(type(dialog.hint))  # construit sans erreur en mode portable
+    assert dialog.findChildren(type(dialog.hint))
+    dialog.memory.setChecked(True)
+    assert not dialog.remember.isVisibleTo(dialog)
     dialog.deleteLater()
 
 
@@ -387,3 +400,30 @@ def test_diagnose_dialog(qtbot, gui, monkeypatch):
     from PySide6.QtWidgets import QApplication
 
     assert QApplication.clipboard().text().startswith("Diagnostic de « Diag »")
+
+
+def test_redirect_dialog_socks_and_remote(qtbot, gui):
+    ctx, window = gui
+    dialog = RedirectDialog(window, ctx, server="NAS")
+    qtbot.addWidget(dialog)
+    dialog.kind.setCurrentIndex(dialog.kind.findData("socks"))
+    assert not dialog.destination.isVisibleTo(dialog)
+    assert "SOCKS sur 127.0.0.1:" in dialog.summary.text()
+    dialog._accept()
+    assert dialog.choice is not None and dialog.choice.forward.kind == "socks"
+    assert dialog.choice.forward.remote_port is None
+
+    remote = RedirectDialog(window, ctx, server="NAS")
+    qtbot.addWidget(remote)
+    remote.kind.setCurrentIndex(remote.kind.findData("remote"))
+    assert remote.remote_host.text() == "localhost" and remote.target.isVisibleTo(remote)
+    remote.remote_port.setText("8080")
+    remote.target_port.setText("3000")
+    assert remote.summary.text() == "Serveur : localhost:8080 → 127.0.0.1:3000 sur ce poste"
+    remote._accept()
+    forward = remote.choice.forward
+    assert (forward.kind, forward.remote_port, forward.local_port) == ("remote", 8080, 3000)
+
+    editing = RedirectDialog(window, ctx, existing=forward)
+    qtbot.addWidget(editing)
+    assert editing.current_kind() == "remote" and editing.target_port.text() == "3000"

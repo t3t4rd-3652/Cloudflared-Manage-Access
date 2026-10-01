@@ -70,6 +70,9 @@ class FakeSshServer(asyncssh.SSHServer):
     def connection_requested(self, dest_host, dest_port, orig_host, orig_port):
         return True
 
+    def server_requested(self, listen_host, listen_port):
+        return True  # redirection inverse (-R) acceptée
+
 
 WINDOWS_NDJSON = (
     '{"v":2,"meta":{"version":"2.1.0","os":"windows","source":"Get-NetTCPConnection","docker":"absent","web_probe":true}}\n'

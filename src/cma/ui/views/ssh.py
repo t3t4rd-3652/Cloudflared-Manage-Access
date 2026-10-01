@@ -81,6 +81,15 @@ from cma.ui.widgets import (
 TABS = ("ports", "forwards", "config")
 
 
+def forward_type_label(forward: SavedForward) -> str:
+    """Colonne « Type » : SOCKS, inverse, ou le protocole web d'une redirection locale."""
+    if forward.kind == "socks":
+        return "SOCKS"
+    if forward.kind == "remote":
+        return tr("Inverse")
+    return (forward.scheme or "tcp").upper()
+
+
 def port_columns() -> list[str]:
     return [tr("Port"), tr("Écoute"), tr("Service ou conteneur"), tr("Web")]
 
@@ -336,7 +345,7 @@ class PortsTab(QWidget):
 class ForwardsTab(QWidget):
     def __init__(self, panel: SshProfilePanel) -> None:
         super().__init__()
-        headers = [tr("Libellé"), tr("Vers (vu du serveur)"), tr("Local"), tr("Protocole"), tr("État")]
+        headers = [tr("Libellé"), tr("Côté serveur"), tr("Côté poste"), tr("Type"), tr("État")]
         self.panel = panel
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 12, 0, 0)
@@ -410,9 +419,9 @@ class ForwardsTab(QWidget):
             state = session.state if session is not None else SessionState.STOPPED
             values = [
                 forward.label or "—",
-                f"{forward.remote_host}:{forward.remote_port}",
-                f"127.0.0.1:{forward.local_port}",
-                (forward.scheme or "tcp").upper(),
+                forward.server_side,
+                forward.local_side,
+                forward_type_label(forward),
                 state.label + (f" : {session.message}" if session is not None and session.message else ""),
             ]
             for column, value in enumerate(values):
@@ -490,7 +499,7 @@ class ForwardsTab(QWidget):
             return
         session = self.panel.forward_session(forward.id)
         active = session is not None and session.state.active
-        name = forward.label or f"{forward.remote_host}:{forward.remote_port}"
+        name = forward.label or forward.describe()
         if active:
             text = tr("La redirection active sera arrêtée, puis retirée de {server}.")
         else:
@@ -567,7 +576,9 @@ class SettingsTab(QWidget):
         layout = QVBoxLayout(column)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
-        self.errors = {name: FieldError() for name in ("name", "host", "port", "user", "key_path", "via")}
+        self.errors = {
+            name: FieldError() for name in ("name", "host", "port", "user", "key_path", "via", "jump")
+        }
         form = QFormLayout()
         form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
@@ -624,7 +635,7 @@ class SettingsTab(QWidget):
         auth_form.addRow(tr("Clé"), with_error(key_host, self.errors["key_path"]))
         layout.addLayout(auth_form)
 
-        layout.addWidget(title(tr("Passage par Cloudflare"), "SectionTitle"))
+        layout.addWidget(title(tr("Passage"), "SectionTitle"))
         layout.addWidget(
             label(
                 tr(
@@ -639,6 +650,13 @@ class SettingsTab(QWidget):
         via_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self.via = QComboBox()
         via_form.addRow(tr("Profil Cloudflare"), with_error(self.via, self.errors["via"]))
+        self.jump = QComboBox()
+        self.jump.setToolTip(
+            tr(
+                "Équivalent de ProxyJump : la connexion passe d'abord par ce serveur, qui joint ensuite l'hôte."
+            )
+        )
+        via_form.addRow(tr("Rebond SSH (ProxyJump)"), with_error(self.jump, self.errors["jump"]))
         layout.addLayout(via_form)
         layout.addWidget(title(tr("Notes"), "SectionTitle"))
         self.notes = QPlainTextEdit()
@@ -669,7 +687,7 @@ class SettingsTab(QWidget):
         for widget in (self.name, self.host, self.port, self.user):
             widget.textEdited.connect(self._changed)
         self.group.editTextChanged.connect(self._changed)
-        for combo in (self.key, self.via):
+        for combo in (self.key, self.via, self.jump):
             combo.currentIndexChanged.connect(self._changed)
         for check in (self.favorite, self.remember, self.auth_password, self.auth_key, self.auth_agent):
             check.toggled.connect(self._changed)
@@ -695,6 +713,14 @@ class SettingsTab(QWidget):
         for profile in config.cloudflare_profiles:
             self.via.addItem(f"{profile.name} ({profile.hostname or '?'})", profile.id)
         self.via.setCurrentIndex(max(0, self.via.findData(current_via)))
+        current_jump = self.jump.currentData()
+        self.jump.clear()
+        self.jump.addItem(tr("Aucun — connexion directe"), None)
+        own = self.panel.profile.id if self.panel.profile else None
+        for profile in sorted(config.ssh_profiles, key=lambda p: p.name.lower()):
+            if profile.id != own:
+                self.jump.addItem(f"{profile.name} ({profile.user}@{profile.host or '?'})", profile.id)
+        self.jump.setCurrentIndex(max(0, self.jump.findData(current_jump)))
         groups = sorted({p.group for p in config.ssh_profiles if p.group}, key=str.lower)
         text = self.group.currentText()
         self.group.clear()
@@ -723,6 +749,7 @@ class SettingsTab(QWidget):
             index = self.key.count() - 1
         self.key.setCurrentIndex(max(0, index))
         self.via.setCurrentIndex(max(0, self.via.findData(profile.via_cloudflare_profile)))
+        self.jump.setCurrentIndex(max(0, self.jump.findData(profile.jump_profile)))
         self.notes.setPlainText(profile.notes)
         self._clear_errors()
         self._loading = False
@@ -755,6 +782,7 @@ class SettingsTab(QWidget):
             "remember_password": self.remember.isChecked() and auth == SshAuthMode.PASSWORD,
             "key_path": self.key.currentData(),
             "via_cloudflare_profile": self.via.currentData(),
+            "jump_profile": self.jump.currentData(),
             "notes": self.notes.toPlainText(),
         }
 
@@ -776,6 +804,7 @@ class SettingsTab(QWidget):
             "remember_password",
             "key_path",
             "via_cloudflare_profile",
+            "jump_profile",
             "notes",
         )
         return any(reference.get(k) != current.get(k) for k in keys)
@@ -821,7 +850,9 @@ class SettingsTab(QWidget):
         port = values["port"]
         checks = {
             "name": None if values["name"] else tr("Saisissez un nom."),
-            "host": None if values["host"] else tr("Saisissez un nom d'hôte ou une adresse IP."),
+            "host": None
+            if values["host"] or values["via_cloudflare_profile"]
+            else tr("Saisissez un nom d'hôte ou une adresse IP."),
             "port": None
             if isinstance(port, int) and 1 <= port <= 65535
             else tr("Saisissez un port entre 1 et 65535."),
@@ -829,6 +860,8 @@ class SettingsTab(QWidget):
         others = {p.name.lower() for p in self.panel.ctx.config().ssh_profiles if p.id != profile.id}
         if values["name"] and values["name"].lower() in others:
             checks["name"] = tr("Un serveur nommé « {name} » existe déjà.").format(name=values["name"])
+        if values["via_cloudflare_profile"] and values["jump_profile"]:
+            checks["jump"] = tr("Choisissez soit un passage par Cloudflare, soit un rebond SSH.")
         if values["auth"] == SshAuthMode.KEY and not values["key_path"]:
             checks["key_path"] = tr("Sélectionnez une clé SSH, ou créez-en une avec « Clés… ».")
         failed = {field: message for field, message in checks.items() if message}
@@ -943,9 +976,14 @@ class SshProfilePanel(QWidget):
         self.heading.setText(profile.name)
         via = self.ctx.config().cloudflare_profile(profile.via_cloudflare_profile)
         self.target.setText(f"{profile.user or '?'}@{profile.host or '?'}:{profile.port}")
-        self.route.setText(
-            tr("Via Cloudflare : {name}").format(name=via.name) if via else tr("Connexion directe")
-        )
+        jump = self.ctx.config().ssh_profile(profile.jump_profile)
+        if via:
+            route = tr("Via Cloudflare : {name}").format(name=via.name)
+        elif jump:
+            route = tr("Rebond par : {name}").format(name=jump.name)
+        else:
+            route = tr("Connexion directe")
+        self.route.setText(route)
         discovery = self.view.discoveries.get(profile.id)
         self.ports_tab.show_result(*(discovery if discovery else (None, None)))
         self.forwards_tab.reload()

@@ -215,7 +215,7 @@ class WorkspacesDialog(QDialog):
                     server, tr("Toutes les redirections"), LaunchItem(kind="ssh", profile_id=profile.id)
                 )
                 for forward in profile.saved_forwards:
-                    text = forward.label or f"{forward.remote_host}:{forward.remote_port}"
+                    text = forward.label or forward.describe()
                     checkable(
                         server, text, LaunchItem(kind="ssh", profile_id=profile.id, forward_id=forward.id)
                     )

@@ -8,7 +8,7 @@ qu'elle contient, puis nomme les champs restants d'après leur texte indicatif.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtCore import QObject, Qt
 from PySide6.QtGui import QAccessible
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -128,22 +128,24 @@ def missing_accessible_names(root: QWidget) -> list[QWidget]:
     return missing
 
 
-class AccessibilityFilter(QObject):
-    """Applique `apply_accessible_names` à chaque fenêtre (principale ou boîte de dialogue) à son affichage."""
+class AccessibilityHook(QObject):
+    """Applique `apply_accessible_names` à chaque fenêtre (principale ou boîte de dialogue) qui prend le focus.
 
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if (
-            event.type() == QEvent.Type.Show
-            and isinstance(watched, QWidget)
-            and watched.isWindow()
-            and not watched.property(_DONE)
-        ):
-            watched.setProperty(_DONE, True)
-            apply_accessible_names(watched)
-        return False
+    Un signal plutôt qu'un filtre d'événements sur toute l'application : un tel filtre, en Python, fait créer à
+    PySide des enveloppes pour des objets encore en construction, qui gardent ensuite un type incomplet
+    (une barre d'état vue comme un simple QWidget, par exemple).
+    """
+
+    def __init__(self, app: QApplication) -> None:
+        super().__init__(app)
+        app.focusWindowChanged.connect(self._on_focus_window)
+
+    def _on_focus_window(self, _window: object) -> None:
+        widget = QApplication.activeWindow()
+        if widget is not None and not widget.property(_DONE):
+            widget.setProperty(_DONE, True)
+            apply_accessible_names(widget)
 
 
-def install(app: QApplication) -> AccessibilityFilter:
-    accessibility = AccessibilityFilter(app)
-    app.installEventFilter(accessibility)
-    return accessibility
+def install(app: QApplication) -> AccessibilityHook:
+    return AccessibilityHook(app)
