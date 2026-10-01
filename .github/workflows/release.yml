@@ -142,7 +142,7 @@ jobs:
             echo
             awk -v h="## [$version]" 'index($0, h) == 1 {found=1; next} found && /^## \[/ {exit} found {print}' CHANGELOG.md
           } > notes.md
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           body_path: notes.md
           prerelease: ${{ needs.windows.outputs.prerelease == 'true' }}
