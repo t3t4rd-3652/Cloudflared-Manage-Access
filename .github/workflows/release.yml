@@ -65,7 +65,7 @@ jobs:
             --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${installer}"
           (cd dist/winget && 7z a -tzip "../winget-manifests-${version}.zip" manifests > /dev/null)
           uv run python packaging/scoop.py --zip "dist/CloudflaredManageAccess-${version}-portable.zip" --out dist/scoop
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: |
@@ -74,7 +74,7 @@ jobs:
             dist/CloudflaredManageAccess-*-sbom.cdx.json
             dist/winget-manifests-*.zip
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: scoop
           path: dist/scoop/cloudflared-manage-access.json
@@ -102,7 +102,7 @@ jobs:
         run: uv run python packaging/build.py --stage package
       - name: Vérification rapide
         run: QT_QPA_PLATFORM=offscreen ./dist/CloudflaredManageAccess/cma --version
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux
           path: |
