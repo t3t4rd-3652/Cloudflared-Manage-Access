@@ -35,14 +35,37 @@ def test_main_window_has_no_unnamed_control(qtbot, gui):
     assert accessible_name(window.profiles.list.tree) == "Profils Cloudflare"
 
 
-def test_dialogs_have_no_unnamed_control(qtbot, gui):
+def test_dialogs_have_no_unnamed_control(qtbot, gui, tmp_path):
+    from cma.core.cfadmin import Overview, TunnelView
+    from cma.core.cfapi import AccessApp, Account, IngressRule, Tunnel, Zone
+    from cma.core.transfer import build_export, plan_import
+    from cma.ui.views import cloud
+
     ctx, window = gui
+    token = ServiceToken(name="Prod", client_id="abc.access")
+    ctx.update_config(lambda c: c.tokens.append(token))
+    plan = plan_import(build_export(ctx.config(), ctx.core.secrets), ctx.config())
+    tunnel = Tunnel("t1", "bureau", "healthy")
+    overview = Overview(
+        Account("a1", "Compte"),
+        tunnels=[TunnelView(tunnel, [IngressRule("a.exemple.fr", "tcp://localhost:22")])],
+        zones=[Zone("z1", "exemple.fr")],
+    )
+    app = AccessApp("app1", "A", "a.exemple.fr", "self_hosted")
     dialogs = [
         misc.KnownHostsDialog(window, ctx),
         misc.KeysDialog(window, ctx),
         RedirectDialog(window, ctx),
         transfer.ExportDialog(window, ctx),
         OnboardingWizard(window, ctx, None),
+        misc.GenerateKeyDialog(window),
+        misc.SecretStoreDialog(window, tmp_path / "coffre.json"),
+        misc.SecretStoreDialog(window, tmp_path / "coffre.json", portable=True),
+        transfer.ImportDialog(window, plan, tmp_path / "export.json", {}),
+        cloud.PublishDialog(window, overview, [token]),
+        cloud.ProtectDialog(window, ["a.exemple.fr"]),
+        cloud.AllowDialog(window, app, [token]),
+        cloud.CreateTokenDialog(window, "Compte", persistent=True),
     ]
     for dialog in dialogs:
         apply_accessible_names(dialog)

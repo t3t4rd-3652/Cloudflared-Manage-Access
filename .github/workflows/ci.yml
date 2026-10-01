@@ -108,3 +108,62 @@ jobs:
         run: shellcheck -x -S style server/ports-report server/install.sh tests/server/run-in-docker.sh tests/server/*.bats
       - name: bats (Debian/mawk, Ubuntu, Alpine/busybox)
         run: bash tests/server/run-in-docker.sh
+
+  startup:
+    name: Temps de démarrage
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Fenêtre prête en moins de 6 s (médiane de 5 essais)
+        run: uv run python scripts/startup_benchmark.py --runs 5 --limit-ms 6000
+
+  captures:
+    name: Captures (100, 125, 150 %)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Captures à trois échelles d'affichage
+        shell: bash
+        run: |
+          for scale in 1 1.25 1.5; do
+            QT_SCALE_FACTOR=$scale uv run python scripts/capture_screenshots.py "captures/x$scale"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: captures
+          path: captures
+          retention-days: 30
+      - name: Captures du dernier main réussi
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --status success \
+            --limit 1 --json databaseId --jq '.[0].databaseId')
+          test -n "$run_id"
+          gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name captures --dir reference
+      - name: Comparaison (informative)
+        if: hashFiles('reference/**/*.png') != ''
+        run: uv run python scripts/compare_captures.py reference captures --diff captures-diff
+      - uses: actions/upload-artifact@v4
+        if: hashFiles('captures-diff/**/*.png') != ''
+        with:
+          name: captures-diff
+          path: captures-diff
+          retention-days: 30

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import sys
 import time
 from typing import Any
@@ -208,7 +209,14 @@ def run_gui(args: argparse.Namespace) -> int:
         window.settings.check_cloudflared_release(quiet=True)
         window.settings.check_cma_update(quiet=True)
     detector = FreezeDetector() if debug else None
-    log.info("Interface prête en %.0f ms", (time.monotonic() - started) * 1000)
+    ready_ms = (time.monotonic() - started) * 1000
+    log.info("Interface prête en %.0f ms", ready_ms)
+    if os.environ.get("CMA_STARTUP_BENCHMARK"):
+        # Mesure du démarrage (scripts/startup_benchmark.py) : on signale l'instant puis on quitte aussitôt.
+        print(f"startup_ms={ready_ms:.0f}", flush=True)
+        QTimer.singleShot(
+            0, lambda: app.exit(0)
+        )  # quit() serait refusé : la fenêtre se réduit dans la zone de notification
     # asyncssh n'est pas importé au démarrage : on le précharge une fois la fenêtre affichée.
     QTimer.singleShot(300, warm_up_ssh)
 
