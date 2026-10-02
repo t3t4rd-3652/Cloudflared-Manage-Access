@@ -39,7 +39,7 @@ anciens plans, qui ont tous été appliqués. L'historique des étapes est dans 
 | Soumission winget | Propriétaire | `wingetcreate submit` avec les manifestes 2.1.1 (`winget-manifests-2.1.1.zip` de la release). |
 | Signature du code | Propriétaire | Exécutables et installeur non signés : SmartScreen avertit au premier lancement. SignPath Foundation (gratuit pour l'open source) est la piste retenue ; `packaging/sign.ps1` et la CI sont prêts à recevoir un certificat. |
 | Mises à jour Dependabot | À décider | Trois branches ouvertes : `actions/checkout` v7, `astral-sh/setup-uv` v7, `softprops/action-gh-release` v3. À fusionner après une CI verte. |
-| Gel ponctuel de la suite de tests | Développement | Une exécution locale complète s'est figée une fois sans sortie ; la relance est passée. Non reproduit. |
+| Instabilité ponctuelle des tests | Développement | Une exécution locale complète s'est figée une fois sans sortie (2026-10-01), et le job « Tests (ubuntu-latest) » s'est arrêté une fois sur SIGABRT, code 134 (2026-10-02). Non reproduits : la relance locale et la suite complète dans un conteneur Linux passent. |
 
 ## Plan d'amélioration
 
@@ -54,7 +54,9 @@ Les priorités vont de P1 (prochaine version) à P3 (quand le reste est fait). C
 3. **Compte Cloudflare introuvable** : si `/accounts` est vide mais que des zones sont lisibles, déduire le compte
    des zones et expliquer la permission manquante au lieu d'échouer (`cfadmin.py`, `views/cloud.py`).
 4. **Délai par test en local** : mettre `timeout = 180` dans `[tool.pytest.ini_options]` pour qu'un gel échoue
-   au lieu de bloquer, comme en CI ; profiter de l'occasion pour chercher la cause du gel observé.
+   au lieu de bloquer, comme en CI. Chercher la cause des deux incidents ci-dessus : activer
+   `PYTHONFAULTHANDLER=1` dans le job de tests et publier son journal en artefact quand il échoue, pour qu'une
+   trace soit lisible sans droits d'administration.
 5. **Découper `ui/views/cloud.py`** (environ 1 600 lignes) en paquet : boîtes de dialogue, rendu des cartes,
    vue. Même traitement ensuite pour `views/ssh.py` (1 300 lignes).
 

@@ -35,6 +35,10 @@ Depuis Windows, l'environnement est `.venv` (uv n'est pas forcément dans le PAT
 - La lancer en arrière-plan avec `-v`, `--timeout=180` (comme la CI) et une sortie dans un fichier : sans délai
   par test, une exécution `-q` qui se fige ne montre rien (c'est arrivé une fois, cause non élucidée).
 - Le seuil de 90 % sur `cma.core` est serré : tout nouveau code du cœur arrive avec ses tests.
+- Reproduire le job Linux sans toucher au `.venv` Windows : conteneur `python:3.12-slim`, dépôt monté en lecture
+  seule et copié sans `.venv` ni `.git`, paquets `libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libgl1
+  libglib2.0-0`, `pip install uv`, `UV_PROJECT_ENVIRONMENT=/opt/venv`, `QT_QPA_PLATFORM=offscreen`, puis
+  `uv sync --locked` et la commande pytest de `ci.yml` (`MSYS_NO_PATHCONV=1` devant `docker run` depuis Git Bash).
 - Captures de la documentation : `scripts/capture_screenshots.py <dossier>`, à regarder en clair et en sombre
   avant de copier dans `docs/captures/`.
 - Traductions : chaque nouveau `tr("…")` doit avoir son entrée dans `src/cma/i18n_en.py`
