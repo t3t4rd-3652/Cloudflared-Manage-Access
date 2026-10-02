@@ -68,7 +68,7 @@ Réécriture complète : cœur métier séparé de l'interface, interface Qt, SS
   dépendances (pip-audit) et tests contre le vrai cloudflared dans la CI.
 
 ### Modifié
-- Refonte complète de l'interface, d'après la spécification de `docs/CMA-refonte-complete/` :
+- Refonte complète de l'interface, d'après une spécification de refonte (retirée du dépôt depuis, voir l'historique git) :
   - Navigation par intention (Utiliser, Configurer, Administrer) et jetons de couleur communs aux thèmes clair et sombre, contrastes vérifiés.
   - Page **Sessions** groupée par état : à vérifier, à l'écoute, terminées. Chaque incident affiche sa cause et l'action qui la corrige.
   - Éditeurs en onglets, libellés au-dessus des champs, erreurs signalées par onglet et barre « Annuler / Enregistrer ».

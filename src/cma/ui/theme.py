@@ -1,7 +1,7 @@
-"""Thème « ardoise et bleu » : jetons de couleur, palette Qt et feuille de style (spécification de refonte §6).
+"""Thème « ardoise et bleu » : jetons de couleur, palette Qt et feuille de style.
 
-- Les jetons viennent de `docs/CMA-refonte-complete/design-tokens.json` ; chaque couple texte/fond autorisé
-  atteint 4,5:1, les bordures de contrôle et le repère de focus au moins 3:1.
+- Chaque couple texte/fond autorisé atteint 4,5:1, les bordures de contrôle et le repère de focus au moins
+  3:1 (vérifié par `tests/unit/test_contrast.py`).
 - `border` est une séparation décorative ; `control` est la limite d'un champ ou d'un bouton.
 - Le bleu sert aux actions et à la sélection ; les teintes sémantiques servent aux seuls états.
 - Le style natif `windows11` est conservé pour les sous-contrôles ; la feuille de style complète le reste.
@@ -247,7 +247,7 @@ def indicator_files(t: Tokens) -> dict[str, str]:
 
 
 def stylesheet(t: Tokens, ui_font: str = "Segoe UI", mono: str = "Cascadia Mono") -> str:
-    """QSS complète, déclinée de `docs/CMA-refonte-complete/CMA-clair.qss` pour les deux thèmes."""
+    """QSS complète de l'application, commune aux deux thèmes."""
     badges = "\n".join(
         f'QLabel[role="badge"][status="{name}"] {{ background-color: {bg}; color: {fg}; '
         f"border: 1px solid {fg}; border-radius: 4px; }}\n"

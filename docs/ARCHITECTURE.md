@@ -38,19 +38,22 @@ Deux règles structurent le code :
 | `src/cma/core/transfer.py` | Import et export, plan de conflits, secrets chiffrés. |
 | `src/cma/core/sessions.py` | Base des sessions : états, journal circulaire, délai de reconnexion. |
 | `src/cma/core/cloudflared/` | Commande sans shell, analyse des journaux, session, binaire et téléchargement vérifié. |
-| `src/cma/core/ssh/` | Connexions asyncssh, clés d'hôte, clés, redirections, découverte de ports (Linux et Windows). |
+| `src/cma/core/ssh/` | Connexions asyncssh (rebond ProxyJump compris), clés d'hôte, clés, redirections locales, inverses et SOCKS 5, découverte de ports (Linux et Windows). |
 | `src/cma/core/cfapi.py` | Client de l'API Cloudflare v4 : comptes, zones, tunnels, DNS, Access, service tokens. |
 | `src/cma/core/cfadmin.py` | Relie l'API à la configuration et au coffre : import de profils, tokens, publication. |
-| `src/cma/core/updates.py` | Nouvelles versions de CMA : téléchargement vérifié de l'installeur et installation. |
+| `src/cma/core/updates.py` | Nouvelles versions de CMA : installeur vérifié, ou mise à jour en place de la version portable. |
+| `src/cma/core/probe.py`, `diagnose.py` | « Tester le service » et diagnostic guidé (cloudflared, port, DNS, proxy, HTTPS, Access). |
+| `src/cma/core/dpapi.py` | Phrase de passe du coffre portable mémorisée par DPAPI (Windows). |
 | `src/cma/core/manager.py` | Orchestrateur : profils vers sessions, actions exposées à l'interface et à la CLI. |
 | `src/cma/core/engine.py` | Boucle asyncio dans un thread. |
 | `src/cma/core/instance.py` | Verrou d'instance unique et canal de commande local. |
 | `src/cma/platform/` | Job Object Windows, démarrage automatique, lanceurs (terminal, RDP, Compass). |
-| `src/cma/ui/` | Interface : fenêtre, vues, boîtes de dialogue, thème, zone de notification. |
+| `src/cma/ui/` | Interface : fenêtre, vues, boîtes de dialogue (palette Ctrl+K, espaces de travail, diagnostic), thème, verrouillage, zone de notification. |
 | `src/cma/i18n.py`, `i18n_en.py` | Traduction (source en français, catalogue anglais vérifié par test). |
 | `server/` | `ports-report` (Linux), `ports-report.ps1` (Windows) et l'installeur du helper Docker. |
 | `src/cma/ui/a11y.py` | Noms accessibles déduits des formulaires, et contrôle automatique en test. |
-| `packaging/` | Spec PyInstaller, installeur Inno Setup, script de build et de signature. |
+| `packaging/` | Spec PyInstaller, installeur Inno Setup, build Windows et Linux, signature, manifestes winget et Scoop. |
+| `bucket/` | Bucket Scoop, mis à jour par le workflow de release. |
 
 ## Cycle de vie d'une session cloudflared
 
@@ -106,7 +109,7 @@ dans le thread principal, la réponse revient au moteur par `call_soon_threadsaf
 
 ## Données
 
-Format de `config.json` : voir `Config` dans `models.py`, ou l'annexe B de [archive/PLAN-AMELIORATION.md](archive/PLAN-AMELIORATION.md).
+Format de `config.json` : voir `Config` dans `models.py`.
 Chaque évolution du schéma incrémente `schema_version` et ajoute une migration testée.
 
 ## Qualité
@@ -116,5 +119,6 @@ Chaque évolution du schéma incrémente `schema_version` et ajoute une migratio
 | `uv run pytest` | Tests unitaires, d'intégration (faux cloudflared, serveur SSH asyncssh en mémoire) et d'interface (pytest-qt) |
 | `uv run ruff check`, `uv run pyright` | Lint et typage (strict sur `cma.core`) |
 | `bash tests/server/run-in-docker.sh` | Scripts serveur sous Debian (mawk), Ubuntu et Alpine (busybox) |
-| `uv run python scripts/bench_tunnel.py` | Débit comparé des relais SSH v1 et v2 |
 | `uv run python scripts/capture_screenshots.py` | Captures de la documentation, avec données fictives |
+| `uv run python scripts/startup_benchmark.py` | Temps d'affichage de la fenêtre (contrôlé par la CI) |
+| `uv run python scripts/compare_captures.py` | Écarts entre deux jeux de captures (informatif en CI) |

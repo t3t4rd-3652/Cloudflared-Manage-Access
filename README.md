@@ -196,7 +196,7 @@ uv run python packaging/build.py          # distribution Windows dans dist/
 ```
 
 Architecture : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Contribuer : [CONTRIBUTING.md](CONTRIBUTING.md).
-Historique : [CHANGELOG.md](CHANGELOG.md).
+Situation et feuille de route : [docs/PLAN.md](docs/PLAN.md). Historique : [CHANGELOG.md](CHANGELOG.md).
 
 ## Licence
 
