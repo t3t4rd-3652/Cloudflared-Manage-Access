@@ -108,6 +108,8 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 qt_api = "pyside6"
 addopts = "-ra"
+# Un test figé échoue (avec la pile de chaque thread) au lieu de bloquer la suite, en local comme en CI.
+timeout = 180
 markers = [
     "real_cloudflared: nécessite un vrai binaire cloudflared dans le PATH (ignoré en CI)",
     "network: nécessite un accès Internet",

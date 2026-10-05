@@ -42,11 +42,24 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libgl1
       - run: uv sync --locked
       - name: Tests et couverture
+        # Délai par test : `timeout` dans pyproject.toml. PYTHONFAULTHANDLER écrit la pile Python même en cas de
+        # plantage natif (SIGABRT de Qt) ; le journal complet est publié en artefact quand le job échoue, car les
+        # journaux des jobs ne sont lisibles qu'aux administrateurs.
+        shell: bash
+        env:
+          PYTHONFAULTHANDLER: "1"
         run: >
-          uv run pytest -m "not real_cloudflared and not network"
+          uv run pytest -v -m "not real_cloudflared and not network"
           -W ignore::pytest.PytestUnraisableExceptionWarning
-          --timeout=180
           --cov=cma --cov-report=term --cov-report=xml --cov-fail-under=80
+          2>&1 | tee pytest-${{ matrix.os }}.log
+      - name: Journal des tests (en cas d'échec)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pytest-log-${{ matrix.os }}
+          path: pytest-${{ matrix.os }}.log
+          retention-days: 14
       - name: Couverture du cœur (90 % minimum)
         run: uv run coverage report --include="src/cma/core/*" --fail-under=90
 
