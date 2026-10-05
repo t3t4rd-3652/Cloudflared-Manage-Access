@@ -9,7 +9,7 @@ from cma.core.cfadmin import PublishRequest
 from cma.core.cfapi import TOKEN_SECRET_KEY, Tunnel
 from cma.core.models import AuthMode
 from cma.ui.views.cloud import AllowDialog, CloudView, CreateTokenDialog, ProtectDialog, PublishDialog
-from tests.fakes.fake_cfapi import TOKEN, FakeCloudflareServer
+from tests.fakes.fake_cfapi import TOKEN, FakeCloudflare, FakeCloudflareServer
 
 
 @pytest.fixture
@@ -40,6 +40,7 @@ def test_cloud_view_full_flow(qtbot, gui, cf, monkeypatch):
     assert "3 noms d'hôte" in view.status.text()
     assert view.stat_hostnames.value.text() == "3" and view.stat_tunnels.value.text() == "2"
     assert view.account_name.text() and view.stat_tunnels.detail.text()
+    assert not view.permission_hint.isVisible()
     view.stat_apps.clicked.emit()
     assert view.tabs.currentIndex() == 1
     view.tabs.setCurrentIndex(0)
@@ -122,6 +123,20 @@ def test_cloud_view_reports_api_errors(qtbot, gui, cf):
     view.allow_token()  # aucune application sélectionnée
     view.import_selected()  # rien à importer
     assert [level for level, _ in notes[1:]] == ["info", "info"]
+
+
+def test_cloud_view_explains_an_account_found_through_zones(qtbot, gui):
+    ctx, window = gui
+    with FakeCloudflareServer(FakeCloudflare(accounts=[])) as server:
+        ctx.core.manager.cloudflare.base_url = server.base_url
+        window.show_view("cloud")
+        view = window.cloud
+        view.token_field.set_text(TOKEN)
+        view.connect_account()
+        qtbot.waitUntil(lambda: view.overview is not None, timeout=10000)
+        assert view.account_name.text() == "Mon compte"
+        assert view.permission_hint.isVisible()
+        assert "Account Settings : Read" in view.permission_hint.text()
 
 
 def test_publish_dialog_validation(qtbot, gui, cf):

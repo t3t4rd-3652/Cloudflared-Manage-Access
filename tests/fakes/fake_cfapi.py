@@ -24,8 +24,8 @@ class FakeCloudflare:
     accounts: list[dict[str, Any]] = field(default_factory=lambda: [{"id": "acc1", "name": "Mon compte"}])
     zones: list[dict[str, Any]] = field(
         default_factory=lambda: [
-            {"id": "z1", "name": "exemple.fr", "account": {"id": "acc1"}},
-            {"id": "z2", "name": "lab.exemple.fr", "account": {"id": "acc1"}},
+            {"id": "z1", "name": "exemple.fr", "account": {"id": "acc1", "name": "Mon compte"}},
+            {"id": "z2", "name": "lab.exemple.fr", "account": {"id": "acc1", "name": "Mon compte"}},
         ]
     )
     tunnels: list[dict[str, Any]] = field(
@@ -55,6 +55,8 @@ class FakeCloudflare:
     )
     policies: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     service_tokens: list[dict[str, Any]] = field(default_factory=list)
+    # Jeton sans « Zone : Read » : /zones est refusé.
+    zones_forbidden: bool = False
     requests: list[tuple[str, str]] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -116,8 +118,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if method == "GET" and path == "/accounts":
             return self._send(200, _page(state.accounts, query))
         if method == "GET" and path == "/zones":
-            account = query.get("account.id", [""])[0]
-            return self._send(200, _page([z for z in state.zones if z["account"]["id"] == account], query))
+            if state.zones_forbidden:
+                return self._error(403, 9109, "Unauthorized to access requested resource")
+            account = query.get("account.id", [None])[0]
+            zones = [z for z in state.zones if account is None or z["account"]["id"] == account]
+            return self._send(200, _page(zones, query))
         if m := re.fullmatch(r"/accounts/(\w+)/cfd_tunnel", path):
             return self._send(200, _page(state.tunnels, query))
         if m := re.fullmatch(r"/accounts/(\w+)/cfd_tunnel/(\w+)/configurations", path):

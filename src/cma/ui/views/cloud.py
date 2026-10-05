@@ -983,6 +983,16 @@ class CloudView(QWidget):
         names.addWidget(self.status)
         self.read_label = label("", "meta")
         names.addWidget(self.read_label)
+        self.permission_hint = label(
+            tr(
+                "Compte retrouvé par ses zones : le jeton n'a pas la permission « Account Settings : Read ». "
+                "Ajoutez-la pour voir tous vos comptes, y compris ceux sans domaine."
+            ),
+            "warning",
+            wrap=True,
+        )
+        self.permission_hint.hide()
+        names.addWidget(self.permission_hint)
         bar.addLayout(names, 1)
         self.account = QComboBox()
         self.account.setAccessibleName(tr("Compte Cloudflare"))
@@ -1183,6 +1193,7 @@ class CloudView(QWidget):
                 self.account.addItem(account.name, account)
                 if account.id == current:
                     self.account.setCurrentIndex(self.account.count() - 1)
+            self.permission_hint.setVisible(any(a.inferred for a in accounts))
             self.refresh()
 
         self.ctx.run(self.admin.connect(token), done, self._error)
@@ -1202,6 +1213,7 @@ class CloudView(QWidget):
         self.overview = None
         self.read_at = None
         self.account.clear()
+        self.permission_hint.hide()
         self._fill(None)
         self._show_state()
         self.ctx.notify("info", tr("Jeton d'API oublié."))

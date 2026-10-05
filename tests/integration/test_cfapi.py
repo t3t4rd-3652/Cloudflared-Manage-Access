@@ -7,6 +7,7 @@ import pytest
 from cma.core.cfadmin import CloudflareAdmin, PublishRequest
 from cma.core.cfapi import (
     TOKEN_SECRET_KEY,
+    Account,
     CloudflareApi,
     CloudflareApiError,
     Tunnel,
@@ -154,6 +155,33 @@ async def test_admin_connect_import_and_tokens(admin, store, secrets):
     admin.forget()
     assert not admin.has_token()
     assert store.snapshot().settings.cloudflare_account_id is None
+
+
+async def test_admin_finds_the_account_through_zones(store, secrets):
+    """Jeton sans « Account Settings : Read » : /accounts est vide, le compte vient des zones."""
+
+    def admin_for(server):
+        return CloudflareAdmin(store, secrets, lambda *_a: None, base_url=server.base_url)
+
+    with FakeCloudflareServer(FakeCloudflare(accounts=[])) as server:
+        assert CloudflareApi(TOKEN, base_url=server.base_url).accounts_from_zones() == [
+            Account("acc1", "Mon compte", inferred=True)
+        ]
+        admin = admin_for(server)
+        accounts = await admin.connect(TOKEN)
+        assert [(a.id, a.inferred) for a in accounts] == [("acc1", True)]
+        assert admin.account_id() == "acc1" and secrets.get(TOKEN_SECRET_KEY) == TOKEN
+        assert [v.tunnel.name for v in (await admin.overview(accounts[0])).tunnels] == ["bureau", "labo"]
+    admin.forget()
+
+    # Ni compte ni zone lisible : refus, qui nomme la permission manquante, et jeton non conservé.
+    for state in (FakeCloudflare(accounts=[], zones=[]), FakeCloudflare(accounts=[], zones_forbidden=True)):
+        with (
+            FakeCloudflareServer(state) as server,
+            pytest.raises(CloudflareApiError, match="Account Settings : Read"),
+        ):
+            await admin_for(server).connect(TOKEN)
+        assert secrets.get(TOKEN_SECRET_KEY) is None
 
 
 async def test_admin_publish_protects_and_creates_the_profile(cf, admin, store):

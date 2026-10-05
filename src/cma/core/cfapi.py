@@ -46,6 +46,8 @@ class CloudflareApiError(RuntimeError):
 class Account:
     id: str
     name: str
+    # Compte déduit des zones, faute de la permission « Account Settings : Read » (`/accounts` vide).
+    inferred: bool = False
 
 
 @dataclass(frozen=True)
@@ -193,6 +195,16 @@ class CloudflareApi:
 
     def list_accounts(self) -> list[Account]:
         return [Account(str(a["id"]), str(a.get("name", a["id"]))) for a in self._paged("/accounts")]
+
+    def accounts_from_zones(self) -> list[Account]:
+        """Comptes propriétaires des zones lisibles : le repli quand `/accounts` ne renvoie rien."""
+        found: dict[str, Account] = {}
+        for zone in self._paged("/zones"):
+            owner = cast(dict[str, Any], zone.get("account") or {})
+            if owner.get("id"):
+                key = str(owner["id"])
+                found.setdefault(key, Account(key, str(owner.get("name") or key), inferred=True))
+        return list(found.values())
 
     def list_zones(self, account_id: str) -> list[Zone]:
         zones = self._paged("/zones", {"account.id": account_id})

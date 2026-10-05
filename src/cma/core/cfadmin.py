@@ -122,7 +122,19 @@ class CloudflareAdmin:
         api = self.api(token)
         accounts = await asyncio.to_thread(api.list_accounts)
         if not accounts:
-            raise CloudflareApiError(tr("Ce jeton ne donne accès à aucun compte Cloudflare."))
+            # Sans « Account Settings : Read », /accounts est vide alors que le reste du compte est lisible :
+            # le compte se retrouve par ses zones (si le jeton a « Zone : Read »).
+            try:
+                accounts = await asyncio.to_thread(api.accounts_from_zones)
+            except CloudflareApiError:
+                accounts = []
+        if not accounts:
+            raise CloudflareApiError(
+                tr(
+                    "Ce jeton ne donne accès à aucun compte Cloudflare. Vérifiez qu'il a la permission "
+                    "« Account Settings : Read »."
+                )
+            )
         if token is not None:
             self.secrets.set(TOKEN_SECRET_KEY, token.strip())
         current = self.store.snapshot().settings.cloudflare_account_id

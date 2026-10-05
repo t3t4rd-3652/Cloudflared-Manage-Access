@@ -32,8 +32,10 @@ Depuis Windows, l'environnement est `.venv` (uv n'est pas forcément dans le PAT
 ```
 
 - La suite complète dure environ 3 minutes. Pour un changement localisé, lancer d'abord le fichier de test concerné.
-- La lancer en arrière-plan avec `-v`, `--timeout=180` (comme la CI) et une sortie dans un fichier : sans délai
-  par test, une exécution `-q` qui se fige ne montre rien (c'est arrivé une fois, cause non élucidée).
+- La lancer en arrière-plan avec `-v` et une sortie dans un fichier. Le délai de 180 s par test est dans
+  `pyproject.toml` (local et CI) : un gel échoue avec la pile de chaque thread au lieu de bloquer sans rien dire.
+- En CI, quand le job de tests échoue, son journal complet (avec `PYTHONFAULTHANDLER`) est publié en artefact
+  `pytest-log-<os>`, lisible sans droits d'administration.
 - Le seuil de 90 % sur `cma.core` est serré : tout nouveau code du cœur arrive avec ses tests.
 - Reproduire le job Linux sans toucher au `.venv` Windows : conteneur `python:3.12-slim`, dépôt monté en lecture
   seule et copié sans `.venv` ni `.git`, paquets `libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libgl1
@@ -76,6 +78,7 @@ Les journaux des jobs ne sont lisibles qu'aux administrateurs ; l'API publique d
 | 2026-10-01 | Jeton d'API sans compte visible : il manquait la permission « Account Settings : Read ». La page de connexion la liste désormais. |
 | 2026-10-01 | Vue Cloudflare redessinée (en-tête du compte, tuiles, connexion en trois étapes), puis tunnels en cartes. Release **2.1.1**. |
 | 2026-10-02 | Ménage : spécification de refonte, anciens plans (`docs/archive/`) et banc d'essai v1 (`scripts/bench_tunnel.py`, groupe `bench`) retirés ; vérification des contrastes reprise dans `tests/unit/test_contrast.py`. Ce fichier et `docs/PLAN.md` créés. |
+| 2026-10-05 | Dependabot entièrement fusionné (`upload-artifact` v7, `download-artifact` v8). Délai par test en local, journal des tests en artefact. Compte Cloudflare déduit des zones sans « Account Settings : Read ». |
 
 Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff-filter=D --name-only`).
 
@@ -92,7 +95,7 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   modèle de données et de sélection (menu contextuel, import, retrait et tests s'appuient dessus) ; seul le rendu
   change. Les colonnes 1 et 2 sont masquées mais gardent service et état pour l'accessibilité et les tests.
 - **Compte Cloudflare** : `/accounts` vide signifie presque toujours qu'il manque « Account Settings : Read ».
-  Une solution de repli (déduire le compte des zones) a été envisagée, pas codée.
+  Dans ce cas, le compte est déduit des zones (`accounts_from_zones`, `Account.inferred`) et la vue l'explique.
 
 ## Pièges déjà rencontrés
 

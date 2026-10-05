@@ -1,6 +1,6 @@
 # Plan du projet
 
-État au 2026-10-02, version **2.1.1**. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+État au 2026-10-05, version **2.1.1** (2.2 en cours). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -38,8 +38,8 @@ anciens plans, qui ont tous été appliqués. L'historique des étapes est dans 
 | --- | --- | --- |
 | Soumission winget | Propriétaire | `wingetcreate submit` avec les manifestes 2.1.1 (`winget-manifests-2.1.1.zip` de la release). |
 | Signature du code | Propriétaire | Exécutables et installeur non signés : SmartScreen avertit au premier lancement. SignPath Foundation (gratuit pour l'open source) est la piste retenue ; `packaging/sign.ps1` et la CI sont prêts à recevoir un certificat. |
-| Mises à jour Dependabot | À décider | Trois branches ouvertes : `actions/checkout` v7, `astral-sh/setup-uv` v7, `softprops/action-gh-release` v3. À fusionner après une CI verte. |
-| Instabilité ponctuelle des tests | Développement | Une exécution locale complète s'est figée une fois sans sortie (2026-10-01), et le job « Tests (ubuntu-latest) » s'est arrêté une fois sur SIGABRT, code 134 (2026-10-02). Non reproduits : la relance locale et la suite complète dans un conteneur Linux passent. |
+| Mises à jour Dependabot | Développement | Toutes fusionnées : `checkout` v7, `setup-uv` v7, `action-gh-release` v3 (2026-10-02), `upload-artifact` v7 et `download-artifact` v8 (2026-10-05). `release.yml` ne tourne qu'à une release : la prochaine le validera (`download-artifact` v8 échoue désormais sur une empreinte qui ne correspond pas). |
+| Instabilité ponctuelle des tests | Développement | Une exécution locale complète s'est figée une fois sans sortie (2026-10-01), et le job « Tests (ubuntu-latest) » s'est arrêté une fois sur SIGABRT, code 134 (2026-10-02). Non reproduits. Depuis le 2026-10-05, un gel échoue après 180 s avec la pile de chaque thread, et le journal du job (avec `PYTHONFAULTHANDLER`) est publié en artefact `pytest-log-<os>` quand il échoue : à lire au prochain incident. |
 
 ## Plan d'amélioration
 
@@ -51,12 +51,11 @@ Les priorités vont de P1 (prochaine version) à P3 (quand le reste est fait). C
    mise à jour en un clic vérifiable par signature, en plus du SHA-256.
 2. **Publication winget**, puis mise à jour automatique des manifestes à chaque release (PR vers
    `winget-pkgs` depuis le workflow, avec un jeton dédié).
-3. **Compte Cloudflare introuvable** : si `/accounts` est vide mais que des zones sont lisibles, déduire le compte
-   des zones et expliquer la permission manquante au lieu d'échouer (`cfadmin.py`, `views/cloud.py`).
-4. **Délai par test en local** : mettre `timeout = 180` dans `[tool.pytest.ini_options]` pour qu'un gel échoue
-   au lieu de bloquer, comme en CI. Chercher la cause des deux incidents ci-dessus : activer
-   `PYTHONFAULTHANDLER=1` dans le job de tests et publier son journal en artefact quand il échoue, pour qu'une
-   trace soit lisible sans droits d'administration.
+3. ~~**Compte Cloudflare introuvable**~~ : fait le 2026-10-05. Si `/accounts` est vide, le compte est déduit des
+   zones (`CloudflareApi.accounts_from_zones`, `Account.inferred`) et l'en-tête de la vue explique la permission
+   manquante.
+4. ~~**Délai par test en local**~~ : fait le 2026-10-05 (`timeout = 180` dans `pyproject.toml`,
+   `PYTHONFAULTHANDLER=1` et journal en artefact dans `ci.yml`). Reste à lire la trace au prochain incident.
 5. **Découper `ui/views/cloud.py`** (environ 1 600 lignes) en paquet : boîtes de dialogue, rendu des cartes,
    vue. Même traitement ensuite pour `views/ssh.py` (1 300 lignes).
 

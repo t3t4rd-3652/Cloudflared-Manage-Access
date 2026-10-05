@@ -2,6 +2,15 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Modifié
+- Compte Cloudflare : un jeton sans la permission « Account Settings : Read » ne bloque plus la connexion. Le
+  compte est retrouvé par ses zones, et l'en-tête explique la permission à ajouter pour voir tous les comptes.
+  Si aucun compte n'est lisible, le message d'erreur nomme cette permission.
+- Tests : délai de 180 s par test aussi en local ; en CI, le journal complet des tests est publié en artefact
+  quand le job échoue, avec la pile Python en cas de plantage.
+
 ## [2.1.1] - 2026-10-01
 
 ### Modifié
