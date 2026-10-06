@@ -48,6 +48,28 @@ class FakeCloudflare:
         }
     )
     dns: dict[str, list[dict[str, Any]]] = field(default_factory=lambda: {"z1": [], "z2": []})
+    # Connecteurs par tunnel : « bureau » a un connecteur sain (4 connexions), « labo » aucun.
+    connectors: dict[str, list[dict[str, Any]]] = field(
+        default_factory=lambda: {
+            "t1": [
+                {
+                    "id": "c0ffee00-1111-2222-3333-444455556666",
+                    "version": "2026.9.0",
+                    "arch": "linux_amd64",
+                    "run_at": "2026-10-01T08:00:00Z",
+                    "conns": [
+                        {
+                            "colo_name": colo,
+                            "origin_ip": "203.0.113.10",
+                            "opened_at": "2026-10-01T08:00:01Z",
+                            "is_pending_reconnect": False,
+                        }
+                        for colo in ("cdg01", "cdg01", "ams01", "ams01")
+                    ],
+                }
+            ]
+        }
+    )
     apps: list[dict[str, Any]] = field(
         default_factory=lambda: [
             {"id": "app1", "name": "SSH", "domain": "ssh.exemple.fr", "type": "self_hosted"}
@@ -125,6 +147,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._send(200, _page(zones, query))
         if m := re.fullmatch(r"/accounts/(\w+)/cfd_tunnel", path):
             return self._send(200, _page(state.tunnels, query))
+        if m := re.fullmatch(r"/accounts/(\w+)/cfd_tunnel/(\w+)/connections", path):
+            return self._send(200, _ok(state.connectors.get(m.group(2), [])))
         if m := re.fullmatch(r"/accounts/(\w+)/cfd_tunnel/(\w+)/configurations", path):
             tunnel = m.group(2)
             if method == "PUT":

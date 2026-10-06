@@ -37,7 +37,7 @@ def test_main_window_has_no_unnamed_control(qtbot, gui):
 
 def test_dialogs_have_no_unnamed_control(qtbot, gui, tmp_path):
     from cma.core.cfadmin import Overview, TunnelView
-    from cma.core.cfapi import AccessApp, Account, IngressRule, Tunnel, Zone
+    from cma.core.cfapi import AccessApp, Account, Connector, EdgeConnection, IngressRule, Tunnel, Zone
     from cma.core.transfer import build_export, plan_import
     from cma.ui.views import cloud
 
@@ -66,6 +66,11 @@ def test_dialogs_have_no_unnamed_control(qtbot, gui, tmp_path):
         cloud.ProtectDialog(window, ["a.exemple.fr"]),
         cloud.AllowDialog(window, app, [token]),
         cloud.CreateTokenDialog(window, "Compte", persistent=True),
+        cloud.ConnectorsDialog(
+            window,
+            tunnel,
+            [Connector("c1", "2026.9.0", "linux_amd64", "", (EdgeConnection("cdg01", "203.0.113.10", ""),))],
+        ),
     ]
     for dialog in dialogs:
         apply_accessible_names(dialog)

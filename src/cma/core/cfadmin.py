@@ -18,6 +18,7 @@ from cma.core.cfapi import (
     Account,
     CloudflareApi,
     CloudflareApiError,
+    Connector,
     IngressRule,
     RemoteServiceToken,
     Tunnel,
@@ -176,6 +177,10 @@ class CloudflareAdmin:
         overview = await asyncio.to_thread(load)
         self.sync_expirations(overview.tokens)
         return overview
+
+    async def connectors(self, tunnel: Tunnel) -> list[Connector]:
+        api = self.api()
+        return await asyncio.to_thread(api.tunnel_connectors, self.account_id(), tunnel.id)
 
     def sync_expirations(self, remote: list[RemoteServiceToken]) -> int:
         """Recopie l'échéance des tokens du compte sur les tokens de CMA (même `client_id`). Renvoie le nombre de

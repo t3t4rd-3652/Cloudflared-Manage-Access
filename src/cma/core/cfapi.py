@@ -68,6 +68,31 @@ class Tunnel:
 
 
 @dataclass(frozen=True)
+class EdgeConnection:
+    """Une connexion d'un connecteur vers un centre de données Cloudflare."""
+
+    colo: str
+    origin_ip: str
+    opened_at: str
+    pending_reconnect: bool = False
+
+
+@dataclass(frozen=True)
+class Connector:
+    """Un cloudflared qui fait tourner le tunnel sur un serveur ; normalement 4 connexions vers Cloudflare."""
+
+    id: str
+    version: str
+    arch: str
+    run_at: str
+    connections: tuple[EdgeConnection, ...] = ()
+
+    @property
+    def origin_ip(self) -> str:
+        return next((c.origin_ip for c in self.connections if c.origin_ip), "")
+
+
+@dataclass(frozen=True)
 class IngressRule:
     hostname: str
     service: str
@@ -230,6 +255,31 @@ class CloudflareApi:
             ),
             key=lambda t: t.name.lower(),
         )
+
+    def tunnel_connectors(self, account_id: str, tunnel_id: str) -> list[Connector]:
+        """Connecteurs actifs du tunnel et leurs connexions vers Cloudflare."""
+        result = cast(
+            list[dict[str, Any]],
+            self._result("GET", f"/accounts/{account_id}/cfd_tunnel/{tunnel_id}/connections") or [],
+        )
+        return [
+            Connector(
+                str(c.get("id", "")),
+                str(c.get("version", "")),
+                str(c.get("arch", "")),
+                str(c.get("run_at", "")),
+                tuple(
+                    EdgeConnection(
+                        str(e.get("colo_name", "")),
+                        str(e.get("origin_ip", "")),
+                        str(e.get("opened_at", "")),
+                        bool(e.get("is_pending_reconnect", False)),
+                    )
+                    for e in cast(list[dict[str, Any]], c.get("conns") or [])
+                ),
+            )
+            for c in result
+        ]
 
     def tunnel_config(self, account_id: str, tunnel_id: str) -> dict[str, Any]:
         result = cast(

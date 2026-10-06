@@ -186,6 +186,15 @@ async def test_admin_finds_the_account_through_zones(store, secrets):
         assert secrets.get(TOKEN_SECRET_KEY) is None
 
 
+async def test_tunnel_connectors(api, admin):
+    [healthy] = api.tunnel_connectors("acc1", "t1")
+    assert (healthy.version, healthy.arch, healthy.origin_ip) == ("2026.9.0", "linux_amd64", "203.0.113.10")
+    assert [c.colo for c in healthy.connections] == ["cdg01", "cdg01", "ams01", "ams01"]
+    assert not any(c.pending_reconnect for c in healthy.connections)
+    await admin.connect(TOKEN)
+    assert await admin.connectors(Tunnel("t2", "labo", "down")) == []
+
+
 async def test_admin_tracks_expiry_extends_and_rotates_tokens(cf, admin, store, secrets):
     await admin.connect(TOKEN)
     token = await admin.create_service_token("Robot")

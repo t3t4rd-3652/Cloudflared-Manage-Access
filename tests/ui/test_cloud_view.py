@@ -8,7 +8,14 @@ import cma.ui.views.cloud.view as cloud_module
 from cma.core.cfadmin import PublishRequest
 from cma.core.cfapi import TOKEN_SECRET_KEY, Tunnel
 from cma.core.models import AuthMode
-from cma.ui.views.cloud import AllowDialog, CloudView, CreateTokenDialog, ProtectDialog, PublishDialog
+from cma.ui.views.cloud import (
+    AllowDialog,
+    CloudView,
+    ConnectorsDialog,
+    CreateTokenDialog,
+    ProtectDialog,
+    PublishDialog,
+)
 from tests.fakes.fake_cfapi import TOKEN, FakeCloudflare, FakeCloudflareServer
 
 
@@ -122,6 +129,35 @@ def test_cloud_view_full_flow(qtbot, gui, cf, monkeypatch):
     view.forget()
     assert view.stack.currentIndex() == 0
     assert ctx.core.secrets.get(TOKEN_SECRET_KEY) is None
+
+
+def test_cloud_view_checks_tunnel_connectors(qtbot, gui, cf, monkeypatch):
+    ctx, window = gui
+    ctx.core.manager.cloudflare.base_url = cf.base_url
+    window.show_view("cloud")
+    view = window.cloud
+    view.token_field.set_text(TOKEN)
+    view.connect_account()
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+    shown: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        cloud_module,
+        "show_connectors",
+        lambda _p, tunnel, connectors: shown.append((tunnel.name, len(connectors))),
+    )
+    for index in (0, 1):
+        view.check_connectors(view.tree.topLevelItem(index).data(0, cloud_module.TUNNEL_ROLE))
+    qtbot.waitUntil(lambda: len(shown) == 2, timeout=10000)
+    assert sorted(shown) == [("bureau", 1), ("labo", 0)]
+
+    tunnel = view.tree.topLevelItem(0).data(0, cloud_module.TUNNEL_ROLE)
+    healthy = ConnectorsDialog(
+        view, tunnel, ctx.core.manager.cloudflare.api().tunnel_connectors("acc1", "t1")
+    )
+    assert healthy.table.rowCount() == 4 and [f.level for f in healthy.findings] == ["success"]
+    assert healthy.table.item(0, 4).text() == "CDG01"
+    empty = ConnectorsDialog(view, tunnel, [])
+    assert empty.table.isHidden() and empty.findings[0].level == "error"
 
 
 def test_cloud_view_reports_api_errors(qtbot, gui, cf):

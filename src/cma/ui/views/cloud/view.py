@@ -46,6 +46,7 @@ from cma.core.cfapi import (
     AccessApp,
     Account,
     CloudflareApiError,
+    Connector,
     IngressRule,
     RemoteServiceToken,
     Tunnel,
@@ -67,6 +68,7 @@ from cma.ui.views.cloud.cards import (
     TunnelTree,
     service_icon,
 )
+from cma.ui.views.cloud.connectors import show_connectors
 from cma.ui.views.cloud.dialogs import (
     PublishDialog,
     ask_allow,
@@ -783,8 +785,19 @@ class CloudView(QWidget):
             menu.addAction(tr("Importer ses noms d'hôte"), self.import_selected)
             publish = menu.addAction(tr("Publier un service sur ce tunnel…"), lambda: self.publish(tunnel))
             publish.setEnabled(self.publish_button.isEnabled())
+            menu.addAction(tr("État des connecteurs…"), lambda: self.check_connectors(tunnel))
         menu.exec(self.tree.viewport().mapToGlobal(pos))
         menu.deleteLater()
+
+    def check_connectors(self, tunnel: Tunnel) -> None:
+        """Lit les connecteurs du tunnel puis affiche le diagnostic et les connexions vers Cloudflare."""
+        self.status.setText(tr("Lecture des connecteurs…"))
+
+        def done(connectors: list[Connector]) -> None:
+            self._show_summary()
+            show_connectors(self, tunnel, connectors)
+
+        self.ctx.run(self.admin.connectors(tunnel), done, self._error)
 
     def ask_publish(self) -> PublishRequest | None:
         if self.overview is None:
