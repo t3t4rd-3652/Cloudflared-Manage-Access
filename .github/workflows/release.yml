@@ -3,9 +3,20 @@ name: Release
 on:
   push:
     tags: ["v*"]
+    # Release à blanc quand la chaîne de publication change (y compris les mises à jour Dependabot) :
+    # tout est construit, rien n'est publié. Les filtres de chemins ne s'appliquent pas aux tags.
+    branches: [main]
+    paths: [".github/workflows/release.yml", "packaging/**"]
+  pull_request:
+    paths: [".github/workflows/release.yml", "packaging/**"]
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+env:
+  # Seul un tag publie ; sinon (push, PR, lancement manuel), c'est une release à blanc.
+  DRY_RUN: ${{ !startsWith(github.ref, 'refs/tags/v') }}
 
 jobs:
   windows:
@@ -13,6 +24,7 @@ jobs:
     runs-on: windows-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
     env:
       SIGNING_CERT_BASE64: ${{ secrets.SIGNING_CERT_BASE64 }}
@@ -26,10 +38,17 @@ jobs:
         shell: bash
         run: |
           version=$(uv run python -c "import cma; print(cma.__version__)")
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          if [ "${DRY_RUN}" = "true" ]; then
+            echo "Release à blanc de la version ${version} : rien ne sera publié."
+            echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           tag="${GITHUB_REF_NAME#v}"
           # Un tag de préversion (v2.0.0-rc.1) publie la même version, marquée « préversion ».
           test "${tag%%-*}" = "${version}" || { echo "Tag ${GITHUB_REF_NAME} ≠ version ${version}"; exit 1; }
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           if [ "${tag}" != "${version}" ]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
       - name: Audit des dépendances (vulnérabilités connues)
         shell: bash
@@ -62,7 +81,7 @@ jobs:
           version="${{ steps.meta.outputs.version }}"
           installer="CloudflaredManageAccess-${version}-setup.exe"
           uv run python packaging/winget.py --installer "dist/${installer}" \
-            --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${installer}"
+            --url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${{ steps.meta.outputs.tag }}/${installer}"
           (cd dist/winget && 7z a -tzip "../winget-manifests-${version}.zip" manifests > /dev/null)
           uv run python packaging/scoop.py --zip "dist/CloudflaredManageAccess-${version}-portable.zip" --out dist/scoop
       - uses: actions/upload-artifact@v7
@@ -142,7 +161,16 @@ jobs:
             echo
             awk -v h="## [$version]" 'index($0, h) == 1 {found=1; next} found && /^## \[/ {exit} found {print}' CHANGELOG.md
           } > notes.md
+          # Une vraie release sans section dans le CHANGELOG publierait des notes vides.
+          if [ "${DRY_RUN}" != "true" ] && ! grep -q '^### ' notes.md; then
+            echo "Aucune section « ## [${version}] » dans CHANGELOG.md"; exit 1
+          fi
+          cat notes.md
+      - name: Release à blanc (rien n'est publié)
+        if: env.DRY_RUN == 'true'
+        run: ls -l dist
       - uses: softprops/action-gh-release@v3
+        if: env.DRY_RUN != 'true'
         with:
           body_path: notes.md
           prerelease: ${{ needs.windows.outputs.prerelease == 'true' }}
