@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from cma import __version__
+from cma.core.policies import AccessGroup, AccessPolicy, policy_from_api, policy_to_api
 from cma.i18n import tr
 
 log = logging.getLogger(__name__)
@@ -426,6 +427,31 @@ class CloudflareApi:
             },
         )
         return str(result["id"])
+
+    def list_policies(self, account_id: str, app_id: str) -> list[AccessPolicy]:
+        policies = [
+            policy_from_api(p) for p in self._paged(f"/accounts/{account_id}/access/apps/{app_id}/policies")
+        ]
+        return sorted(policies, key=lambda p: (p.precedence is None, p.precedence or 0, p.name.lower()))
+
+    def save_policy(self, account_id: str, app_id: str, policy: AccessPolicy) -> AccessPolicy:
+        """Crée la politique (sans id) ou la remplace (avec id)."""
+        base = f"/accounts/{account_id}/access/apps/{app_id}/policies"
+        if policy.id:
+            result = self._result("PUT", f"{base}/{policy.id}", body=policy_to_api(policy))
+        else:
+            result = self._result("POST", base, body=policy_to_api(policy))
+        return policy_from_api(cast(dict[str, Any], result))
+
+    def delete_policy(self, account_id: str, app_id: str, policy_id: str) -> None:
+        self._result("DELETE", f"/accounts/{account_id}/access/apps/{app_id}/policies/{policy_id}")
+
+    def list_access_groups(self, account_id: str) -> list[AccessGroup]:
+        groups = self._paged(f"/accounts/{account_id}/access/groups")
+        return sorted(
+            (AccessGroup(str(g["id"]), str(g.get("name", g["id"]))) for g in groups),
+            key=lambda g: g.name.lower(),
+        )
 
     def list_service_tokens(self, account_id: str) -> list[RemoteServiceToken]:
         tokens = self._paged(f"/accounts/{account_id}/access/service_tokens")

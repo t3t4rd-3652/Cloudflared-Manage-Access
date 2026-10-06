@@ -7,7 +7,7 @@ créer un service token directement rangé dans le coffre de CMA (D14 à D17).
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 
 from PySide6.QtCore import (
@@ -52,6 +52,7 @@ from cma.core.cfapi import (
     Tunnel,
 )
 from cma.core.models import CloudflareProfile, ServiceToken
+from cma.core.policies import AccessGroup, AccessPolicy
 from cma.i18n import tr
 from cma.ui.context import GuiContext
 from cma.ui.format import last_read
@@ -86,6 +87,7 @@ from cma.ui.views.cloud.helpers import (
     plural,
     tunnel_state,
 )
+from cma.ui.views.cloud.policies import PoliciesDialog, show_policies
 from cma.ui.views.common import confirm
 from cma.ui.widgets import (
     EmptyState,
@@ -364,11 +366,18 @@ class CloudView(QWidget):
         protect.clicked.connect(self.protect_hostname)
         self.allow_button = button(tr("Autoriser un service token…"), "key")
         self.allow_button.clicked.connect(self.allow_token)
+        self.policies_button = button(tr("Politiques…"), "user")
+        self.policies_button.setToolTip(tr("Qui peut atteindre l'application"))
+        self.policies_button.clicked.connect(self.manage_policies)
         row.addWidget(protect)
         row.addWidget(self.allow_button)
+        row.addWidget(self.policies_button)
         row.addStretch()
         box.addLayout(row)
-        self.apps_hint = label(tr("Sélectionnez une application pour y autoriser un service token."), "muted")
+        self.apps_hint = label(
+            tr("Sélectionnez une application pour voir qui y a accès ou y autoriser un service token."),
+            "muted",
+        )
         box.addWidget(self.apps_hint)
         self.apps = data_table([tr("Nom"), tr("Domaine"), tr("Type")], tr("Applications Access"))
         self.apps.horizontalHeader().resizeSection(0, 220)
@@ -899,7 +908,41 @@ class CloudView(QWidget):
     def _update_app_actions(self) -> None:
         has_app = self._selected_app() is not None
         self.allow_button.setEnabled(has_app)
+        self.policies_button.setEnabled(has_app)
         self.apps_hint.setVisible(not has_app and bool(self.overview and self.overview.apps))
+
+    def manage_policies(self) -> None:
+        """Politiques Access de l'application sélectionnée : lecture, puis modification dans une boîte de dialogue."""
+        app = self._selected_app()
+        if app is None:
+            return
+        tokens = {t.name: t.id for t in (self.overview.tokens if self.overview else [])}
+        self.status.setText(tr("Lecture des politiques…"))
+
+        async def after(action: Awaitable[object]) -> list[AccessPolicy]:
+            await action
+            return (await self.admin.policies(app))[0]
+
+        def loaded(result: tuple[list[AccessPolicy], list[AccessGroup]]) -> None:
+            self._show_summary()
+            policies, groups = result
+            dialog: PoliciesDialog | None = None
+
+            def failed(error: BaseException) -> None:
+                if dialog is not None:
+                    dialog.failed()
+                self._error(error)
+
+            def save(policy: AccessPolicy, done: Callable[[list[AccessPolicy]], None]) -> None:
+                self.ctx.run(after(self.admin.save_policy(app, policy)), done, failed)
+
+            def delete(policy: AccessPolicy, done: Callable[[list[AccessPolicy]], None]) -> None:
+                self.ctx.run(after(self.admin.delete_policy(app, policy)), done, failed)
+
+            dialog = PoliciesDialog(self, app, policies, groups, tokens, save=save, delete=delete)
+            show_policies(dialog)
+
+        self.ctx.run(self.admin.policies(app), loaded, self._error)
 
     def protect_hostname(self) -> None:
         hostnames = []

@@ -9,6 +9,7 @@ import pytest
 from cma.core.cfadmin import CloudflareAdmin, PublishRequest
 from cma.core.cfapi import (
     TOKEN_SECRET_KEY,
+    AccessApp,
     Account,
     CloudflareApi,
     CloudflareApiError,
@@ -18,6 +19,7 @@ from cma.core.cfapi import (
 )
 from cma.core.models import AuthMode, ServiceType
 from cma.core.netutil import find_free_port
+from cma.core.policies import AccessGroup, AccessPolicy, PolicyRule
 from tests.fakes.fake_cfapi import TOKEN, FakeCloudflare, FakeCloudflareServer
 
 
@@ -213,6 +215,45 @@ async def test_edit_a_published_hostname(cf, api, admin, store):
         bureau, "rdp.exemple.fr", "tcp://10.0.0.5:22"
     )  # schéma sans type : profil inchangé
     assert store.snapshot().cloudflare_profile(profile.id).service_type == ServiceType.SSH
+
+
+async def test_access_policies(cf, admin):
+    await admin.connect(TOKEN)
+    app = AccessApp("app1", "SSH", "ssh.exemple.fr", "self_hosted")
+    policies, groups = await admin.policies(app)
+    assert policies == [] and groups == [AccessGroup("g1", "Admins")]
+
+    team = await admin.save_policy(
+        app, AccessPolicy("", "Équipe", "allow", (PolicyRule("email_domain", "exemple.fr"),))
+    )
+    robots = await admin.save_policy(
+        app, AccessPolicy("", "Robots", "non_identity", (PolicyRule("any_valid_service_token"),))
+    )
+    assert team.id and (team.precedence, robots.precedence) == (1, 2)
+    unknown = {"github-organization": {"name": "acme"}}
+    cf.state.policies["app1"][0]["include"].append(unknown)
+
+    policies, _ = await admin.policies(app)
+    assert [p.name for p in policies] == ["Équipe", "Robots"]
+    edited = AccessPolicy(
+        policies[0].id,
+        "Équipe et Admins",
+        "allow",
+        (PolicyRule("group", "g1"), *[r for r in policies[0].include if not r.editable]),
+        precedence=policies[0].precedence,
+    )
+    await admin.save_policy(app, edited)
+    stored = cf.state.policies["app1"][0]
+    assert stored["name"] == "Équipe et Admins"
+    assert stored["include"] == [{"group": {"id": "g1"}}, unknown]  # la règle inconnue de CMA est gardée
+
+    await admin.delete_policy(app, robots)
+    assert [p["name"] for p in cf.state.policies["app1"]] == ["Équipe et Admins"]
+
+    # Sans le droit de lire les groupes, les politiques restent lisibles.
+    cf.state.groups_forbidden = True
+    policies, groups = await admin.policies(app)
+    assert len(policies) == 1 and groups == []
 
 
 async def test_tunnel_connectors(api, admin):

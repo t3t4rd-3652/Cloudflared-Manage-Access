@@ -8,6 +8,7 @@ import cma.ui.views.cloud.view as cloud_module
 from cma.core.cfadmin import PublishRequest
 from cma.core.cfapi import TOKEN_SECRET_KEY, Tunnel
 from cma.core.models import AuthMode
+from cma.core.policies import AccessGroup, AccessPolicy, PolicyRule
 from cma.ui.views.cloud import (
     AllowDialog,
     CloudView,
@@ -17,6 +18,7 @@ from cma.ui.views.cloud import (
     ProtectDialog,
     PublishDialog,
 )
+from cma.ui.views.cloud.policies import PoliciesDialog, PolicyEditDialog
 from tests.fakes.fake_cfapi import TOKEN, FakeCloudflare, FakeCloudflareServer
 
 
@@ -192,6 +194,84 @@ def test_cloud_view_edits_a_published_service(qtbot, gui, cf, monkeypatch):
     dialog.service.setText("tcp://localhost:22")
     dialog._accept()
     assert dialog.result() == 1 and dialog.value() == "tcp://localhost:22"
+
+
+def test_cloud_view_manages_access_policies(qtbot, gui, cf, monkeypatch):
+    import cma.ui.views.cloud.policies as policies_module
+
+    ctx, window = gui
+    ctx.core.manager.cloudflare.base_url = cf.base_url
+    window.show_view("cloud")
+    view = window.cloud
+    view.token_field.set_text(TOKEN)
+    view.connect_account()
+    qtbot.waitUntil(lambda: view.apps.rowCount() == 1, timeout=10000)
+    view.tabs.setCurrentIndex(1)
+    assert not view.policies_button.isEnabled()
+    view.apps.selectRow(0)
+    assert view.policies_button.isEnabled()
+
+    opened: list[PoliciesDialog] = []
+    monkeypatch.setattr(cloud_module, "show_policies", opened.append)
+    view.manage_policies()
+    qtbot.waitUntil(lambda: bool(opened), timeout=10000)
+    dialog = opened[0]
+    assert dialog.table.rowCount() == 0 and "Aucune politique" in dialog.status.text()
+    assert dialog.groups == [AccessGroup("g1", "Admins")]
+
+    team = AccessPolicy("", "Équipe", "allow", (PolicyRule("email_domain", "exemple.fr"),))
+    monkeypatch.setattr(policies_module, "ask_policy", lambda *_a: team)
+    dialog.add_policy()
+    qtbot.waitUntil(lambda: dialog.table.rowCount() == 1 and dialog.isEnabled(), timeout=10000)
+    assert dialog.table.item(0, 2).text() == "@exemple.fr"
+
+    dialog.table.selectRow(0)
+    renamed = AccessPolicy(dialog.policies[0].id, "Admins", "allow", (PolicyRule("group", "g1"),))
+    monkeypatch.setattr(policies_module, "ask_policy", lambda *_a: renamed)
+    dialog.edit_policy()
+    qtbot.waitUntil(lambda: dialog.table.item(0, 0).text() == "Admins", timeout=10000)
+    assert dialog.table.item(0, 2).text() == "groupe : Admins"
+    assert cf.state.policies["app1"][0]["include"] == [{"group": {"id": "g1"}}]
+
+    dialog.table.selectRow(0)
+    monkeypatch.setattr(policies_module, "confirm", lambda *_a: True)
+    dialog.delete_policy()
+    qtbot.waitUntil(lambda: dialog.table.rowCount() == 0 and dialog.isEnabled(), timeout=10000)
+    assert cf.state.policies["app1"] == []
+
+    # Une erreur de l'API réactive la boîte de dialogue.
+    cf.state.policies["app1"] = []
+    monkeypatch.setattr(policies_module, "ask_policy", lambda *_a: renamed)  # id disparu : 404
+    dialog.table.setRowCount(0)
+    dialog.policies = [renamed]
+    dialog.edit_policy()
+    qtbot.waitUntil(dialog.isEnabled, timeout=10000)
+
+
+def test_policy_editor_validates_the_rules(qtbot, gui):
+    _ctx, window = gui
+    groups = [AccessGroup("g1", "Admins")]
+    unknown = PolicyRule("raw", raw={"github-organization": {"name": "acme"}})
+    existing = AccessPolicy("p1", "Équipe", "allow", (PolicyRule("email", "a@b.fr"), unknown), precedence=3)
+    dialog = PolicyEditDialog(window, existing, groups, {"Robot": "tok1"})
+    assert dialog.rules.toPlainText() == "a@b.fr"
+    assert dialog.warning.isHidden()
+    dialog.rules.setPlainText("a@b.fr\ntout le monde")
+    assert not dialog.warning.isHidden()
+    dialog.rules.setPlainText("a@b.fr\nn'importe quoi")
+    assert dialog.value() is None and "Ligne 2" in dialog.error.text()
+    dialog.rules.setPlainText("groupe : Admins\ntoken : Robot")
+    dialog.decision.setCurrentIndex(2)
+    value = dialog.value()
+    assert (
+        value is not None and value.id == "p1" and value.decision == "non_identity" and value.precedence == 3
+    )
+    assert value.include == (PolicyRule("group", "g1"), PolicyRule("service_token", "tok1"), unknown)
+
+    fresh = PolicyEditDialog(window, None, groups, {})
+    assert fresh.value() is None and "nom" in fresh.error.text()
+    fresh.name.setText("Vide")
+    assert fresh.value() is None and "au moins une règle" in fresh.error.text()
 
 
 def test_cloud_view_reports_api_errors(qtbot, gui, cf):

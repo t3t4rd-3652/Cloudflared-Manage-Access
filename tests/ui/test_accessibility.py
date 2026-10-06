@@ -38,8 +38,10 @@ def test_main_window_has_no_unnamed_control(qtbot, gui):
 def test_dialogs_have_no_unnamed_control(qtbot, gui, tmp_path):
     from cma.core.cfadmin import Overview, TunnelView
     from cma.core.cfapi import AccessApp, Account, Connector, EdgeConnection, IngressRule, Tunnel, Zone
+    from cma.core.policies import AccessGroup, AccessPolicy, PolicyRule
     from cma.core.transfer import build_export, plan_import
     from cma.ui.views import cloud
+    from cma.ui.views.cloud.policies import PoliciesDialog, PolicyEditDialog
 
     ctx, window = gui
     token = ServiceToken(name="Prod", client_id="abc.access")
@@ -67,6 +69,16 @@ def test_dialogs_have_no_unnamed_control(qtbot, gui, tmp_path):
         cloud.AllowDialog(window, app, [token]),
         cloud.CreateTokenDialog(window, "Compte", persistent=True),
         cloud.EditServiceDialog(window, tunnel, IngressRule("a.exemple.fr", "tcp://localhost:22")),
+        PolicyEditDialog(window, None, [AccessGroup("g1", "Admins")], {"Robot": "tok1"}),
+        PoliciesDialog(
+            window,
+            app,
+            [AccessPolicy("p1", "Équipe", "allow", (PolicyRule("email_domain", "exemple.fr"),))],
+            [],
+            {},
+            save=lambda *_a: None,
+            delete=lambda *_a: None,
+        ),
         cloud.ConnectorsDialog(
             window,
             tunnel,

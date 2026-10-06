@@ -36,6 +36,7 @@ from cma.core.models import (
     guess_service_type,
     unique_name,
 )
+from cma.core.policies import AccessGroup, AccessPolicy
 from cma.core.secrets import SecretStore
 from cma.i18n import tr
 
@@ -317,6 +318,33 @@ class CloudflareAdmin:
         secret = await asyncio.to_thread(run)
         self.secrets.set(token.secret_key, secret)
         return token
+
+    # --- Politiques Access ----------------------------------------------------------------------------------
+
+    async def policies(self, app: AccessApp) -> tuple[list[AccessPolicy], list[AccessGroup]]:
+        """Politiques de l'application et groupes Access du compte (pour la saisie « groupe : Nom »).
+
+        Sans la permission de lire les groupes, la liste des groupes est simplement vide."""
+        api = self.api()
+        account = self.account_id()
+
+        def load() -> tuple[list[AccessPolicy], list[AccessGroup]]:
+            policies = api.list_policies(account, app.id)
+            try:
+                groups = api.list_access_groups(account)
+            except CloudflareApiError:
+                groups = []
+            return policies, groups
+
+        return await asyncio.to_thread(load)
+
+    async def save_policy(self, app: AccessApp, policy: AccessPolicy) -> AccessPolicy:
+        api = self.api()
+        return await asyncio.to_thread(api.save_policy, self.account_id(), app.id, policy)
+
+    async def delete_policy(self, app: AccessApp, policy: AccessPolicy) -> None:
+        api = self.api()
+        await asyncio.to_thread(api.delete_policy, self.account_id(), app.id, policy.id)
 
     async def protect_hostname(self, hostname: str) -> AccessApp:
         """Application Access « self-hosted » pour ce nom d'hôte ; l'existante est réutilisée."""

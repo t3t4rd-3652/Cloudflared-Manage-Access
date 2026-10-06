@@ -76,6 +76,9 @@ class FakeCloudflare:
         ]
     )
     policies: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    groups: list[dict[str, Any]] = field(default_factory=lambda: [{"id": "g1", "name": "Admins"}])
+    # Jeton sans « Access: Organizations, Identity Providers, and Groups : Read » : /access/groups est refusé.
+    groups_forbidden: bool = False
     service_tokens: list[dict[str, Any]] = field(default_factory=list)
     # Jeton sans « Zone : Read » : /zones est refusé.
     zones_forbidden: bool = False
@@ -187,9 +190,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._send(200, _ok(app))
             return self._send(200, _page(state.apps, query))
         if m := re.fullmatch(r"/accounts/(\w+)/access/apps/(\w+)/policies", path):
-            policy = {**body, "id": uuid.uuid4().hex}
-            state.policies.setdefault(m.group(2), []).append(policy)
+            policies = state.policies.setdefault(m.group(2), [])
+            if method == "GET":
+                return self._send(200, _page(policies, query))
+            policy = {**body, "id": uuid.uuid4().hex, "precedence": len(policies) + 1}
+            policies.append(policy)
             return self._send(200, _ok(policy))
+        if m := re.fullmatch(r"/accounts/(\w+)/access/apps/(\w+)/policies/(\w+)", path):
+            policies = state.policies.setdefault(m.group(2), [])
+            policy = next((p for p in policies if p["id"] == m.group(3)), None)
+            if policy is None:
+                return self._error(404, 12131, "access.api.error.policy_not_found")
+            if method == "DELETE":
+                policies.remove(policy)
+                return self._send(200, _ok({"id": policy["id"]}))
+            policy.clear()
+            policy.update({**body, "id": m.group(3)})
+            return self._send(200, _ok(policy))
+        if re.fullmatch(r"/accounts/(\w+)/access/groups", path):
+            if state.groups_forbidden:
+                return self._error(403, 10000, "Authentication error")
+            return self._send(200, _page(state.groups, query))
         if m := re.fullmatch(r"/accounts/(\w+)/access/service_tokens", path):
             if method == "POST":
                 token = {
