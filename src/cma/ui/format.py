@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
+from cma.core.expiry import WARN_BEFORE, TokenExpiry, days_left
 from cma.i18n import tr
 
 
@@ -47,3 +48,30 @@ def last_read(when: datetime | None) -> str:
     if when.date() == datetime.now().date():
         return tr("Dernière lecture : aujourd'hui à {time}").format(time=when.strftime("%H:%M"))
     return tr("Dernière lecture : {date}").format(date=when.strftime("%d/%m/%Y %H:%M"))
+
+
+def token_expiry(expires_at: datetime | None, now: datetime | None = None) -> tuple[str, str]:
+    """Échéance d'un service token et son rôle d'affichage (`muted`, `warning` ou `error`)."""
+    if expires_at is None:
+        return tr("Échéance inconnue : elle est lue avec le compte, dans la vue Cloudflare."), "muted"
+    now = now or datetime.now(UTC)
+    date = expires_at.astimezone().strftime("%d/%m/%Y")
+    days = days_left(expires_at, now)
+    if days < 0:
+        return tr("Expiré depuis le {date}").format(date=date), "error"
+    if expires_at - now <= WARN_BEFORE:
+        return tr("Expire le {date} (dans {n} j)").format(date=date, n=days), "warning"
+    return tr("Expire le {date}").format(date=date), "muted"
+
+
+def expiry_alert(item: TokenExpiry) -> str:
+    """Message d'alerte pour un token expiré ou proche de l'échéance."""
+    if item.expired:
+        return tr(
+            "Le service token « {name} » a expiré : Cloudflare refuse les accès qui l'utilisent."
+        ).format(name=item.token.name)
+    if item.days_left == 0:
+        return tr("Le service token « {name} » expire aujourd'hui.").format(name=item.token.name)
+    return tr("Le service token « {name} » expire dans {n} jours.").format(
+        name=item.token.name, n=item.days_left
+    )

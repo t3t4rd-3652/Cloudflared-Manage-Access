@@ -47,6 +47,7 @@ TUNNEL_ROLE = 256
 RULE_ROLE = 257
 PROTECTED_ROLE = 258
 PROFILE_ROLE = 259
+TOKEN_ROLE = 260  # tableau des service tokens du compte
 
 # Géométrie des cartes de tunnel.
 CARD_GAP = 12

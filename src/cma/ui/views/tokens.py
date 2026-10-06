@@ -26,7 +26,7 @@ from cma.core.secrets import SecretStoreError
 from cma.i18n import tr
 from cma.ui.context import GuiContext
 from cma.ui.dialogs.transfer import run_export, run_import
-from cma.ui.format import short_datetime
+from cma.ui.format import short_datetime, token_expiry
 from cma.ui.views.common import ListEntry, ProfileList, ask_unsaved, confirm
 from cma.ui.widgets import (
     EmptyState,
@@ -36,6 +36,7 @@ from cma.ui.widgets import (
     button,
     label,
     primary_button,
+    set_role,
     title,
     with_error,
 )
@@ -83,10 +84,12 @@ class TokenEditor(QWidget):
         self.notes.setMinimumHeight(80)
         self.notes.setMaximumHeight(120)
         self.created = label("", "muted")
+        self.expiry = label("", "muted", wrap=True)
         form.addRow(tr("Nom"), with_error(self.name, self.name_error))
         form.addRow(tr("Client ID"), with_error(self.client_id, self.client_error))
         form.addRow(tr("Secret"), self.secret)
         form.addRow(self.created)
+        form.addRow(self.expiry)
         form.addRow(tr("Notes"), self.notes)
         body.addLayout(form)
         self.users_title = title(tr("Profils qui l'utilisent"), "SectionTitle")
@@ -156,6 +159,9 @@ class TokenEditor(QWidget):
         self.secret.set_text(self._secret_loaded)
         self.notes.setPlainText(token.notes)
         self.created.setText(tr("Créé le {date}").format(date=short_datetime(token.created)))
+        text, role = token_expiry(token.expires_at)
+        self.expiry.setText(text)
+        set_role(self.expiry, role)
         self.secret.set_subject(token.name)
         self.vault_text.setText(self._vault_description())
         self.users.clear()

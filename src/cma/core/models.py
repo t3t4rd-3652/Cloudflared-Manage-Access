@@ -133,6 +133,8 @@ class ServiceToken(Model):
     name: Name
     client_id: str = Field(min_length=1, max_length=200)
     created: datetime = Field(default_factory=utc_now)
+    # Échéance connue chez Cloudflare (création depuis CMA ou lecture du compte) ; None si jamais lue.
+    expires_at: datetime | None = None
     notes: str = ""
 
     @property

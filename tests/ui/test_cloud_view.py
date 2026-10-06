@@ -66,6 +66,22 @@ def test_cloud_view_full_flow(qtbot, gui, cf, monkeypatch):
     assert ctx.core.secrets.get(token.secret_key).startswith("secret-")
     assert view.remote_tokens.item(0, 3).text() == "Oui"
 
+    # Prolonger, puis changer le secret du token sélectionné.
+    assert not view.extend_button.isEnabled() and not view.rotate_button.isEnabled()
+    view.remote_tokens.selectRow(0)
+    assert view.extend_button.isEnabled() and view.rotate_button.isEnabled()
+    view.extend_selected_token()
+    qtbot.waitUntil(lambda: ctx.config().tokens[0].expires_at.year == 2028, timeout=10000)
+    old_secret = ctx.core.secrets.get(token.secret_key)
+    monkeypatch.setattr(cloud_module, "confirm", lambda *_a: False)
+    view.remote_tokens.selectRow(0)
+    view.rotate_selected_token()  # refusé : rien ne change
+    assert ctx.core.secrets.get(token.secret_key) == old_secret
+    monkeypatch.setattr(cloud_module, "confirm", lambda *_a: True)
+    view.rotate_selected_token()
+    qtbot.waitUntil(lambda: ctx.core.secrets.get(token.secret_key) != old_secret, timeout=10000)
+    qtbot.waitUntil(lambda: view.remote_tokens.rowCount() == 1, timeout=10000)
+
     # Autorisation du token sur l'application Access existante.
     view.apps.selectRow(0)
     monkeypatch.setattr(cloud_module, "ask_allow", lambda _p, _app, tokens: tokens[0])

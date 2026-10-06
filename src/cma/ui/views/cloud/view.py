@@ -41,7 +41,15 @@ from PySide6.QtWidgets import (
 )
 
 from cma.core.cfadmin import CloudflareAdmin, Overview, PublishRequest, PublishResult
-from cma.core.cfapi import TOKENS_PAGE, AccessApp, Account, CloudflareApiError, IngressRule, Tunnel
+from cma.core.cfapi import (
+    TOKENS_PAGE,
+    AccessApp,
+    Account,
+    CloudflareApiError,
+    IngressRule,
+    RemoteServiceToken,
+    Tunnel,
+)
 from cma.core.models import CloudflareProfile, ServiceToken
 from cma.i18n import tr
 from cma.ui.context import GuiContext
@@ -53,6 +61,7 @@ from cma.ui.views.cloud.cards import (
     PROFILE_ROLE,
     PROTECTED_ROLE,
     RULE_ROLE,
+    TOKEN_ROLE,
     TUNNEL_ROLE,
     StatTile,
     TunnelTree,
@@ -386,13 +395,22 @@ class CloudView(QWidget):
         create = primary_button(tr("Créer un service token…"), "plus")
         create.clicked.connect(self.create_token)
         row.addWidget(create)
+        self.extend_button = button(
+            tr("Prolonger"), "hourglass", tooltip=tr("Repousser l'échéance, sans changer le secret")
+        )
+        self.extend_button.clicked.connect(self.extend_selected_token)
+        row.addWidget(self.extend_button)
+        self.rotate_button = button(tr("Changer le secret…"), "rotate-clockwise")
+        self.rotate_button.clicked.connect(self.rotate_selected_token)
+        row.addWidget(self.rotate_button)
         row.addStretch()
         box.addLayout(row)
         box.addWidget(
             label(
                 tr(
                     "Service tokens du compte Cloudflare. « Dans CMA » indique si le token est aussi "
-                    "enregistré sur ce poste, avec son secret."
+                    "enregistré sur ce poste, avec son secret. Seul un token enregistré dans CMA peut changer "
+                    "de secret : le nouveau part directement dans le coffre."
                 ),
                 "muted",
                 wrap=True,
@@ -405,6 +423,7 @@ class CloudView(QWidget):
         for column, width in enumerate((200, 280, 120)):
             header.resizeSection(column, width)
         remember_header(header, "cloud-tokens")
+        self.remote_tokens.itemSelectionChanged.connect(self._update_token_actions)
         create_empty = primary_button(tr("Créer un service token…"), "plus")
         create_empty.clicked.connect(self.create_token)
         self.tokens_empty = EmptyState(
@@ -650,6 +669,7 @@ class CloudView(QWidget):
                 item.setToolTip(value)
                 if column == 0:
                     item.setIcon(token_icon("key", "accent"))
+                    item.setData(TOKEN_ROLE, token)
                 elif column == 1:
                     item.setFont(mono)
                 elif column == 2 and expiry_tone:
@@ -660,6 +680,7 @@ class CloudView(QWidget):
         self.tokens_stack.setCurrentWidget(self.remote_tokens if overview.tokens else self.tokens_empty)
         self._update_tunnel_actions()
         self._update_app_actions()
+        self._update_token_actions()
 
     # --- Tunnels -----------------------------------------------------------------------------------------
 
@@ -924,3 +945,68 @@ class CloudView(QWidget):
             self.refresh()
 
         self.ctx.run(self.admin.create_service_token(name, duration=duration), done, failed)
+
+    # --- Échéance et secret des service tokens --------------------------------------------------------------
+
+    def selected_remote_token(self) -> RemoteServiceToken | None:
+        rows = self.remote_tokens.selectionModel().selectedRows()
+        item = self.remote_tokens.item(rows[0].row(), 0) if rows else None
+        token = item.data(TOKEN_ROLE) if item is not None else None
+        return token if isinstance(token, RemoteServiceToken) else None
+
+    def _local_token(self, remote: RemoteServiceToken | None) -> ServiceToken | None:
+        if remote is None:
+            return None
+        return next((t for t in self.ctx.config().tokens if t.client_id == remote.client_id), None)
+
+    def _update_token_actions(self) -> None:
+        remote = self.selected_remote_token()
+        self.extend_button.setEnabled(remote is not None)
+        self.rotate_button.setEnabled(self._local_token(remote) is not None)
+
+    def extend_selected_token(self) -> None:
+        remote = self.selected_remote_token()
+        if remote is None:
+            return
+        self.status.setText(tr("Prolongation du service token…"))
+
+        def done(expires_at: str) -> None:
+            self.ctx.notify(
+                "success",
+                tr("« {name} » expire désormais le {date}.").format(
+                    name=remote.name, date=expiry_label(expires_at)
+                ),
+            )
+            self.refresh()
+
+        self.ctx.run(self.admin.extend_token(remote), done, self._error)
+
+    def rotate_selected_token(self) -> None:
+        local = self._local_token(self.selected_remote_token())
+        if local is None:
+            return
+        users = [p.name for p in self.ctx.config().profiles_using_token(local.id)]
+        text = tr(
+            "Cloudflare crée un nouveau secret et révoque aussitôt l'ancien. Le nouveau secret est rangé dans le "
+            "coffre de CMA ; l'ID client ne change pas."
+        )
+        if users:
+            text += "\n\n" + tr("Les accès en cours qui l'utilisent sont à relancer : {names}.").format(
+                names=", ".join(users)
+            )
+        if not confirm(
+            self,
+            tr("Changer le secret de « {name} » ?").format(name=local.name),
+            text,
+            tr("Changer le secret"),
+        ):
+            return
+        self.status.setText(tr("Changement du secret…"))
+
+        def done(token: ServiceToken) -> None:
+            self.ctx.notify(
+                "success", tr("Nouveau secret de « {name} » enregistré dans CMA.").format(name=token.name)
+            )
+            self.refresh()
+
+        self.ctx.run(self.admin.rotate_token(local.id), done, self._error)

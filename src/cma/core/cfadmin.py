@@ -25,6 +25,7 @@ from cma.core.cfapi import (
     guess_service_from_ingress,
 )
 from cma.core.config_store import ConfigStore
+from cma.core.expiry import parse_expiry
 from cma.core.models import (
     AuthMode,
     CloudflareProfile,
@@ -172,7 +173,28 @@ class CloudflareAdmin:
                 zones=api.list_zones(account.id),
             )
 
-        return await asyncio.to_thread(load)
+        overview = await asyncio.to_thread(load)
+        self.sync_expirations(overview.tokens)
+        return overview
+
+    def sync_expirations(self, remote: list[RemoteServiceToken]) -> int:
+        """Recopie l'échéance des tokens du compte sur les tokens de CMA (même `client_id`). Renvoie le nombre de
+        tokens modifiés ; la configuration n'est écrite que si quelque chose change."""
+        known = {t.client_id: parse_expiry(t.expires_at) for t in remote}
+        changes = {
+            token.id: known[token.client_id]
+            for token in self.store.snapshot().tokens
+            if token.client_id in known and known[token.client_id] != token.expires_at
+        }
+        if changes:
+
+            def apply(config: Config) -> None:
+                for token in config.tokens:
+                    if token.id in changes:
+                        token.expires_at = changes[token.id]
+
+            self.store.update(apply)
+        return len(changes)
 
     # --- Profils ----------------------------------------------------------------------------------------
 
@@ -234,31 +256,62 @@ class CloudflareAdmin:
         token = ServiceToken(
             name=unique_name(created.name, names),
             client_id=created.client_id,
+            expires_at=parse_expiry(created.expires_at),
             notes=tr("Créé depuis CMA (id Cloudflare {id}).").format(id=created.id),
         )
         self.secrets.set(token.secret_key, created.client_secret)
         self.store.update(lambda c: c.tokens.append(token))
         return token
 
-    async def allow_token(self, app: AccessApp, token_id: str) -> str:
-        """Autorise un service token de CMA sur une application Access (règle « Service Auth »)."""
+    def _local_token(self, token_id: str) -> ServiceToken:
         token = self.store.snapshot().token(token_id)
         if token is None:
             raise CloudflareApiError(tr("Service token introuvable."))
+        return token
+
+    @staticmethod
+    def _remote_token(api: CloudflareApi, account: str, token: ServiceToken) -> RemoteServiceToken:
+        """Le token du compte Cloudflare qui correspond à un token de CMA (même `client_id`)."""
+        remote = next((t for t in api.list_service_tokens(account) if t.client_id == token.client_id), None)
+        if remote is None:
+            raise CloudflareApiError(
+                tr("Le token « {name} » n'existe pas dans ce compte Cloudflare.").format(name=token.name)
+            )
+        return remote
+
+    async def allow_token(self, app: AccessApp, token_id: str) -> str:
+        """Autorise un service token de CMA sur une application Access (règle « Service Auth »)."""
+        token = self._local_token(token_id)
         api = self.api()
         account = self.account_id()
 
         def run() -> str:
-            remote = next(
-                (t for t in api.list_service_tokens(account) if t.client_id == token.client_id), None
-            )
-            if remote is None:
-                raise CloudflareApiError(
-                    tr("Le token « {name} » n'existe pas dans ce compte Cloudflare.").format(name=token.name)
-                )
+            remote = self._remote_token(api, account, token)
             return api.allow_service_token(account, app.id, remote.id, f"CMA - {token.name}")
 
         return await asyncio.to_thread(run)
+
+    async def extend_token(self, remote: RemoteServiceToken) -> str:
+        """Repousse l'échéance d'un token du compte (même secret). Le token de CMA lié suit. Renvoie l'échéance."""
+        api = self.api()
+        expires_at = await asyncio.to_thread(api.refresh_service_token, self.account_id(), remote.id)
+        self.sync_expirations([RemoteServiceToken(remote.id, remote.name, remote.client_id, expires_at)])
+        return expires_at
+
+    async def rotate_token(self, token_id: str) -> ServiceToken:
+        """Nouveau secret pour un token de CMA, rangé aussitôt dans le coffre : le `client_id` ne change pas, les
+        profils qui l'utilisent n'ont rien à modifier. L'ancien secret est révoqué par Cloudflare."""
+        token = self._local_token(token_id)
+        api = self.api()
+        account = self.account_id()
+
+        def run() -> str:
+            remote = self._remote_token(api, account, token)
+            return api.rotate_service_token(account, remote.id).client_secret
+
+        secret = await asyncio.to_thread(run)
+        self.secrets.set(token.secret_key, secret)
+        return token
 
     async def protect_hostname(self, hostname: str) -> AccessApp:
         """Application Access « self-hosted » pour ce nom d'hôte ; l'existante est réutilisée."""

@@ -178,6 +178,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 state.service_tokens.append(token)
                 return self._send(200, _ok({**token, "client_secret": "secret-" + uuid.uuid4().hex}))
             return self._send(200, _page(state.service_tokens, query))
+        if m := re.fullmatch(r"/accounts/(\w+)/access/service_tokens/(\w+)/(refresh|rotate)", path):
+            token = next((t for t in state.service_tokens if t["id"] == m.group(2)), None)
+            if token is None:
+                return self._error(404, 12002, "access.api.error.service_token_not_found")
+            if m.group(3) == "refresh":
+                token["expires_at"] = "2028-09-29T00:00:00Z"
+                return self._send(200, _ok(token))
+            return self._send(200, _ok({**token, "client_secret": "secret-" + uuid.uuid4().hex}))
         return self._error(404, 7003, f"No route for that URI: {method} {path}")
 
     def do_GET(self) -> None:

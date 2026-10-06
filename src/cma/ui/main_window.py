@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 from PySide6.QtCore import QByteArray, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QKeySequence, QResizeEvent, QShortcut
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from cma import APP_NAME, __version__
 from cma.core.events import Notification
+from cma.core.expiry import TokenExpiry, expiring_tokens
 from cma.core.secrets import EncryptedFileSecretStore
 from cma.core.sessions import SessionInfo, SessionKind, SessionState
 from cma.i18n import tr
@@ -31,6 +33,7 @@ from cma.ui.context import GuiContext
 from cma.ui.dialogs.diagnose import open_diagnosis
 from cma.ui.dialogs.palette import CommandPalette, PaletteEntry
 from cma.ui.dialogs.workspaces import launch_workspace
+from cma.ui.format import expiry_alert
 from cma.ui.icons import app_icon, set_icon, token_icon
 from cma.ui.lock import IdleWatcher, LockPanel
 from cma.ui.views.cloud import CloudView
@@ -196,6 +199,13 @@ class MainWindow(QMainWindow):
         self._lock_timer.setInterval(30_000)
         self._lock_timer.timeout.connect(self.check_idle)
         self._lock_timer.start()
+        # Échéance des service tokens : vérifiée peu après l'affichage, puis toutes les 12 heures.
+        self._expiry_alerted: set[str] = set()
+        self._expiry_timer = QTimer(self)
+        self._expiry_timer.setInterval(12 * 3600 * 1000)
+        self._expiry_timer.timeout.connect(self.check_token_expiry)
+        self._expiry_timer.start()
+        QTimer.singleShot(5_000, self.check_token_expiry)
         ctx.theme.changed.connect(self._refresh_nav_icons)
 
         status = self.statusBar()
@@ -442,6 +452,27 @@ class MainWindow(QMainWindow):
 
     def can_lock(self) -> bool:
         return isinstance(self.ctx.core.secrets, EncryptedFileSecretStore)
+
+    def check_token_expiry(self) -> list[TokenExpiry]:
+        """Prévient une fois par session pour chaque service token expiré ou proche de son échéance."""
+        fresh = [
+            item
+            for item in expiring_tokens(self.ctx.config(), datetime.now(UTC))
+            if item.token.id not in self._expiry_alerted
+        ]
+        for item in fresh:
+            self._expiry_alerted.add(item.token.id)
+            self.notify(
+                "error" if item.expired else "warning",
+                expiry_alert(item),
+                action=(tr("Renouveler"), self.open_cloud_tokens),
+            )
+        return fresh
+
+    def open_cloud_tokens(self) -> None:
+        """Onglet « Service tokens » de la vue Cloudflare, où se prolonge un token."""
+        self.show_view("cloud")
+        self.cloud.tabs.setCurrentIndex(2)
 
     def check_idle(self) -> None:
         minutes = self.ctx.config().settings.lock_after_minutes

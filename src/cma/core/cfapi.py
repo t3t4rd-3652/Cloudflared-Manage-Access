@@ -96,6 +96,7 @@ class CreatedServiceToken:
     name: str
     client_id: str
     client_secret: str
+    expires_at: str = ""
 
     def __repr__(self) -> str:  # le secret ne doit jamais apparaître dans un journal
         return f"CreatedServiceToken(id={self.id!r}, name={self.name!r}, client_id={self.client_id!r})"
@@ -378,12 +379,27 @@ class CloudflareApi:
         result = self._result(
             "POST", f"/accounts/{account_id}/access/service_tokens", body={"name": name, "duration": duration}
         )
-        return CreatedServiceToken(
-            str(result["id"]),
-            str(result.get("name", name)),
-            str(result["client_id"]),
-            str(result["client_secret"]),
-        )
+        return _created_token(result, name)
+
+    def refresh_service_token(self, account_id: str, token_id: str) -> str:
+        """Repousse l'échéance du token d'une durée (même secret, aucune coupure). Renvoie la nouvelle échéance."""
+        result = self._result("POST", f"/accounts/{account_id}/access/service_tokens/{token_id}/refresh")
+        return str(result.get("expires_at") or "")
+
+    def rotate_service_token(self, account_id: str, token_id: str) -> CreatedServiceToken:
+        """Nouveau secret pour le même `client_id` ; Cloudflare révoque l'ancien."""
+        result = self._result("POST", f"/accounts/{account_id}/access/service_tokens/{token_id}/rotate")
+        return _created_token(result, "")
+
+
+def _created_token(result: dict[str, Any], name: str) -> CreatedServiceToken:
+    return CreatedServiceToken(
+        str(result["id"]),
+        str(result.get("name") or name),
+        str(result["client_id"]),
+        str(result["client_secret"]),
+        str(result.get("expires_at") or ""),
+    )
 
 
 def guess_service_from_ingress(service: str) -> tuple[str, int | None]:

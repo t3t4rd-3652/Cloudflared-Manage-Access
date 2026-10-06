@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from cma.core.cfadmin import CloudflareAdmin, PublishRequest
@@ -182,6 +184,37 @@ async def test_admin_finds_the_account_through_zones(store, secrets):
         ):
             await admin_for(server).connect(TOKEN)
         assert secrets.get(TOKEN_SECRET_KEY) is None
+
+
+async def test_admin_tracks_expiry_extends_and_rotates_tokens(cf, admin, store, secrets):
+    await admin.connect(TOKEN)
+    token = await admin.create_service_token("Robot")
+    assert token.expires_at == datetime(2027, 9, 29, tzinfo=UTC)
+    first_secret = secrets.get(token.secret_key)
+
+    # La lecture du compte recopie l'échéance connue chez Cloudflare (une écriture seulement si elle change).
+    cf.state.service_tokens[0]["expires_at"] = "2026-11-01T00:00:00Z"
+    overview = await admin.overview((await admin.connect())[0])
+    assert store.snapshot().token(token.id).expires_at == datetime(2026, 11, 1, tzinfo=UTC)
+    assert admin.sync_expirations(overview.tokens) == 0
+
+    # Prolonger : nouvelle échéance, même secret.
+    assert await admin.extend_token(overview.tokens[0]) == "2028-09-29T00:00:00Z"
+    assert store.snapshot().token(token.id).expires_at == datetime(2028, 9, 29, tzinfo=UTC)
+    assert secrets.get(token.secret_key) == first_secret
+
+    # Changer le secret : même client_id, nouveau secret dans le coffre, jamais dans la configuration.
+    rotated = await admin.rotate_token(token.id)
+    new_secret = secrets.get(token.secret_key)
+    assert rotated.client_id == token.client_id
+    assert new_secret and new_secret != first_secret and new_secret not in store.snapshot().model_dump_json()
+
+    # Un token absent du compte ou de CMA est refusé avec un message clair.
+    cf.state.service_tokens.clear()
+    with pytest.raises(CloudflareApiError, match="n'existe pas"):
+        await admin.rotate_token(token.id)
+    with pytest.raises(CloudflareApiError, match="introuvable"):
+        await admin.rotate_token("inconnu")
 
 
 async def test_admin_publish_protects_and_creates_the_profile(cf, admin, store):
