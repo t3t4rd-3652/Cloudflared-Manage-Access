@@ -111,6 +111,9 @@ Avec un jeton d'API Cloudflare, CMA gère aussi le côté serveur :
 - **Créer un tunnel**, avec la commande d'installation de son connecteur pour Linux, Windows ou Docker.
 - **État des connecteurs** d'un tunnel : diagnostic en clair d'un tunnel « Dégradé » ou « Hors ligne ».
 - **Politiques Access** : qui atteint une application (e-mails, domaines, groupes, service tokens), une règle par ligne.
+  Les politiques réutilisables partagées entre applications sont signalées, ajoutées ou retirées sans toucher aux autres.
+- Ménage : renommer ou supprimer un tunnel, supprimer une application Access ou un service token, politiques inutilisées.
+- Options d'origine d'un nom d'hôte publié : certificat auto-signé (Proxmox…), en-tête Host, nom du certificat.
 - Service tokens créés depuis CMA, rangés directement dans le coffre : leur secret n'est jamais affiché. CMA prévient
   avant leur expiration ; **Prolonger** repousse l'échéance, **Changer le secret** en crée un nouveau sans toucher aux profils.
 - Permissions du jeton d'API et détails dans [docs/SECURITE.md](docs/SECURITE.md).

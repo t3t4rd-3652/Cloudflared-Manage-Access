@@ -41,8 +41,14 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
   l'ancien aussitôt.
 - Le jeton du connecteur d'un tunnel créé depuis CMA est masqué à l'écran et dans les journaux, et n'est pas
   conservé : seul le bouton « Copier » donne la commande d'installation complète.
-- Une politique Access modifiée depuis CMA garde telles quelles les règles que CMA ne sait pas éditer, ainsi que
-  ses conditions « exclude » et « require ». « Tout le monde » avec « Autoriser » est signalé avant l'enregistrement.
+- Une politique Access modifiée depuis CMA garde telles quelles les règles et réglages que CMA ne sait pas éditer
+  (règles de connexion RDP, approbations, conditions « exclude » et « require »). Une politique partagée entre
+  plusieurs applications est signalée avant modification ; la retirer d'une application ne la supprime pas.
+  « Tout le monde » avec « Autoriser » est signalé avant l'enregistrement.
+- Pour attacher ou retirer une politique, CMA relit l'application et la renvoie entière (seuls ses champs calculés
+  sont retirés). Une application qui a encore des politiques legacy n'est pas modifiée de cette façon.
+- Supprimer une application Access rend son nom d'hôte joignable sans authentification s'il est publié : la
+  confirmation le dit. Supprimer un tunnel n'est possible qu'une fois son connecteur arrêté.
 - « Oublier le jeton… » le retire du coffre, après confirmation. Révoquez-le aussi dans le tableau de bord Cloudflare si besoin.
 
 ## Mise à jour de CMA

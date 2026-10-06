@@ -98,7 +98,15 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
 - **Compte Cloudflare** : `/accounts` vide signifie presque toujours qu'il manque « Account Settings : Read ».
   Dans ce cas, le compte est déduit des zones (`accounts_from_zones`, `Account.inferred`) et la vue l'explique.
 - **Politiques Access** : une règle que CMA ne comprend pas devient `PolicyRule("raw")` et repart telle quelle à
-  l'enregistrement ; `exclude` et `require` ne sont jamais modifiés. Ne pas « simplifier » cette conservation.
+  l'enregistrement ; `exclude`, `require` et les champs inconnus (`AccessPolicy.extra`, dont `connection_rules`
+  du RDP) aussi. Ne pas « simplifier » cette conservation.
+- **Politiques réutilisables** : sur un vrai compte, elles le sont toutes (`reusable`, `app_count`). Elles se
+  modifient par `/access/policies/{id}` et s'attachent par un PUT complet de l'application (relue, champs calculés
+  retirés). Cloudflare refuse une politique legacy sur une application nouvelle : `allow_service_token` réutilise
+  ou crée une politique du compte. Le faux serveur reproduit ce modèle ; ne pas revenir à `/apps/{id}/policies`.
+- **Recette sur un vrai compte** : `scripts/cloudflare_recette.py` (lecture seule par défaut). Le classifieur de
+  la session refuse toute écriture sur le compte Cloudflare réel, même jetable : le mode `--ecriture` est lancé
+  par le propriétaire.
 - **Secrets de la 2.3** : « Changer le secret » (`…/rotate`) révoque l'ancien secret chez Cloudflare, d'où la
   confirmation ; le jeton d'un connecteur de tunnel passe par `register_secret` et n'est jamais conservé.
 - **Boîtes modales et tests** : chaque boîte ouverte par la vue Cloudflare passe par une fonction de module

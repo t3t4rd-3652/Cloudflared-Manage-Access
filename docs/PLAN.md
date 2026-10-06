@@ -61,11 +61,17 @@ Restent, côté propriétaire :
 
 ### P2 — Administration Cloudflare plus complète (2.3)
 
+**Ajouts du 2026-10-06** : ménage (renommer et supprimer un tunnel, supprimer une application ou un service
+token), options d'origine d'un nom d'hôte, et `scripts/cloudflare_recette.py` pour la recette sur un vrai compte.
+
 **État au 2026-10-06 : les cinq points sont réalisés** (section « Non publié » du CHANGELOG), avec leurs routes
 dans le faux serveur (`tests/fakes/fake_cfapi.py`), leurs tests d'API, de `cfadmin` et d'interface, et leurs
 traductions. Les appels d'API nouveaux (`…/refresh`, `…/rotate`, `…/connections`, politiques, groupes, création de
-tunnel et `…/token`) ne sont vérifiés que contre le faux serveur : **un essai sur un vrai compte est nécessaire
-avant de publier la 2.3**, avec un jeton qui a les permissions de [SECURITE.md](SECURITE.md).
+tunnel et `…/token`) sont vérifiés contre le faux serveur, et **en lecture** sur un vrai compte (`python
+scripts/cloudflare_recette.py`, réussi le 2026-10-06 : 4 tunnels, 10 politiques réutilisables, 9 applications ;
+les corps de requête calculés ne perdent aucun champ). **Avant de publier la 2.3, le propriétaire lance
+`python scripts/cloudflare_recette.py --ecriture`** (ressources jetables, aucun DNS) : la session de Claude
+Code n'a pas le droit d'écrire sur le compte réel.
 
 Ordre de réalisation suivi : de ce qui évite une panne silencieuse à ce qui ajoute une possibilité.
 
@@ -98,16 +104,19 @@ Ordre de réalisation suivi : de ce qui évite une panne silencieuse à ce qui a
    - Interface : « Modifier le service… » dans le menu d'un nom d'hôte, avec la même validation que la
      publication ; le type de service du profil CMA lié est mis à jour s'il change de schéma.
 
-4. **Politiques Access.**
-   - API : lister, créer, modifier et supprimer les politiques d'une application
-     (`/accounts/{a}/access/apps/{app}/policies[/{id}]`), lister les groupes Access (`/access/groups`).
+4. **Politiques Access.** Revu le 2026-10-06 après lecture du vrai compte : toutes les politiques y sont
+   **réutilisables** (dans le compte, partagées entre applications, certaines avec des `connection_rules` RDP), et
+   Cloudflare refuse une politique legacy sur une application nouvelle.
+   - API : politiques du compte (`/access/policies[/{id}]`, avec `app_count`), attachées à une application par
+     un PUT complet de celle-ci (champ `policies`, liens `{id, precedence}`) ; politiques legacy encore lues et
+     modifiées par `/apps/{app}/policies[/{id}]`. Groupes Access (`/access/groups`, facultatif).
    - Modèle : `AccessPolicy` (nom, décision, règles `include`, `exclude` et `require` brutes) et `PolicyRule`
      simplifiée pour les règles comprises : e-mail, domaine d'e-mail, groupe, service token, tout service token
      valide, tout le monde. Les règles inconnues de CMA sont conservées telles quelles à la modification.
    - Saisie : une entrée par ligne (`alice@exemple.fr`, `@exemple.fr`, `groupe : Admins`, `token : Robot`,
      `tout le monde`), analysée et validée par une fonction pure testée.
-   - Interface : bouton « Politiques… » sur une application Access : liste, ajout, modification, suppression
-     avec confirmation.
+   - Interface : « Politiques… » sur une application (nouvelle, ajouter une existante, modifier, retirer, avec
+     le partage affiché) et « Politiques du compte… » (modifier, supprimer les inutilisées).
 
 5. **Créer un tunnel.**
    - API : `POST /accounts/{a}/cfd_tunnel` (`config_src: cloudflare`, configuration gérée à distance), puis

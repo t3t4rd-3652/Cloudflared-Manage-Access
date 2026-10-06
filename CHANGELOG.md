@@ -11,11 +11,27 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
   (l'ID client et les profils ne changent pas).
 - Tunnels : **État des connecteurs**, avec un diagnostic en clair (aucun connecteur, connexions manquantes,
   reconnexions, versions différentes) et chaque connexion vers Cloudflare.
-- Noms d'hôte publiés : **Modifier le service** cible sans retirer ni republier ; le profil CMA lié suit.
+- Noms d'hôte publiés : **Modifier le service** cible sans retirer ni republier, ainsi que les options
+  d'origine (certificat auto-signé accepté, en-tête Host, nom attendu dans le certificat) ; le profil CMA lié suit.
 - Applications Access : **Politiques**, pour voir et modifier qui y a accès, une règle par ligne (e-mail,
-  domaine, groupe, service token). Les règles que CMA ne sait pas éditer sont conservées.
+  domaine, groupe, service token). Les politiques réutilisables du compte sont gérées comme telles : une
+  politique partagée est signalée avec son nombre d'applications, se modifie dans le compte et se **retire**
+  d'une application sans disparaître des autres ; une politique existante peut être **ajoutée** à une
+  application. Les règles et réglages que CMA ne sait pas éditer (dont les règles de connexion RDP) sont conservés.
+- **Politiques du compte** : toutes les politiques réutilisables, avec le nombre d'applications qui les
+  utilisent ; les inutilisées se suppriment.
 - **Créer un tunnel** depuis CMA, avec la commande d'installation du connecteur (Linux, Windows, Docker) ;
-  le jeton du connecteur est masqué et n'est pas conservé.
+  le jeton du connecteur est masqué et n'est pas conservé. **Renommer** et **supprimer** un tunnel arrêté
+  (ses enregistrements DNS qui le visent sont retirés).
+- Ménage : **supprimer** une application Access ou un service token du compte, après confirmation.
+- `scripts/cloudflare_recette.py` : recette sur un vrai compte, en lecture seule ou, avec `--ecriture`, sur des
+  ressources jetables « cma-essai » supprimées à la fin (aucun DNS).
+
+### Corrigé
+- « Autoriser un service token » et « Publier un service » : Cloudflare refuse désormais une politique propre à
+  une application nouvellement créée. CMA réutilise la politique du compte qui autorise exactement ce token, ou
+  la crée, puis l'attache à l'application.
+- Vue Cloudflare : une actualisation demandée pendant une lecture en cours n'est plus perdue.
 
 ## [2.2.0] - 2026-10-06
 
