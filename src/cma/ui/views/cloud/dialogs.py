@@ -16,11 +16,11 @@ from PySide6.QtWidgets import (
 )
 
 from cma.core.cfadmin import Overview, PublishRequest, PublishResult
-from cma.core.cfapi import AccessApp, Tunnel
+from cma.core.cfapi import AccessApp, IngressRule, Tunnel
 from cma.core.models import ServiceToken
 from cma.i18n import tr
 from cma.ui.icons import app_icon
-from cma.ui.views.cloud.helpers import dialog_buttons, token_durations, tunnel_status_label
+from cma.ui.views.cloud.helpers import dialog_buttons, service_error, token_durations, tunnel_status_label
 from cma.ui.widgets import (
     label,
     title,
@@ -168,8 +168,8 @@ class PublishDialog(QDialog):
             return self._fail(tr("Aucun tunnel ou domaine utilisable dans ce compte."))
         if "." not in hostname or " " in hostname:
             return self._fail(tr("Nom d'hôte invalide : utilisez un nom comme app.exemple.fr"))
-        if "://" not in service and not service.startswith("http_status:"):
-            return self._fail(tr("Service invalide : indiquez un schéma, par exemple tcp://localhost:22"))
+        if problem := service_error(service):
+            return self._fail(problem)
         self.error.hide()
         return PublishRequest(
             tunnel=tunnel,
@@ -187,6 +187,65 @@ class PublishDialog(QDialog):
     def _accept(self) -> None:
         if self.request() is not None:
             self.accept()
+
+
+# --- Modifier le service d'un nom d'hôte publié -------------------------------------------------------------
+
+
+class EditServiceDialog(QDialog):
+    """Changer la cible d'un nom d'hôte publié, sans le retirer puis le republier."""
+
+    def __init__(self, parent: QWidget | None, tunnel: Tunnel, rule: IngressRule) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(tr("Modifier le service"))
+        self.setWindowIcon(app_icon())
+        self.resize(600, 300)
+        self.rule = rule
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.addWidget(title(tr("Modifier le service"), "SectionTitle"))
+        layout.addWidget(label(rule.hostname + rule.path, "mono", selectable=True))
+        layout.addWidget(label(tr("Tunnel : {name}").format(name=tunnel.name), "meta"))
+        form = QFormLayout()
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        self.service = QLineEdit(rule.service)
+        self.service.setAccessibleName(tr("Service"))
+        form.addRow(tr("Service"), self.service)
+        layout.addLayout(form)
+        layout.addWidget(
+            label(
+                tr(
+                    "Le service doit être joignable depuis le connecteur du tunnel. Le nom d'hôte, son "
+                    "enregistrement DNS et sa protection Access ne changent pas."
+                ),
+                "muted",
+                wrap=True,
+            )
+        )
+        self.error = label("", "error", wrap=True)
+        self.error.hide()
+        layout.addWidget(self.error)
+        layout.addStretch()
+        buttons, self.ok_button = dialog_buttons(self, tr("Enregistrer"))
+        self.ok_button.clicked.connect(self._accept)
+        layout.addWidget(buttons)
+        self.service.textChanged.connect(self._refresh)
+        self._refresh()
+
+    def value(self) -> str:
+        return self.service.text().strip()
+
+    def _refresh(self, *_args: object) -> None:
+        self.ok_button.setEnabled(bool(self.value()) and self.value() != self.rule.service)
+
+    def _accept(self) -> None:
+        problem = service_error(self.value())
+        if problem:
+            self.error.setText(problem)
+            self.error.show()
+            return
+        self.accept()
 
 
 # --- D15 — Protéger un nom d'hôte ------------------------------------------------------------------------
@@ -343,6 +402,11 @@ class CreateTokenDialog(QDialog):
 
 
 # Fonctions de module : les tests les remplacent pour ne pas ouvrir de boîte modale.
+
+
+def ask_service(parent: QWidget, tunnel: Tunnel, rule: IngressRule) -> str | None:
+    dialog = EditServiceDialog(parent, tunnel, rule)
+    return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
 
 
 def ask_protect(parent: QWidget, hostnames: list[str]) -> str | None:

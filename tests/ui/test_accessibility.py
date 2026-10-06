@@ -66,6 +66,7 @@ def test_dialogs_have_no_unnamed_control(qtbot, gui, tmp_path):
         cloud.ProtectDialog(window, ["a.exemple.fr"]),
         cloud.AllowDialog(window, app, [token]),
         cloud.CreateTokenDialog(window, "Compte", persistent=True),
+        cloud.EditServiceDialog(window, tunnel, IngressRule("a.exemple.fr", "tcp://localhost:22")),
         cloud.ConnectorsDialog(
             window,
             tunnel,

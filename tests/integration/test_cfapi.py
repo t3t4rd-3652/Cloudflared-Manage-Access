@@ -12,6 +12,7 @@ from cma.core.cfapi import (
     Account,
     CloudflareApi,
     CloudflareApiError,
+    IngressRule,
     Tunnel,
     guess_service_from_ingress,
 )
@@ -184,6 +185,34 @@ async def test_admin_finds_the_account_through_zones(store, secrets):
         ):
             await admin_for(server).connect(TOKEN)
         assert secrets.get(TOKEN_SECRET_KEY) is None
+
+
+async def test_edit_a_published_hostname(cf, api, admin, store):
+    bureau = Tunnel("t1", "bureau", "healthy")
+    cf.state.configs["t1"]["ingress"][2]["originRequest"] = {"noTLSVerify": True}
+    rule = api.update_hostname_service("acc1", bureau, "grafana.exemple.fr", "https://localhost:3443")
+    assert (rule.hostname, rule.service) == ("grafana.exemple.fr", "https://localhost:3443")
+    grafana = cf.state.configs["t1"]["ingress"][2]
+    assert grafana == {
+        "hostname": "grafana.exemple.fr",
+        "service": "https://localhost:3443",
+        "originRequest": {"noTLSVerify": True},
+    }
+    assert len(cf.state.configs["t1"]["ingress"]) == 4  # rien d'ajouté ni de retiré
+    with pytest.raises(CloudflareApiError, match="n'est pas publié"):
+        api.update_hostname_service("acc1", bureau, "absent.exemple.fr", "tcp://localhost:1")
+
+    # Le profil CMA lié suit le changement de type de service ; son port local est gardé.
+    await admin.connect(TOKEN)
+    [profile] = admin.import_profiles([(bureau, IngressRule("rdp.exemple.fr", "rdp://10.0.0.5:3389"))])
+    assert profile.service_type == ServiceType.RDP
+    await admin.edit_hostname(bureau, "rdp.exemple.fr", "ssh://10.0.0.5:22")
+    edited = store.snapshot().cloudflare_profile(profile.id)
+    assert edited.service_type == ServiceType.SSH and edited.local_port == profile.local_port
+    await admin.edit_hostname(
+        bureau, "rdp.exemple.fr", "tcp://10.0.0.5:22"
+    )  # schéma sans type : profil inchangé
+    assert store.snapshot().cloudflare_profile(profile.id).service_type == ServiceType.SSH
 
 
 async def test_tunnel_connectors(api, admin):

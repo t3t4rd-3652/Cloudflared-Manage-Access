@@ -74,6 +74,7 @@ from cma.ui.views.cloud.dialogs import (
     ask_allow,
     ask_create_token,
     ask_protect,
+    ask_service,
     publish_summary,
 )
 from cma.ui.views.cloud.helpers import (
@@ -779,6 +780,10 @@ class CloudView(QWidget):
                     tr("Ouvrir dans le navigateur"),
                     lambda: QDesktopServices.openUrl(QUrl(f"https://{rule.hostname}{rule.path}")),
                 )
+            parent = item.parent()
+            owner = parent.data(0, TUNNEL_ROLE) if parent is not None else None
+            if isinstance(owner, Tunnel):
+                menu.addAction(tr("Modifier le service…"), lambda: self.edit_service(owner, rule))
             menu.addSeparator()
             menu.addAction(tr("Retirer ce nom d'hôte…"), self.unpublish_selected)
         elif isinstance(tunnel, Tunnel):
@@ -788,6 +793,24 @@ class CloudView(QWidget):
             menu.addAction(tr("État des connecteurs…"), lambda: self.check_connectors(tunnel))
         menu.exec(self.tree.viewport().mapToGlobal(pos))
         menu.deleteLater()
+
+    def edit_service(self, tunnel: Tunnel, rule: IngressRule) -> None:
+        """Change la cible d'un nom d'hôte publié (même nom, même DNS, même protection Access)."""
+        service = ask_service(self, tunnel, rule)
+        if not service:
+            return
+        self.status.setText(tr("Modification du service…"))
+
+        def done(updated: IngressRule) -> None:
+            self.ctx.notify(
+                "success",
+                tr("{host} pointe désormais vers {service}.").format(
+                    host=updated.hostname, service=updated.service
+                ),
+            )
+            self.refresh()
+
+        self.ctx.run(self.admin.edit_hostname(tunnel, rule.hostname, service), done, self._error)
 
     def check_connectors(self, tunnel: Tunnel) -> None:
         """Lit les connecteurs du tunnel puis affiche le diagnostic et les connexions vers Cloudflare."""

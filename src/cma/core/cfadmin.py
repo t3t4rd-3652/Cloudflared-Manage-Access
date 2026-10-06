@@ -379,6 +379,29 @@ class CloudflareAdmin:
                 steps.append(PublishStep("profile", False, str(exc)))
         return PublishResult(rule, app, profile, tuple(steps))
 
+    async def edit_hostname(self, tunnel: Tunnel, hostname: str, service: str) -> IngressRule:
+        """Change le service publié pour `hostname`. Le profil CMA lié suit si le type de service change
+        (ssh:// → rdp://…) ; son port local est gardé."""
+        api = self.api()
+        rule = await asyncio.to_thread(
+            api.update_hostname_service, self.account_id(), tunnel, hostname, service
+        )
+        scheme, _port = guess_service_from_ingress(service)
+        kind = _SCHEME_TYPES.get(scheme)
+        if kind is not None:
+
+            def apply(config: Config) -> None:
+                for profile in config.cloudflare_profiles:
+                    if profile.hostname == hostname and profile.service_type != kind:
+                        profile.service_type = kind
+
+            if any(
+                p.hostname == hostname and p.service_type != kind
+                for p in self.store.snapshot().cloudflare_profiles
+            ):
+                self.store.update(apply)
+        return rule
+
     async def unpublish(self, tunnel: Tunnel, hostname: str) -> None:
         api = self.api()
         await asyncio.to_thread(api.unpublish_hostname, self.account_id(), tunnel, hostname)

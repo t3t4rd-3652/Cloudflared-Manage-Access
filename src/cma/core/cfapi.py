@@ -326,6 +326,26 @@ class CloudflareApi:
         self.ensure_cname(zone, hostname, tunnel.cname_target)
         return IngressRule(hostname, service)
 
+    def update_hostname_service(
+        self, account_id: str, tunnel: Tunnel, hostname: str, service: str
+    ) -> IngressRule:
+        """Change le service d'un nom d'hôte déjà publié. Les autres clés de la règle (`path`, `originRequest`)
+        sont gardées ; le DNS ne change pas."""
+        config = self.tunnel_config(account_id, tunnel.id)
+        ingress = cast(list[dict[str, Any]], config.get("ingress") or [])
+        rule = next((r for r in ingress if r.get("hostname") == hostname), None)
+        if rule is None:
+            raise CloudflareApiError(
+                tr("{host} n'est pas publié sur le tunnel {tunnel}.").format(
+                    host=hostname, tunnel=tunnel.name
+                )
+            )
+        rule["service"] = service
+        self._result(
+            "PUT", f"/accounts/{account_id}/cfd_tunnel/{tunnel.id}/configurations", body={"config": config}
+        )
+        return IngressRule(hostname, service, str(rule.get("path", "")))
+
     def unpublish_hostname(self, account_id: str, tunnel: Tunnel, hostname: str) -> None:
         """Retire `hostname` du tunnel. L'enregistrement DNS est supprimé s'il vise encore ce tunnel."""
         config = self.tunnel_config(account_id, tunnel.id)

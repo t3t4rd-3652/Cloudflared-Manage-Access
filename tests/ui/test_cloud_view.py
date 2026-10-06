@@ -13,6 +13,7 @@ from cma.ui.views.cloud import (
     CloudView,
     ConnectorsDialog,
     CreateTokenDialog,
+    EditServiceDialog,
     ProtectDialog,
     PublishDialog,
 )
@@ -158,6 +159,39 @@ def test_cloud_view_checks_tunnel_connectors(qtbot, gui, cf, monkeypatch):
     assert healthy.table.item(0, 4).text() == "CDG01"
     empty = ConnectorsDialog(view, tunnel, [])
     assert empty.table.isHidden() and empty.findings[0].level == "error"
+
+
+def test_cloud_view_edits_a_published_service(qtbot, gui, cf, monkeypatch):
+    ctx, window = gui
+    ctx.core.manager.cloudflare.base_url = cf.base_url
+    window.show_view("cloud")
+    view = window.cloud
+    view.token_field.set_text(TOKEN)
+    view.connect_account()
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+    bureau = view.tree.topLevelItem(0)
+    tunnel = bureau.data(0, cloud_module.TUNNEL_ROLE)
+    rule = bureau.child(0).data(0, cloud_module.RULE_ROLE)
+    assert rule.hostname == "ssh.exemple.fr"
+
+    monkeypatch.setattr(cloud_module, "ask_service", lambda *_a: None)
+    view.edit_service(tunnel, rule)  # annulé : rien n'est envoyé
+    assert not any(method == "PUT" for method, _ in cf.state.requests)
+    monkeypatch.setattr(cloud_module, "ask_service", lambda *_a: "ssh://localhost:2222")
+    view.edit_service(tunnel, rule)
+    qtbot.waitUntil(
+        lambda: cf.state.configs["t1"]["ingress"][0]["service"] == "ssh://localhost:2222", timeout=10000
+    )
+
+    dialog = EditServiceDialog(view, tunnel, rule)
+    assert not dialog.ok_button.isEnabled()  # service inchangé
+    dialog.service.setText("localhost:22")
+    assert dialog.ok_button.isEnabled()
+    dialog._accept()
+    assert "schéma" in dialog.error.text() and dialog.result() == 0
+    dialog.service.setText("tcp://localhost:22")
+    dialog._accept()
+    assert dialog.result() == 1 and dialog.value() == "tcp://localhost:22"
 
 
 def test_cloud_view_reports_api_errors(qtbot, gui, cf):

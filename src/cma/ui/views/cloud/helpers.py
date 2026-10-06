@@ -82,6 +82,13 @@ def dialog_buttons(dialog: QDialog, action: str) -> tuple[QDialogButtonBox, QPus
     return buttons, ok
 
 
+def service_error(service: str) -> str | None:
+    """Message d'erreur si le service publié n'a pas de schéma (tcp://, ssh://, http://…), sinon None."""
+    if "://" not in service and not service.startswith("http_status:"):
+        return tr("Service invalide : indiquez un schéma, par exemple tcp://localhost:22")
+    return None
+
+
 def data_table(headers: list[str], name: str) -> QTableWidget:
     table = QTableWidget(0, len(headers))
     table.setAccessibleName(name)
