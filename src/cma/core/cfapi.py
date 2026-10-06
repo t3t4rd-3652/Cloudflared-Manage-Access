@@ -619,8 +619,19 @@ class CloudflareApi:
         return _created_token(result, name)
 
     def delete_service_token(self, account_id: str, token_id: str) -> None:
-        """Le token est révoqué aussitôt : les accès qui l'utilisent sont refusés."""
+        """Le token est révoqué aussitôt. Cloudflare refuse (code 12139) tant qu'une politique le référence."""
         self._result("DELETE", f"/accounts/{account_id}/access/service_tokens/{token_id}")
+
+    def policies_using_token(self, account_id: str, token_id: str) -> list[AccessPolicy]:
+        """Politiques du compte qui citent ce token, dans « include », « exclude » ou « require »."""
+        wanted = {"service_token": {"token_id": token_id}}
+        return [
+            p
+            for p in self.list_account_policies(account_id)
+            if PolicyRule("service_token", token_id) in p.include
+            or wanted in p.exclude
+            or wanted in p.require
+        ]
 
     def refresh_service_token(self, account_id: str, token_id: str) -> str:
         """Repousse l'échéance du token d'une durée (même secret, aucune coupure). Renvoie la nouvelle échéance."""

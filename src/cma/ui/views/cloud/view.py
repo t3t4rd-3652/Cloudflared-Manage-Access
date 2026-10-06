@@ -1109,7 +1109,10 @@ class CloudView(QWidget):
         if remote is None:
             return
         local = self._local_token(remote)
-        text = tr("Cloudflare révoque le token aussitôt : les accès qui l'utilisent sont refusés.")
+        text = tr(
+            "Cloudflare révoque le token aussitôt : les accès qui l'utilisent sont refusés. Les politiques "
+            "inutilisées qui ne servaient qu'à lui sont supprimées avec lui."
+        )
         if local is not None:
             text += " " + tr("Sa copie dans CMA reste dans la vue Service tokens, à supprimer à part.")
         if not confirm(
@@ -1121,8 +1124,13 @@ class CloudView(QWidget):
             return
         self.status.setText(tr("Suppression du service token…"))
 
-        def done(_result: object) -> None:
-            self.ctx.notify("success", tr("Service token « {name} » supprimé.").format(name=remote.name))
+        def done(policies: list[str]) -> None:
+            text = tr("Service token « {name} » supprimé.").format(name=remote.name)
+            if policies:
+                text += " " + tr("Politique(s) supprimée(s) avec lui : {names}.").format(
+                    names=", ".join(policies)
+                )
+            self.ctx.notify("success", text)
             self.refresh()
 
         self.ctx.run(self.admin.delete_remote_token(remote), done, self._error)

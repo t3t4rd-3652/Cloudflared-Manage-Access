@@ -367,8 +367,21 @@ async def test_cleanup_tunnels_apps_and_tokens(cf, admin):
     assert cf.state.apps == []
     token = await admin.create_service_token("Robot")
     [remote] = api.list_service_tokens("acc1")
-    await admin.delete_remote_token(remote)
-    assert cf.state.service_tokens == [] and admin.store.snapshot().token(token.id) is not None
+    other = api.create_access_app("acc1", "Base", "db.exemple.fr")
+    await admin.allow_token(other, token.id)  # crée la politique « CMA - Robot », attachée à « Base »
+
+    # Cité par une politique encore utilisée : Cloudflare refuserait, CMA le dit avant et ne supprime rien.
+    with pytest.raises(CloudflareApiError, match="CMA - Robot"):
+        await admin.delete_remote_token(remote)
+    assert len(cf.state.service_tokens) == 1 and len(cf.state.account_policies) == 1
+    with pytest.raises(CloudflareApiError, match="service_token_in_use"):
+        api.delete_service_token("acc1", remote.id)  # le faux serveur refuse comme Cloudflare
+
+    # Une fois l'application supprimée, la politique ne sert plus qu'au token : elle part avec lui.
+    await admin.delete_app(other)
+    assert await admin.delete_remote_token(remote) == ["CMA - Robot"]
+    assert cf.state.service_tokens == [] and cf.state.account_policies == []
+    assert admin.store.snapshot().token(token.id) is not None  # la copie dans CMA reste
 
 
 async def test_create_a_tunnel(cf, admin):

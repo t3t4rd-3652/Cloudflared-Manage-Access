@@ -37,7 +37,7 @@ from cma.core.models import (
     guess_service_type,
     unique_name,
 )
-from cma.core.policies import AccessGroup, AccessPolicy
+from cma.core.policies import AccessGroup, AccessPolicy, PolicyRule
 from cma.core.redact import register_secret
 from cma.core.secrets import SecretStore
 from cma.i18n import tr
@@ -465,10 +465,32 @@ class CloudflareAdmin:
         api = self.api()
         await asyncio.to_thread(api.delete_access_app, self.account_id(), app.id)
 
-    async def delete_remote_token(self, remote: RemoteServiceToken) -> None:
-        """Révoque le token chez Cloudflare. Sa copie dans CMA, si elle existe, reste à supprimer à part."""
+    async def delete_remote_token(self, remote: RemoteServiceToken) -> list[str]:
+        """Révoque le token chez Cloudflare et renvoie le nom des politiques supprimées avec lui.
+
+        Cloudflare refuse de supprimer un token cité par une politique. Les politiques inutilisées qui ne servent
+        qu'à ce token (celles que « Autoriser un service token » crée) partent avec lui ; s'il est cité ailleurs,
+        rien n'est supprimé et le message nomme les politiques à revoir. Sa copie dans CMA reste à part."""
         api = self.api()
-        await asyncio.to_thread(api.delete_service_token, self.account_id(), remote.id)
+        account = self.account_id()
+        only_this = (PolicyRule("service_token", remote.id),)
+
+        def run() -> list[str]:
+            users = api.policies_using_token(account, remote.id)
+            blocking = [p for p in users if p.app_count or p.include != only_this or p.exclude or p.require]
+            if blocking:
+                raise CloudflareApiError(
+                    tr(
+                        "Le token « {name} » est encore cité par : {policies}. Retirez-le de ces politiques (ou "
+                        "retirez-les de leurs applications), ou changez son secret pour couper les accès."
+                    ).format(name=remote.name, policies=", ".join(p.name for p in blocking))
+                )
+            for policy in users:
+                api.delete_account_policy(account, policy.id)
+            api.delete_service_token(account, remote.id)
+            return [p.name for p in users]
+
+        return await asyncio.to_thread(run)
 
     async def protect_hostname(self, hostname: str) -> AccessApp:
         """Application Access « self-hosted » pour ce nom d'hôte ; l'existante est réutilisée."""

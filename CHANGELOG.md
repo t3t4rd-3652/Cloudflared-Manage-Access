@@ -32,6 +32,9 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
   une application nouvellement créée. CMA réutilise la politique du compte qui autorise exactement ce token, ou
   la crée, puis l'attache à l'application.
 - Vue Cloudflare : une actualisation demandée pendant une lecture en cours n'est plus perdue.
+- Supprimer un service token : Cloudflare refuse tant qu'une politique le cite. Les politiques inutilisées qui ne
+  servent qu'à ce token (celles créées par « Autoriser un service token ») sont supprimées avec lui ; sinon, le
+  message nomme les politiques à revoir.
 
 ## [2.2.0] - 2026-10-06
 

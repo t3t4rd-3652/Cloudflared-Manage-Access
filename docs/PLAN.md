@@ -73,6 +73,13 @@ les corps de requête calculés ne perdent aucun champ). **Avant de publier la 2
 `python scripts/cloudflare_recette.py --ecriture`** (ressources jetables, aucun DNS) : la session de Claude
 Code n'a pas le droit d'écrire sur le compte réel.
 
+**Recette en écriture du 2026-10-06 (lancée par le propriétaire)** : toutes les fonctions réussissent sur le vrai
+compte (création, renommage et suppression de tunnel, service et options d'origine, politiques réutilisables
+créées, modifiées, retirées et remises, token autorisé, prolongé, secret changé). Seul le nettoyage a échoué :
+Cloudflare refuse de supprimer un token cité par une politique (code 12139). Corrigé le même jour ; reste à
+relancer `python scripts/cloudflare_recette.py --ecriture`, qui commence par supprimer les restes de la première
+recette (le token `cma-essai` et la politique `CMA - cma-essai`).
+
 Ordre de réalisation suivi : de ce qui évite une panne silencieuse à ce qui ajoute une possibilité.
 
 1. **Expiration des service tokens.**

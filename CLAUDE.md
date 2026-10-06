@@ -143,6 +143,9 @@ Tests et CI :
 
 Réseau et bibliothèques :
 
+- Cloudflare refuse de supprimer un service token cité par une politique (400, code 12139) : supprimer d'abord
+  les politiques qui le citent. Les erreurs de l'API ne se découvrent souvent qu'avec la recette sur un vrai compte.
+
 - `asyncssh.ChannelListenError` n'hérite pas de `asyncssh.Error` : l'attraper explicitement.
 - Une `SSLError` peut ne pas avoir d'attribut `reason` : `getattr(error, "reason", None)`.
 

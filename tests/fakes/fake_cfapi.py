@@ -346,6 +346,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             token = next((t for t in state.service_tokens if t["id"] == m.group(2)), None)
             if token is None:
                 return self._error(404, 12002, "access.api.error.service_token_not_found")
+            cited = {"service_token": {"token_id": token["id"]}}
+            everywhere = [*state.account_policies, *(p for legacy in state.policies.values() for p in legacy)]
+            if any(cited in p.get(k, []) for p in everywhere for k in ("include", "exclude", "require")):
+                return self._error(
+                    400,
+                    12139,
+                    "access.api.error.service_token_in_use: cannot delete service token because it is used by a "
+                    "policy, group, or app SCIM configuration. remove all references to it and try again, or "
+                    "rotate the service token to invalidate existing clients",
+                )
             state.service_tokens.remove(token)
             return self._send(200, _ok({"id": token["id"]}))
         if m := re.fullmatch(r"/accounts/(\w+)/access/service_tokens/(\w+)/(refresh|rotate)", path):
