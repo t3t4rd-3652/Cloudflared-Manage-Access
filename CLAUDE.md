@@ -91,7 +91,7 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   `config.json`, masqués dans les journaux. Coffre système (keyring) ou fichier chiffré en mode portable.
 - **Démarrage** : asyncssh et cryptography sont importés à la demande (`cma.core.ssh._lazy`) puis préchargés après
   l'affichage ; le budget CI est de 6 s.
-- **Tunnels en cartes** (`TunnelTree` et `TunnelDelegate` dans `ui/views/cloud.py`) : le `QTreeWidget` reste le
+- **Tunnels en cartes** (`TunnelTree` et `TunnelDelegate` dans `ui/views/cloud/cards.py`) : le `QTreeWidget` reste le
   modèle de données et de sélection (menu contextuel, import, retrait et tests s'appuient dessus) ; seul le rendu
   change. Les colonnes 1 et 2 sont masquées mais gardent service et état pour l'accessibilité et les tests.
 - **Compte Cloudflare** : `/accounts` vide signifie presque toujours qu'il manque « Account Settings : Read ».

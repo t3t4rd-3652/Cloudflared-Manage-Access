@@ -125,9 +125,11 @@ def test_ssh_view_full_flow(qtbot, ssh_gui, threaded_ssh_server, monkeypatch):
     forwards._stop_all()
     forwards.table.selectRow(0)
     forwards._edit()
-    import cma.ui.views.ssh as ssh_module
+    import cma.ui.views.ssh.forwards_tab as forwards_module
+    import cma.ui.views.ssh.view as ssh_module
 
-    monkeypatch.setattr(ssh_module, "confirm", lambda *_a: True)
+    for module in (forwards_module, ssh_module):
+        monkeypatch.setattr(module, "confirm", lambda *_a: True)
     forwards._remove()
     qtbot.waitUntil(lambda: not ctx.config().ssh_profile(profile_id).saved_forwards, timeout=5000)
 

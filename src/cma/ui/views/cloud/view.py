@@ -7,18 +7,11 @@ créer un service token directement rangé dans le coffre de CMA (D14 à D17).
 
 from __future__ import annotations
 
-import urllib.error
 from collections.abc import Callable
 from datetime import datetime
 
 from PySide6.QtCore import (
-    QModelIndex,
-    QPersistentModelIndex,
     QPoint,
-    QPointF,
-    QRect,
-    QRectF,
-    QSize,
     Qt,
     QUrl,
     Signal,
@@ -27,38 +20,21 @@ from PySide6.QtGui import (
     QBrush,
     QColor,
     QDesktopServices,
-    QFont,
-    QFontMetrics,
     QKeySequence,
-    QMouseEvent,
-    QPainter,
-    QPen,
     QShowEvent,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QCheckBox,
     QComboBox,
-    QCompleter,
     QDialog,
-    QDialogButtonBox,
-    QFormLayout,
     QFrame,
     QGridLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
-    QLineEdit,
     QMenu,
-    QPushButton,
     QStackedWidget,
-    QStyle,
-    QStyledItemDelegate,
-    QStyleOptionViewItem,
-    QTableWidget,
     QTableWidgetItem,
     QTabWidget,
-    QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -70,9 +46,34 @@ from cma.core.models import CloudflareProfile, ServiceToken
 from cma.i18n import tr
 from cma.ui.context import GuiContext
 from cma.ui.format import last_read
-from cma.ui.icons import app_icon, icon, set_glyph, token_icon
+from cma.ui.icons import set_glyph, token_icon
 from cma.ui.state import remember_header
 from cma.ui.theme import current_tokens, mono_font, status_colors
+from cma.ui.views.cloud.cards import (
+    PROFILE_ROLE,
+    PROTECTED_ROLE,
+    RULE_ROLE,
+    TUNNEL_ROLE,
+    StatTile,
+    TunnelTree,
+    service_icon,
+)
+from cma.ui.views.cloud.dialogs import (
+    PublishDialog,
+    ask_allow,
+    ask_create_token,
+    ask_protect,
+    publish_summary,
+)
+from cma.ui.views.cloud.helpers import (
+    app_type_label,
+    data_table,
+    describe_api_error,
+    expiry_label,
+    expiry_status,
+    plural,
+    tunnel_state,
+)
 from cma.ui.views.common import confirm
 from cma.ui.widgets import (
     EmptyState,
@@ -86,450 +87,6 @@ from cma.ui.widgets import (
     title,
 )
 
-TUNNEL_ROLE = 256
-RULE_ROLE = 257
-PROTECTED_ROLE = 258
-PROFILE_ROLE = 259
-
-# Géométrie des cartes de tunnel.
-CARD_GAP = 12
-CARD_RADIUS = 10.0
-CARD_PADDING = 8
-HEADER_HEIGHT = 62
-HOST_HEIGHT = 44
-TEXT_LEFT = 88
-CHEVRON_ZONE = 36
-
-
-def token_durations() -> list[tuple[str, str]]:
-    """Durées proposées, au format de l'API Cloudflare (« 8760h ») ; 1 an est la valeur par défaut de l'API."""
-    return [(tr("1 an"), "8760h"), (tr("2 ans"), "17520h"), (tr("3 ans"), "26280h"), (tr("6 mois"), "4380h")]
-
-
-def plural(n: int, one: str, many: str) -> str:
-    return (one if n <= 1 else many).format(n=n)
-
-
-def tunnel_state(status: str) -> tuple[str, str, str]:
-    """(libellé, ton, symbole) de l'état d'un tunnel donné par l'API."""
-    return {
-        "healthy": (tr("En ligne"), "success", "✓"),
-        "degraded": (tr("Dégradé"), "warning", "!"),
-        "down": (tr("Hors ligne"), "danger", "×"),
-        "inactive": (tr("Inactif"), "neutral", "■"),
-    }.get(status, (status, "neutral", "■"))
-
-
-def tunnel_status_label(status: str) -> str:
-    return tunnel_state(status)[0]
-
-
-def app_type_label(kind: str) -> str:
-    known = {"self_hosted": "Self-hosted", "ssh": "SSH", "vnc": "VNC", "rdp": "RDP", "saas": "SaaS"}
-    return known.get(kind, kind.replace("_", " ").capitalize())
-
-
-def expiry_label(value: str) -> str:
-    try:
-        return datetime.fromisoformat(value[:10]).strftime("%d/%m/%Y")
-    except ValueError:
-        return value or "—"
-
-
-def expiry_status(value: str) -> str | None:
-    """Teinte de la date d'expiration : « danger » si dépassée, « warning » à moins de 30 jours."""
-    try:
-        expires = datetime.fromisoformat(value[:10])
-    except ValueError:
-        return None
-    days = (expires - datetime.now()).days
-    return "danger" if days < 0 else "warning" if days < 30 else None
-
-
-def describe_api_error(error: BaseException) -> str:
-    """Refus de l'API, réseau injoignable ou autre erreur : jamais tout confondre avec un 401 (§4.6)."""
-    if isinstance(error, CloudflareApiError):
-        if error.status in (401, 403):
-            return tr("L'API a refusé la demande. Vérifiez le jeton et ses permissions.") + f" ({error})"
-        if error.status is None and isinstance(error.__cause__, (urllib.error.URLError, OSError)):
-            return tr("Impossible de joindre l'API Cloudflare.") + f" ({error})"
-    return str(error)
-
-
-def _dialog_buttons(dialog: QDialog, action: str) -> tuple[QDialogButtonBox, QPushButton]:
-    buttons = QDialogButtonBox()
-    buttons.addButton(tr("Annuler"), QDialogButtonBox.ButtonRole.RejectRole)
-    ok = buttons.addButton(action, QDialogButtonBox.ButtonRole.AcceptRole)
-    ok.setProperty("role", "primary")
-    buttons.rejected.connect(dialog.reject)
-    return buttons, ok
-
-
-def _table(headers: list[str], name: str) -> QTableWidget:
-    table = QTableWidget(0, len(headers))
-    table.setAccessibleName(name)
-    table.setHorizontalHeaderLabels(headers)
-    table.verticalHeader().hide()
-    table.verticalHeader().setDefaultSectionSize(36)
-    table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-    table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-    table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-    table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-    table.horizontalHeader().setStretchLastSection(True)
-    return table
-
-
-# --- D14 — Publier un service ------------------------------------------------------------------------------
-
-
-class PublishDialog(QDialog):
-    """Nom d'hôte → service du réseau privé, via un tunnel, protégé par Access (§4.22)."""
-
-    def __init__(
-        self,
-        parent: QWidget | None,
-        overview: Overview,
-        tokens: list[ServiceToken],
-        tunnel: Tunnel | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(tr("Publier un service"))
-        self.setWindowIcon(app_icon())
-        self.setMinimumWidth(560)
-        self.resize(760, 560)
-        self.overview = overview
-        self.zone_names = sorted((z.name for z in overview.zones), key=lambda n: (-len(n), n))
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        layout.addWidget(title(tr("Publier un service"), "SectionTitle"))
-        layout.addWidget(
-            label(tr("Le service doit être joignable depuis le connecteur du tunnel."), "muted", wrap=True)
-        )
-        form = QFormLayout()
-        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        self.tunnel = QComboBox()
-        self.tunnel.setAccessibleName(tr("Tunnel"))
-        for view in sorted(overview.tunnels, key=lambda v: v.tunnel.name.lower()):
-            self.tunnel.addItem(
-                f"{view.tunnel.name} — {tunnel_status_label(view.tunnel.status)}", view.tunnel
-            )
-            if tunnel is not None and view.tunnel.id == tunnel.id:
-                self.tunnel.setCurrentIndex(self.tunnel.count() - 1)
-        form.addRow(tr("Tunnel"), self.tunnel)
-        host_row = QHBoxLayout()
-        self.hostname = QLineEdit()
-        self.hostname.setPlaceholderText("mongodb")
-        self.hostname.setAccessibleName(tr("Nom d'hôte"))
-        self.zone = QComboBox()
-        self.zone.setAccessibleName(tr("Domaine"))
-        for name in sorted(self.zone_names):
-            self.zone.addItem(name, name)
-        host_row.addWidget(self.hostname, 3)
-        host_row.addWidget(label("."))
-        host_row.addWidget(self.zone, 2)
-        form.addRow(tr("Nom d'hôte · Domaine"), host_row)
-        self.service = QLineEdit()
-        self.service.setPlaceholderText("tcp://localhost:27017")
-        self.service.setAccessibleName(tr("Service"))
-        form.addRow(tr("Service"), self.service)
-        form.addRow(
-            label(
-                tr("Exemples : tcp://localhost:22, rdp://10.0.0.5:3389, http://localhost:8080"),
-                "muted",
-                wrap=True,
-            )
-        )
-        self.protect = QCheckBox(tr("Protéger par Cloudflare Access"))
-        self.protect.setChecked(True)
-        form.addRow(self.protect)
-        self.token = QComboBox()
-        self.token.setAccessibleName(tr("Service token autorisé"))
-        self.token.addItem(tr("Aucun service token"), None)
-        for token in sorted(tokens, key=lambda t: t.name.lower()):
-            self.token.addItem(token.name, token.id)
-        form.addRow(tr("Service token autorisé"), self.token)
-        if not tokens:
-            form.addRow(
-                label(
-                    tr(
-                        "Créez un service token dans l'onglet Service tokens, puis revenez publier ce service."
-                    ),
-                    "muted",
-                    wrap=True,
-                )
-            )
-        self.create_profile = QCheckBox(tr("Créer le profil CMA correspondant"))
-        self.create_profile.setChecked(True)
-        form.addRow(self.create_profile)
-        layout.addLayout(form)
-        layout.addStretch()
-        self.summary = label("", "mono", wrap=True, selectable=True)
-        layout.addWidget(self.summary)
-        self.error = label("", "error", wrap=True)
-        self.error.hide()
-        layout.addWidget(self.error)
-        buttons, self.ok_button = _dialog_buttons(self, tr("Publier"))
-        self.ok_button.setAutoDefault(False)
-        self.ok_button.clicked.connect(self._accept)
-        layout.addWidget(buttons)
-        self.protect.toggled.connect(self.token.setEnabled)
-        self.hostname.textEdited.connect(self._split_fqdn)
-        for signal in (self.hostname.textChanged, self.service.textChanged):
-            signal.connect(self._refresh)
-        for combo in (self.tunnel, self.zone):
-            combo.currentIndexChanged.connect(self._refresh)
-        if not overview.tunnels or not overview.zones:
-            self._fail(tr("Aucun tunnel ou domaine utilisable dans ce compte."))
-        self._refresh()
-
-    def _split_fqdn(self, text: str) -> None:
-        """Nom complet collé : répartition seulement si le suffixe correspond à un domaine du compte."""
-        value = text.strip().lower().rstrip(".")
-        for zone in self.zone_names:  # le plus long d'abord : lab.exemple.fr avant exemple.fr
-            if value.endswith("." + zone):
-                self.zone.setCurrentIndex(self.zone.findData(zone))
-                self.hostname.setText(value.removesuffix("." + zone))
-                return
-
-    def full_hostname(self) -> str:
-        text = self.hostname.text().strip().lower().rstrip(".")
-        if not text:
-            return ""
-        if any(text == zone or text.endswith("." + zone) for zone in self.zone_names):
-            return text
-        zone = self.zone.currentData()
-        return f"{text}.{zone}" if zone else text
-
-    def _refresh(self, *_args: object) -> None:
-        tunnel = self.tunnel.currentData()
-        host = self.full_hostname() or "?"
-        service = self.service.text().strip() or "?"
-        via = tunnel.name if isinstance(tunnel, Tunnel) else "?"
-        self.summary.setText(
-            tr("Résumé : {host} → {service} via {tunnel}").format(host=host, service=service, tunnel=via)
-        )
-        self.ok_button.setEnabled(
-            isinstance(tunnel, Tunnel)
-            and bool(self.hostname.text().strip())
-            and bool(self.service.text().strip())
-        )
-
-    def request(self) -> PublishRequest | None:
-        tunnel = self.tunnel.currentData()
-        hostname = self.full_hostname()
-        service = self.service.text().strip()
-        if not isinstance(tunnel, Tunnel):
-            return self._fail(tr("Aucun tunnel ou domaine utilisable dans ce compte."))
-        if "." not in hostname or " " in hostname:
-            return self._fail(tr("Nom d'hôte invalide : utilisez un nom comme app.exemple.fr"))
-        if "://" not in service and not service.startswith("http_status:"):
-            return self._fail(tr("Service invalide : indiquez un schéma, par exemple tcp://localhost:22"))
-        self.error.hide()
-        return PublishRequest(
-            tunnel=tunnel,
-            hostname=hostname,
-            service=service,
-            protect=self.protect.isChecked(),
-            token_id=self.token.currentData() if self.protect.isChecked() else None,
-            create_profile=self.create_profile.isChecked(),
-        )
-
-    def _fail(self, message: str) -> None:
-        self.error.setText(message)
-        self.error.show()
-
-    def _accept(self) -> None:
-        if self.request() is not None:
-            self.accept()
-
-
-# --- D15 — Protéger un nom d'hôte ------------------------------------------------------------------------
-
-
-class ProtectDialog(QDialog):
-    """Application Access « self-hosted » pour un nom d'hôte ; aucune règle d'accès n'est ajoutée (§4.23)."""
-
-    def __init__(self, parent: QWidget | None, hostnames: list[str]) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(tr("Protéger un nom d'hôte"))
-        self.setWindowIcon(app_icon())
-        self.resize(600, 340)
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        layout.addWidget(title(tr("Protéger un nom d'hôte"), "SectionTitle"))
-        form = QFormLayout()
-        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        self.hostname = QLineEdit()
-        self.hostname.setPlaceholderText("mongodb.exemple.fr")
-        self.hostname.setAccessibleName(tr("Nom d'hôte"))
-        completer = QCompleter(sorted(hostnames), self)
-        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self.hostname.setCompleter(completer)
-        form.addRow(tr("Nom d'hôte"), self.hostname)
-        layout.addLayout(form)
-        layout.addWidget(
-            label(
-                tr(
-                    "Une application Cloudflare Access sera créée pour ce nom d'hôte ; si elle existe déjà, "
-                    "elle est réutilisée. Aucune règle d'accès n'est ajoutée : autorisez ensuite un service token."
-                ),
-                "muted",
-                wrap=True,
-            )
-        )
-        self.app_name = label("", wrap=True, selectable=True)
-        layout.addWidget(self.app_name)
-        layout.addStretch()
-        buttons, self.ok_button = _dialog_buttons(self, tr("Protéger"))
-        self.ok_button.clicked.connect(self.accept)
-        layout.addWidget(buttons)
-        self.hostname.textChanged.connect(self._refresh)
-        self._refresh()
-
-    def value(self) -> str:
-        return self.hostname.text().strip().lower().rstrip(".")
-
-    def _refresh(self, *_args: object) -> None:
-        value = self.value()
-        self.app_name.setText(tr("Nom de l'application : {name}").format(name=value or "—"))
-        self.ok_button.setEnabled("." in value and " " not in value)
-
-
-# --- D16 — Autoriser un service token --------------------------------------------------------------------
-
-
-class AllowDialog(QDialog):
-    """Autoriser un service token de CMA, présent dans le compte, sur une application Access (§4.24)."""
-
-    def __init__(self, parent: QWidget | None, app: AccessApp, tokens: list[ServiceToken]) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(tr("Autoriser un service token"))
-        self.setWindowIcon(app_icon())
-        self.resize(640, 400)
-        self.tokens = sorted(tokens, key=lambda t: t.name.lower())
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        layout.addWidget(title(tr("Autoriser un service token"), "SectionTitle"))
-        layout.addWidget(label(tr("Application Access : {name}").format(name=app.name), selectable=True))
-        layout.addWidget(label(tr("Domaine : {domain}").format(domain=app.domain), "mono", selectable=True))
-        form = QFormLayout()
-        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        self.token = QComboBox()
-        self.token.setAccessibleName(tr("Service token"))
-        for token in self.tokens:
-            self.token.addItem(f"{token.name} · {token.client_id}", token.id)
-        form.addRow(tr("Service token"), self.token)
-        layout.addLayout(form)
-        layout.addWidget(
-            label(
-                tr("Ce token pourra s'authentifier auprès de cette application.")
-                if self.tokens
-                else tr("Aucun service token disponible dans ce compte."),
-                "muted",
-                wrap=True,
-            )
-        )
-        layout.addStretch()
-        buttons, self.ok_button = _dialog_buttons(self, tr("Autoriser"))
-        self.ok_button.setEnabled(bool(self.tokens))
-        self.ok_button.clicked.connect(self.accept)
-        layout.addWidget(buttons)
-
-    def value(self) -> ServiceToken | None:
-        token_id = self.token.currentData()
-        return next((t for t in self.tokens if t.id == token_id), None)
-
-
-# --- D17 — Créer un service token dans Cloudflare ----------------------------------------------------------
-
-
-class CreateTokenDialog(QDialog):
-    """Nom et durée de validité du token ; le secret n'est jamais affiché (§4.25)."""
-
-    def __init__(self, parent: QWidget | None, account: str, persistent: bool) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(tr("Créer un service token"))
-        self.setWindowIcon(app_icon())
-        self.resize(640, 380)
-        layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        layout.addWidget(title(tr("Créer un service token"), "SectionTitle"))
-        layout.addWidget(label(tr("Compte : {name}").format(name=account), selectable=True))
-        form = QFormLayout()
-        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        self.name = QLineEdit()
-        self.name.setAccessibleName(tr("Nom"))
-        self.name.setPlaceholderText("Production")
-        form.addRow(tr("Nom"), self.name)
-        self.duration = QComboBox()
-        self.duration.setAccessibleName(tr("Durée de validité"))
-        for text, value in token_durations():
-            self.duration.addItem(text, value)
-        form.addRow(tr("Durée de validité"), self.duration)
-        layout.addLayout(form)
-        layout.addWidget(
-            label(
-                tr("Le secret sera enregistré dans le coffre de CMA et ne sera pas affiché."),
-                "muted",
-                wrap=True,
-            )
-        )
-        if not persistent:
-            layout.addWidget(
-                label(
-                    tr("Coffre temporaire : le secret sera perdu à la fermeture de CMA."),
-                    "warning",
-                    wrap=True,
-                )
-            )
-        layout.addStretch()
-        buttons, self.ok_button = _dialog_buttons(self, tr("Créer"))
-        self.ok_button.clicked.connect(self.accept)
-        layout.addWidget(buttons)
-        self.name.textChanged.connect(lambda text: self.ok_button.setEnabled(bool(text.strip())))
-        self.ok_button.setEnabled(False)
-
-    def value(self) -> tuple[str, str]:
-        return self.name.text().strip(), str(self.duration.currentData())
-
-
-# Fonctions de module : les tests les remplacent pour ne pas ouvrir de boîte modale.
-
-
-def ask_protect(parent: QWidget, hostnames: list[str]) -> str | None:
-    dialog = ProtectDialog(parent, hostnames)
-    return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
-
-
-def ask_allow(parent: QWidget, app: AccessApp, tokens: list[ServiceToken]) -> ServiceToken | None:
-    dialog = AllowDialog(parent, app, tokens)
-    return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
-
-
-def ask_create_token(parent: QWidget, account: str, persistent: bool) -> tuple[str, str] | None:
-    dialog = CreateTokenDialog(parent, account, persistent)
-    return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
-
-
-def publish_summary(result: PublishResult) -> str:
-    """« Nom d'hôte publié ; protection Access non créée ; profil CMA créé. » puis le détail des échecs."""
-    labels = {
-        "hostname": (tr("nom d'hôte publié"), tr("nom d'hôte non publié")),
-        "access": (tr("protection Access créée"), tr("protection Access non créée")),
-        "token": (tr("service token autorisé"), tr("service token non autorisé")),
-        "profile": (tr("profil CMA créé"), tr("profil CMA non créé")),
-    }
-    parts = [labels[step.name][0 if step.ok else 1] for step in result.steps if step.name in labels]
-    text = " ; ".join(parts)
-    text = (text[:1].upper() + text[1:] + ".") if text else ""
-    details = [step.detail for step in result.steps if not step.ok and step.detail]
-    return "\n".join([text, *details])
-
-
 PERMISSION_GROUPS = (
     (
         "Compte",
@@ -542,289 +99,6 @@ PERMISSION_GROUPS = (
     ),
     ("Zone", ("DNS : Edit", "Zone : Read")),
 )
-DATABASE_PORTS = {"1433", "1521", "3306", "5432", "6379", "27017"}
-
-
-def service_icon(service: str) -> str:
-    """Icône d'un service publié, d'après son schéma (ssh://, rdp://, http://…) et son port."""
-    scheme, _, rest = service.partition("://")
-    scheme = scheme.lower()
-    if scheme == "tcp" and rest.rsplit(":", 1)[-1].strip("/") in DATABASE_PORTS:
-        return "database"
-    return {
-        "ssh": "terminal-2",
-        "rdp": "device-desktop",
-        "http": "world-www",
-        "https": "world-www",
-        "smb": "folder",
-        "tcp": "plug-connected",
-        "unix": "plug-connected",
-    }.get(scheme, "link")
-
-
-class StatTile(QFrame):
-    """Chiffre clé du compte (tunnels, noms d'hôte…) ; un clic ouvre l'onglet correspondant."""
-
-    clicked = Signal()
-
-    def __init__(self, icon_name: str, caption: str) -> None:
-        super().__init__()
-        self.setProperty("role", "tile")
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setMinimumWidth(150)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 10, 14, 10)
-        layout.setSpacing(12)
-        self.glyph = QLabel()
-        set_glyph(self.glyph, icon_name, "accent", 24)
-        layout.addWidget(self.glyph, 0, Qt.AlignmentFlag.AlignTop)
-        texts = QVBoxLayout()
-        texts.setSpacing(0)
-        self.value = QLabel("—")
-        self.value.setStyleSheet("font-size: 18pt; font-weight: 600;")
-        self.caption = label(caption, "muted")
-        self.detail = label("", "meta")
-        texts.addWidget(self.value)
-        texts.addWidget(self.caption)
-        texts.addWidget(self.detail)
-        layout.addLayout(texts, 1)
-        self._caption = caption
-
-    def set_values(self, value: int | None, detail: str = "", tone: str | None = None) -> None:
-        self.value.setText("—" if value is None else str(value))
-        self.detail.setText(detail)
-        self.detail.setVisible(bool(detail))
-        if tone is not None:
-            self.detail.setStyleSheet(f"color: {status_colors(tone, current_tokens())[0]};")
-        else:
-            self.detail.setStyleSheet("")
-        self.setAccessibleName(f"{self._caption} : {self.value.text()}" + (f", {detail}" if detail else ""))
-
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit()
-        super().mousePressEvent(event)
-
-
-class TunnelTree(QTreeWidget):
-    """Arbre des tunnels présenté en cartes : un tunnel par carte, ses noms d'hôte en lignes."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.setObjectName("CardTree")
-        self.setColumnCount(3)
-        self.setHeaderHidden(True)
-        self.setRootIsDecorated(False)
-        self.setIndentation(0)
-        self.setUniformRowHeights(False)
-        self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setMouseTracking(True)
-        self.viewport().setAttribute(Qt.WidgetAttribute.WA_Hover, True)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
-        self.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        # Le service et l'état restent des colonnes (lecture, tests) mais la carte les dessine elle-même.
-        self.setColumnHidden(1, True)
-        self.setColumnHidden(2, True)
-        self.setItemDelegate(TunnelDelegate(self))
-
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        position = event.position().toPoint()
-        item = self.itemAt(position)
-        if (
-            event.button() == Qt.MouseButton.LeftButton
-            and item is not None
-            and item.parent() is None
-            and item.childCount()
-            and position.x() < CHEVRON_ZONE
-        ):
-            item.setExpanded(not item.isExpanded())
-        super().mousePressEvent(event)
-
-
-def _is_last_child(index: QModelIndex | QPersistentModelIndex) -> bool:
-    parent = index.parent()
-    return parent.isValid() and index.row() == index.model().rowCount(parent) - 1
-
-
-def _resized(font: QFont, delta: float, weight: QFont.Weight | None = None) -> QFont:
-    result = QFont(font)
-    result.setPointSizeF(max(7.5, font.pointSizeF() + delta))
-    if weight is not None:
-        result.setWeight(weight)
-    return result
-
-
-class TunnelDelegate(QStyledItemDelegate):
-    """Dessine chaque tunnel comme une carte : en-tête (état, nom, résumé), puis une ligne par nom d'hôte.
-
-    La carte s'étend sur plusieurs lignes de l'arbre : chaque ligne dessine sa part du même rectangle
-    arrondi, prolongé au-delà de ses bords quand la carte continue, et rogné à la ligne.
-    """
-
-    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex) -> QSize:
-        if not index.parent().isValid():
-            return QSize(0, HEADER_HEIGHT + (CARD_GAP if index.row() else 0))
-        return QSize(0, HOST_HEIGHT + (CARD_PADDING if _is_last_child(index) else 0))
-
-    def paint(
-        self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex
-    ) -> None:
-        tokens = current_tokens()
-        rect = QRect(option.rect)  # type: ignore[attr-defined]
-        state = option.state  # type: ignore[attr-defined]
-        font = QFont(option.font)  # type: ignore[attr-defined]
-        top_level = not index.parent().isValid()
-        view = self.parent()
-        children = index.model().rowCount(index) if top_level else 0
-        expanded = top_level and isinstance(view, QTreeWidget) and view.isExpanded(index)
-        if top_level:
-            band = QRect(
-                rect.left(), rect.top() + (CARD_GAP if index.row() else 0), rect.width(), HEADER_HEIGHT
-            )
-            open_below = expanded and children > 0
-        else:
-            band = QRect(rect.left(), rect.top(), rect.width(), HOST_HEIGHT)
-            open_below = not _is_last_child(index)
-        reach = int(2 * CARD_RADIUS)
-        top = band.top() if top_level else rect.top() - reach
-        bottom = rect.bottom() + reach if open_below else rect.bottom()
-        painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setClipRect(rect)
-        painter.setPen(QPen(QColor(tokens.border), 1))
-        painter.setBrush(QColor(tokens.surface))
-        card = QRectF(rect.left() + 1.5, top + 0.5, rect.width() - 3, bottom - top)
-        painter.drawRoundedRect(card, CARD_RADIUS, CARD_RADIUS)
-        inner = QRectF(band).adjusted(6, 4 if top_level else 2, -6, -4 if top_level else -2)
-        if state & QStyle.StateFlag.State_Selected:
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(tokens.selected))
-            painter.drawRoundedRect(inner, 6, 6)
-            painter.setBrush(QColor(tokens.accent))
-            painter.drawRoundedRect(QRectF(inner.left(), inner.top() + 7, 3, inner.height() - 14), 1.5, 1.5)
-        elif state & QStyle.StateFlag.State_MouseOver:
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(tokens.hover))
-            painter.drawRoundedRect(inner, 6, 6)
-        if state & QStyle.StateFlag.State_HasFocus:
-            painter.setPen(QPen(QColor(tokens.focus), 1))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRoundedRect(inner.adjusted(0.5, 0.5, -0.5, -0.5), 6, 6)
-        if top_level:
-            self._paint_tunnel(painter, band, font, index, children, expanded)
-        else:
-            self._paint_host(painter, band, font, index)
-        painter.restore()
-
-    def _paint_tunnel(
-        self,
-        painter: QPainter,
-        band: QRect,
-        font: QFont,
-        index: QModelIndex | QPersistentModelIndex,
-        children: int,
-        expanded: bool,
-    ) -> None:
-        tokens = current_tokens()
-        tunnel = index.data(TUNNEL_ROLE)
-        text, tone, symbol = tunnel_state(tunnel.status if isinstance(tunnel, Tunnel) else "")
-        fg, bg = status_colors(tone, tokens)
-        middle = band.center().y()
-        if children:
-            chevron = "chevron-down" if expanded else "chevron-right"
-            icon(chevron, tokens.muted).paint(painter, QRect(band.left() + 14, middle - 8, 16, 16))
-        tile = QRectF(band.left() + 38, middle - 18, 36, 36)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(bg))
-        painter.drawRoundedRect(tile, 9, 9)
-        icon("cloud", fg).paint(painter, tile.toRect().adjusted(8, 8, -8, -8))
-        pill_font = _resized(font, -0.5, QFont.Weight.DemiBold)
-        pill_text = f"{symbol} {text}"
-        pill_width = QFontMetrics(pill_font).horizontalAdvance(pill_text) + 24
-        pill = QRectF(band.right() - 16 - pill_width, middle - 12, pill_width, 24)
-        painter.drawRoundedRect(pill, 12, 12)
-        painter.setFont(pill_font)
-        painter.setPen(QColor(fg))
-        painter.drawText(pill, Qt.AlignmentFlag.AlignCenter, pill_text)
-        left = band.left() + TEXT_LEFT
-        width = max(0, int(pill.left()) - 12 - left)
-        name_font = _resized(font, 1.5, QFont.Weight.DemiBold)
-        meta_font = _resized(font, -0.5)
-        name_metrics, meta_metrics = QFontMetrics(name_font), QFontMetrics(meta_font)
-        y = middle - (name_metrics.height() + meta_metrics.height() + 2) // 2
-        painter.setFont(name_font)
-        painter.setPen(QColor(tokens.text))
-        name = name_metrics.elidedText(str(index.data()), Qt.TextElideMode.ElideRight, width)
-        painter.drawText(QRect(left, y, width, name_metrics.height()), Qt.AlignmentFlag.AlignVCenter, name)
-        painter.setFont(meta_font)
-        painter.setPen(QColor(tokens.muted))
-        summary = meta_metrics.elidedText(
-            str(index.model().index(index.row(), 1, index.parent()).data() or ""),
-            Qt.TextElideMode.ElideRight,
-            width,
-        )
-        y += name_metrics.height() + 2
-        painter.drawText(QRect(left, y, width, meta_metrics.height()), Qt.AlignmentFlag.AlignVCenter, summary)
-        if expanded and children:
-            painter.setPen(QPen(QColor(tokens.border), 1))
-            line = band.bottom() + 0.5
-            painter.drawLine(QPointF(band.left() + 16, line), QPointF(band.right() - 16, line))
-
-    def _paint_host(
-        self, painter: QPainter, band: QRect, font: QFont, index: QModelIndex | QPersistentModelIndex
-    ) -> None:
-        tokens = current_tokens()
-        rule = index.data(RULE_ROLE)
-        service = rule.service if isinstance(rule, IngressRule) else ""
-        middle = band.center().y()
-        tile = QRectF(band.left() + 42, middle - 14, 28, 28)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(tokens.window))
-        painter.drawRoundedRect(tile, 7, 7)
-        icon(service_icon(service), tokens.muted).paint(painter, tile.toRect().adjusted(6, 6, -6, -6))
-        badge_font = _resized(font, -1.0, QFont.Weight.DemiBold)
-        badge_metrics = QFontMetrics(badge_font)
-        badges: list[tuple[str, str, str]] = []
-        if index.data(PROFILE_ROLE):
-            badges.append((tr("Profil CMA"), "circle-check", "info"))
-        if index.data(PROTECTED_ROLE):
-            badges.append((tr("Access"), "shield-check", "success"))
-        else:
-            badges.append((tr("Non protégé"), "alert-triangle", "warning"))
-        x = band.right() - 16
-        painter.setFont(badge_font)
-        for text, name, tone in reversed(badges):
-            fg, bg = status_colors(tone, tokens)
-            width = badge_metrics.horizontalAdvance(text) + 34
-            badge = QRectF(x - width, middle - 11, width, 22)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(bg))
-            painter.drawRoundedRect(badge, 11, 11)
-            icon(name, fg).paint(painter, QRect(int(badge.left()) + 9, middle - 7, 14, 14))
-            painter.setPen(QColor(fg))
-            painter.drawText(badge.adjusted(27, 0, -8, 0), Qt.AlignmentFlag.AlignVCenter, text)
-            x = int(badge.left()) - 6
-        left = band.left() + TEXT_LEFT
-        column = left + int((band.right() - 16 - left) * 0.42)
-        host_width = max(0, column - 16 - left)
-        painter.setFont(font)
-        painter.setPen(QColor(tokens.text))
-        host = QFontMetrics(font).elidedText(str(index.data()), Qt.TextElideMode.ElideMiddle, host_width)
-        painter.drawText(
-            QRect(left, band.top(), host_width, band.height()), Qt.AlignmentFlag.AlignVCenter, host
-        )
-        mono = mono_font(9.0)
-        service_width = max(0, x - 12 - column)
-        service = QFontMetrics(mono).elidedText(service, Qt.TextElideMode.ElideMiddle, service_width)
-        painter.setFont(mono)
-        painter.setPen(QColor(tokens.muted))
-        painter.drawText(
-            QRect(column, band.top(), service_width, band.height()), Qt.AlignmentFlag.AlignVCenter, service
-        )
-
-
-# --- Vue ----------------------------------------------------------------------------------------------------
 
 
 class CloudView(QWidget):
@@ -1084,7 +358,7 @@ class CloudView(QWidget):
         box.addLayout(row)
         self.apps_hint = label(tr("Sélectionnez une application pour y autoriser un service token."), "muted")
         box.addWidget(self.apps_hint)
-        self.apps = _table([tr("Nom"), tr("Domaine"), tr("Type")], tr("Applications Access"))
+        self.apps = data_table([tr("Nom"), tr("Domaine"), tr("Type")], tr("Applications Access"))
         self.apps.horizontalHeader().resizeSection(0, 220)
         self.apps.horizontalHeader().resizeSection(1, 280)
         remember_header(self.apps.horizontalHeader(), "cloud-apps")
@@ -1124,7 +398,7 @@ class CloudView(QWidget):
                 wrap=True,
             )
         )
-        self.remote_tokens = _table(
+        self.remote_tokens = data_table(
             [tr("Nom"), tr("ID client"), tr("Expiration"), tr("Dans CMA")], tr("Service tokens du compte")
         )
         header = self.remote_tokens.horizontalHeader()

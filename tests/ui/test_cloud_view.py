@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-import cma.ui.views.cloud as cloud_module
+import cma.ui.views.cloud.view as cloud_module
 from cma.core.cfadmin import PublishRequest
 from cma.core.cfapi import TOKEN_SECRET_KEY, Tunnel
 from cma.core.models import AuthMode
