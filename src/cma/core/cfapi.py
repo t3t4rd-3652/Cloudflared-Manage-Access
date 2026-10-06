@@ -20,11 +20,11 @@ import logging
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
 from cma import __version__
-from cma.core.policies import AccessGroup, AccessPolicy, policy_from_api, policy_to_api
+from cma.core.policies import AccessGroup, AccessPolicy, PolicyRule, policy_from_api, policy_to_api
 from cma.i18n import tr
 
 log = logging.getLogger(__name__)
@@ -33,6 +33,8 @@ API_BASE = "https://api.cloudflare.com/client/v4"
 TOKEN_SECRET_KEY = "cfapi:token"  # noqa: S105 (nom de la clé dans le coffre, pas un secret)
 TOKENS_PAGE = "https://dash.cloudflare.com/profile/api-tokens"
 CATCH_ALL = {"service": "http_status:404"}
+# Champs d'une application Access calculés par Cloudflare : jamais renvoyés dans un PUT.
+_APP_READ_ONLY = {"id", "uid", "aud", "created_at", "updated_at"}
 
 
 class CloudflareApiError(RuntimeError):
@@ -99,6 +101,8 @@ class IngressRule:
     hostname: str
     service: str
     path: str = ""
+    # `originRequest` de la règle (noTLSVerify, httpHostHeader, originServerName…), tel que Cloudflare le garde.
+    origin: dict[str, Any] = field(default_factory=dict[str, Any], compare=False, hash=False)
 
 
 @dataclass(frozen=True)
@@ -313,7 +317,10 @@ class CloudflareApi:
             if rule.get("hostname"):
                 rules.append(
                     IngressRule(
-                        str(rule["hostname"]), str(rule.get("service", "")), str(rule.get("path", ""))
+                        str(rule["hostname"]),
+                        str(rule.get("service", "")),
+                        str(rule.get("path", "")),
+                        dict(cast(dict[str, Any], rule.get("originRequest") or {})),
                     )
                 )
         return rules
@@ -345,10 +352,17 @@ class CloudflareApi:
         return IngressRule(hostname, service)
 
     def update_hostname_service(
-        self, account_id: str, tunnel: Tunnel, hostname: str, service: str
+        self,
+        account_id: str,
+        tunnel: Tunnel,
+        hostname: str,
+        service: str,
+        origin: dict[str, Any] | None = None,
     ) -> IngressRule:
-        """Change le service d'un nom d'hôte déjà publié. Les autres clés de la règle (`path`, `originRequest`)
-        sont gardées ; le DNS ne change pas."""
+        """Change le service d'un nom d'hôte déjà publié. Les autres clés de la règle (`path`, autres options
+        d'origine) sont gardées ; le DNS ne change pas.
+
+        `origin` modifie des options d'origine : une valeur vide, fausse ou None retire l'option."""
         config = self.tunnel_config(account_id, tunnel.id)
         ingress = cast(list[dict[str, Any]], config.get("ingress") or [])
         rule = next((r for r in ingress if r.get("hostname") == hostname), None)
@@ -359,10 +373,26 @@ class CloudflareApi:
                 )
             )
         rule["service"] = service
+        if origin is not None:
+            options = dict(cast(dict[str, Any], rule.get("originRequest") or {}))
+            for key, value in origin.items():
+                if value in (None, False, ""):
+                    options.pop(key, None)
+                else:
+                    options[key] = value
+            if options:
+                rule["originRequest"] = options
+            else:
+                rule.pop("originRequest", None)
         self._result(
             "PUT", f"/accounts/{account_id}/cfd_tunnel/{tunnel.id}/configurations", body={"config": config}
         )
-        return IngressRule(hostname, service, str(rule.get("path", "")))
+        return IngressRule(
+            hostname,
+            service,
+            str(rule.get("path", "")),
+            dict(cast(dict[str, Any], rule.get("originRequest") or {})),
+        )
 
     def unpublish_hostname(self, account_id: str, tunnel: Tunnel, hostname: str) -> None:
         """Retire `hostname` du tunnel. L'enregistrement DNS est supprimé s'il vise encore ce tunnel."""
@@ -372,12 +402,30 @@ class CloudflareApi:
         self._result(
             "PUT", f"/accounts/{account_id}/cfd_tunnel/{tunnel.id}/configurations", body={"config": config}
         )
+        self.delete_tunnel_cname(account_id, tunnel, hostname)
+
+    def delete_tunnel_cname(self, account_id: str, tunnel: Tunnel, hostname: str) -> bool:
+        """Supprime l'enregistrement CNAME de `hostname` s'il vise ce tunnel (et seulement dans ce cas)."""
         zone = self.zone_for_hostname(account_id, hostname)
         if zone is None:
-            return
+            return False
+        deleted = False
         for record in self._paged(f"/zones/{zone.id}/dns_records", {"name": hostname, "type": "CNAME"}):
             if record.get("content") == tunnel.cname_target:
                 self._result("DELETE", f"/zones/{zone.id}/dns_records/{record['id']}")
+                deleted = True
+        return deleted
+
+    def rename_tunnel(self, account_id: str, tunnel: Tunnel, name: str) -> Tunnel:
+        result = cast(
+            dict[str, Any],
+            self._result("PATCH", f"/accounts/{account_id}/cfd_tunnel/{tunnel.id}", body={"name": name}),
+        )
+        return Tunnel(tunnel.id, str(result.get("name") or name), str(result.get("status") or tunnel.status))
+
+    def delete_tunnel(self, account_id: str, tunnel_id: str) -> None:
+        """Cloudflare refuse tant que le tunnel a des connexions actives."""
+        self._result("DELETE", f"/accounts/{account_id}/cfd_tunnel/{tunnel_id}")
 
     def ensure_cname(self, zone: Zone, hostname: str, target: str) -> None:
         existing = self._paged(f"/zones/{zone.id}/dns_records", {"name": hostname})
@@ -432,36 +480,112 @@ class CloudflareApi:
             str(result["id"]), str(result.get("name", name)), str(result.get("domain", domain)), "self_hosted"
         )
 
+    def delete_access_app(self, account_id: str, app_id: str) -> None:
+        """Les politiques réutilisables qu'elle utilisait restent dans le compte."""
+        self._result("DELETE", f"/accounts/{account_id}/access/apps/{app_id}")
+
     def allow_service_token(self, account_id: str, app_id: str, token_id: str, policy_name: str) -> str:
-        """Ajoute une règle « Service Auth » qui laisse passer ce service token. Renvoie l'id de la règle."""
-        result = self._result(
-            "POST",
-            f"/accounts/{account_id}/access/apps/{app_id}/policies",
-            body={
-                "name": policy_name,
-                "decision": "non_identity",
-                "include": [{"service_token": {"token_id": token_id}}],
-            },
+        """Laisse passer ce service token sur l'application (règle « Service Auth »). Renvoie l'id de la politique.
+
+        Cloudflare n'accepte plus de politique propre à une application nouvellement créée : CMA réutilise la
+        politique du compte qui autorise exactement ce token, ou la crée, puis l'attache à l'application."""
+        wanted = (PolicyRule("service_token", token_id),)
+        self.app_for_update(account_id, app_id)  # avant de créer : pas de politique orpheline en cas de refus
+        policy = next(
+            (
+                p
+                for p in self.list_account_policies(account_id)
+                if p.decision == "non_identity" and p.include == wanted and not p.exclude and not p.require
+            ),
+            None,
         )
-        return str(result["id"])
+        if policy is None:
+            policy = self.create_account_policy(
+                account_id, AccessPolicy("", policy_name, "non_identity", wanted)
+            )
+        self.attach_policy(account_id, app_id, policy.id)
+        return policy.id
 
     def list_policies(self, account_id: str, app_id: str) -> list[AccessPolicy]:
+        """Politiques de l'application, dans leur ordre d'évaluation."""
         policies = [
             policy_from_api(p) for p in self._paged(f"/accounts/{account_id}/access/apps/{app_id}/policies")
         ]
         return sorted(policies, key=lambda p: (p.precedence is None, p.precedence or 0, p.name.lower()))
 
-    def save_policy(self, account_id: str, app_id: str, policy: AccessPolicy) -> AccessPolicy:
-        """Crée la politique (sans id) ou la remplace (avec id)."""
-        base = f"/accounts/{account_id}/access/apps/{app_id}/policies"
-        if policy.id:
-            result = self._result("PUT", f"{base}/{policy.id}", body=policy_to_api(policy))
-        else:
-            result = self._result("POST", base, body=policy_to_api(policy))
-        return policy_from_api(cast(dict[str, Any], result))
+    def list_account_policies(self, account_id: str) -> list[AccessPolicy]:
+        """Politiques réutilisables du compte, avec le nombre d'applications qui utilisent chacune."""
+        policies = [
+            policy_from_api({"reusable": True, **p})
+            for p in self._paged(f"/accounts/{account_id}/access/policies")
+        ]
+        return sorted(policies, key=lambda p: p.name.lower())
 
-    def delete_policy(self, account_id: str, app_id: str, policy_id: str) -> None:
+    def create_account_policy(self, account_id: str, policy: AccessPolicy) -> AccessPolicy:
+        body = policy_to_api(replace(policy, reusable=True))
+        result = cast(
+            dict[str, Any], self._result("POST", f"/accounts/{account_id}/access/policies", body=body)
+        )
+        return policy_from_api({"reusable": True, **result})
+
+    def update_policy(self, account_id: str, app_id: str, policy: AccessPolicy) -> AccessPolicy:
+        """Une politique réutilisable se modifie dans le compte (toutes ses applications la voient changer) ;
+        une politique legacy, dans son application."""
+        if policy.reusable:
+            path = f"/accounts/{account_id}/access/policies/{policy.id}"
+        else:
+            path = f"/accounts/{account_id}/access/apps/{app_id}/policies/{policy.id}"
+        result = cast(dict[str, Any], self._result("PUT", path, body=policy_to_api(policy)))
+        return policy_from_api({"reusable": policy.reusable, **result})
+
+    def delete_account_policy(self, account_id: str, policy_id: str) -> None:
+        self._result("DELETE", f"/accounts/{account_id}/access/policies/{policy_id}")
+
+    def delete_legacy_policy(self, account_id: str, app_id: str, policy_id: str) -> None:
         self._result("DELETE", f"/accounts/{account_id}/access/apps/{app_id}/policies/{policy_id}")
+
+    def app_policy_ids(self, account_id: str, app_id: str) -> list[str]:
+        """Politiques réutilisables attachées à l'application, dans leur ordre."""
+        app = cast(dict[str, Any], self._result("GET", f"/accounts/{account_id}/access/apps/{app_id}"))
+        links = cast(list[dict[str, Any]], app.get("policies") or [])
+        links = sorted(links, key=lambda p: int(p.get("precedence") or 0))
+        return [str(p["id"]) for p in links if p.get("reusable", True)]
+
+    def set_app_policies(self, account_id: str, app_id: str, policy_ids: list[str]) -> None:
+        """Remplace la liste des politiques réutilisables de l'application, dans cet ordre.
+
+        L'API ne modifie une application que par un PUT complet : l'application est relue et renvoyée telle
+        quelle, seuls ses champs calculés (id, aud, dates) étant retirés, avec la nouvelle liste."""
+        app = self.app_for_update(account_id, app_id)
+        body = {k: v for k, v in app.items() if k not in _APP_READ_ONLY}
+        body["policies"] = [{"id": pid, "precedence": rank} for rank, pid in enumerate(policy_ids, start=1)]
+        self._result("PUT", f"/accounts/{account_id}/access/apps/{app_id}", body=body)
+
+    def app_for_update(self, account_id: str, app_id: str) -> dict[str, Any]:
+        """L'application, si CMA peut changer ses politiques sans risque ; sinon une erreur qui explique pourquoi."""
+        app = cast(dict[str, Any], self._result("GET", f"/accounts/{account_id}/access/apps/{app_id}"))
+        links = cast(list[dict[str, Any]], app.get("policies") or [])
+        if any(not p.get("reusable", True) for p in links):
+            # Réutilisables et propres à l'application ne se mélangent pas dans un PUT : ne rien risquer.
+            raise CloudflareApiError(
+                tr(
+                    "{name} a encore des politiques propres à l'application (legacy) : remplacez-les par des "
+                    "politiques réutilisables dans le tableau de bord Cloudflare avant de la modifier ici."
+                ).format(name=app.get("name", app_id))
+            )
+        return app
+
+    def attach_policy(self, account_id: str, app_id: str, policy_id: str) -> None:
+        """Ajoute la politique en dernier ; rien ne change si elle y est déjà."""
+        current = self.app_policy_ids(account_id, app_id)
+        if policy_id not in current:
+            self.set_app_policies(account_id, app_id, [*current, policy_id])
+
+    def detach_policy(self, account_id: str, app_id: str, policy_id: str) -> None:
+        """Retire la politique de l'application ; elle reste dans le compte pour les autres."""
+        current = self.app_policy_ids(account_id, app_id)
+        if policy_id in current:
+            self.set_app_policies(account_id, app_id, [p for p in current if p != policy_id])
 
     def list_access_groups(self, account_id: str) -> list[AccessGroup]:
         groups = self._paged(f"/accounts/{account_id}/access/groups")
@@ -493,6 +617,10 @@ class CloudflareApi:
             "POST", f"/accounts/{account_id}/access/service_tokens", body={"name": name, "duration": duration}
         )
         return _created_token(result, name)
+
+    def delete_service_token(self, account_id: str, token_id: str) -> None:
+        """Le token est révoqué aussitôt : les accès qui l'utilisent sont refusés."""
+        self._result("DELETE", f"/accounts/{account_id}/access/service_tokens/{token_id}")
 
     def refresh_service_token(self, account_id: str, token_id: str) -> str:
         """Repousse l'échéance du token d'une durée (même secret, aucune coupure). Renvoie la nouvelle échéance."""

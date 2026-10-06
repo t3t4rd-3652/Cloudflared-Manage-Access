@@ -18,19 +18,22 @@ MASK = "•" * 12
 
 
 class CreateTunnelDialog(QDialog):
-    def __init__(self, parent: QWidget | None, existing: list[str]) -> None:
+    def __init__(self, parent: QWidget | None, existing: list[str], current: str | None = None) -> None:
+        """Création, ou renommage du tunnel `current` quand il est donné."""
         super().__init__(parent)
-        self.existing = {name.lower() for name in existing}
-        self.setWindowTitle(tr("Créer un tunnel"))
+        self.current = current
+        self.existing = {name.lower() for name in existing if name != current}
+        heading = tr("Renommer le tunnel") if current else tr("Créer un tunnel")
+        self.setWindowTitle(heading)
         self.setWindowIcon(app_icon())
         self.resize(560, 280)
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
-        layout.addWidget(title(tr("Créer un tunnel"), "SectionTitle"))
+        layout.addWidget(title(heading, "SectionTitle"))
         form = QFormLayout()
         form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        self.name = QLineEdit()
+        self.name = QLineEdit(current or "")
         self.name.setAccessibleName(tr("Nom"))
         self.name.setPlaceholderText("bureau-paris")
         form.addRow(tr("Nom"), self.name)
@@ -38,6 +41,10 @@ class CreateTunnelDialog(QDialog):
         layout.addWidget(
             label(
                 tr(
+                    "Le nom ne change que l'affichage : le connecteur et les noms d'hôte publiés continuent de fonctionner."
+                )
+                if current
+                else tr(
                     "Le tunnel est géré depuis Cloudflare : vous y publierez ensuite des services depuis CMA. "
                     "Il reste « Hors ligne » tant que son connecteur n'est pas installé sur un serveur."
                 ),
@@ -48,7 +55,7 @@ class CreateTunnelDialog(QDialog):
         self.error = label("", "error", wrap=True)
         layout.addWidget(self.error)
         layout.addStretch()
-        buttons, self.ok_button = dialog_buttons(self, tr("Créer"))
+        buttons, self.ok_button = dialog_buttons(self, tr("Renommer") if current else tr("Créer"))
         self.ok_button.clicked.connect(self.accept)
         layout.addWidget(buttons)
         self.name.textChanged.connect(self._refresh)
@@ -62,7 +69,7 @@ class CreateTunnelDialog(QDialog):
         taken = value.lower() in self.existing
         self.error.setText(tr("Un tunnel porte déjà ce nom.") if taken else "")
         self.error.setVisible(taken)
-        self.ok_button.setEnabled(bool(value) and not taken)
+        self.ok_button.setEnabled(bool(value) and not taken and value != self.current)
 
 
 class NewTunnelDialog(QDialog):
@@ -127,8 +134,8 @@ class NewTunnelDialog(QDialog):
         self.copied.setText(tr("Commande copiée : {system}.").format(system=system))
 
 
-def ask_tunnel_name(parent: QWidget, existing: list[str]) -> str | None:
-    dialog = CreateTunnelDialog(parent, existing)
+def ask_tunnel_name(parent: QWidget, existing: list[str], current: str | None = None) -> str | None:
+    dialog = CreateTunnelDialog(parent, existing, current)
     return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
 
 

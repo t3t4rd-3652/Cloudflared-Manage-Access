@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 import cma.ui.views.cloud.view as cloud_module
@@ -18,7 +20,7 @@ from cma.ui.views.cloud import (
     ProtectDialog,
     PublishDialog,
 )
-from cma.ui.views.cloud.policies import PoliciesDialog, PolicyEditDialog
+from cma.ui.views.cloud.policies import AccountPoliciesDialog, PoliciesDialog, PolicyEditDialog
 from cma.ui.views.cloud.tunnel_create import MASK, CreateTunnelDialog, NewTunnelDialog
 from tests.fakes.fake_cfapi import TOKEN, FakeCloudflare, FakeCloudflareServer
 
@@ -97,7 +99,7 @@ def test_cloud_view_full_flow(qtbot, gui, cf, monkeypatch):
     view.apps.selectRow(0)
     monkeypatch.setattr(cloud_module, "ask_allow", lambda _p, _app, tokens: tokens[0])
     view.allow_token()
-    qtbot.waitUntil(lambda: bool(cf.state.policies), timeout=10000)
+    qtbot.waitUntil(lambda: bool(cf.state.account_policies), timeout=10000)
 
     # Protection d'un nouveau nom d'hôte.
     monkeypatch.setattr(cloud_module, "ask_protect", lambda *_a: "DB.exemple.fr")
@@ -164,7 +166,7 @@ def test_cloud_view_checks_tunnel_connectors(qtbot, gui, cf, monkeypatch):
     assert empty.table.isHidden() and empty.findings[0].level == "error"
 
 
-def test_cloud_view_edits_a_published_service(qtbot, gui, cf, monkeypatch):
+def connected_view(qtbot, gui, cf):
     ctx, window = gui
     ctx.core.manager.cloudflare.base_url = cf.base_url
     window.show_view("cloud")
@@ -172,6 +174,11 @@ def test_cloud_view_edits_a_published_service(qtbot, gui, cf, monkeypatch):
     view.token_field.set_text(TOKEN)
     view.connect_account()
     qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+    return ctx, view
+
+
+def test_cloud_view_edits_a_published_service(qtbot, gui, cf, monkeypatch):
+    _ctx, view = connected_view(qtbot, gui, cf)
     bureau = view.tree.topLevelItem(0)
     tunnel = bureau.data(0, cloud_module.TUNNEL_ROLE)
     rule = bureau.child(0).data(0, cloud_module.RULE_ROLE)
@@ -180,14 +187,22 @@ def test_cloud_view_edits_a_published_service(qtbot, gui, cf, monkeypatch):
     monkeypatch.setattr(cloud_module, "ask_service", lambda *_a: None)
     view.edit_service(tunnel, rule)  # annulé : rien n'est envoyé
     assert not any(method == "PUT" for method, _ in cf.state.requests)
-    monkeypatch.setattr(cloud_module, "ask_service", lambda *_a: "ssh://localhost:2222")
+    origin = {"noTLSVerify": True, "httpHostHeader": "pve.local", "originServerName": ""}
+    monkeypatch.setattr(cloud_module, "ask_service", lambda *_a: ("https://localhost:8006", origin))
     view.edit_service(tunnel, rule)
     qtbot.waitUntil(
-        lambda: cf.state.configs["t1"]["ingress"][0]["service"] == "ssh://localhost:2222", timeout=10000
+        lambda: cf.state.configs["t1"]["ingress"][0]["service"] == "https://localhost:8006", timeout=10000
     )
+    assert cf.state.configs["t1"]["ingress"][0]["originRequest"] == {
+        "noTLSVerify": True,
+        "httpHostHeader": "pve.local",
+    }
 
     dialog = EditServiceDialog(view, tunnel, rule)
-    assert not dialog.ok_button.isEnabled()  # service inchangé
+    assert not dialog.ok_button.isEnabled()  # rien de changé
+    dialog.no_tls_verify.setChecked(True)
+    assert dialog.ok_button.isEnabled()  # une option d'origine suffit
+    dialog.no_tls_verify.setChecked(False)
     dialog.service.setText("localhost:22")
     assert dialog.ok_button.isEnabled()
     dialog._accept()
@@ -195,58 +210,150 @@ def test_cloud_view_edits_a_published_service(qtbot, gui, cf, monkeypatch):
     dialog.service.setText("tcp://localhost:22")
     dialog._accept()
     assert dialog.result() == 1 and dialog.value() == "tcp://localhost:22"
+    assert dialog.origin() == {"noTLSVerify": False, "httpHostHeader": "", "originServerName": ""}
+    with_origin = EditServiceDialog(
+        view, tunnel, cloud_module.IngressRule("a.fr", "https://x", origin={"noTLSVerify": True})
+    )
+    assert with_origin.no_tls_verify.isChecked() and not with_origin.ok_button.isEnabled()
 
 
-def test_cloud_view_manages_access_policies(qtbot, gui, cf, monkeypatch):
+def test_cloud_view_manages_shared_access_policies(qtbot, gui, cf, monkeypatch):
     import cma.ui.views.cloud.policies as policies_module
 
-    ctx, window = gui
-    ctx.core.manager.cloudflare.base_url = cf.base_url
-    window.show_view("cloud")
-    view = window.cloud
-    view.token_field.set_text(TOKEN)
-    view.connect_account()
-    qtbot.waitUntil(lambda: view.apps.rowCount() == 1, timeout=10000)
+    cf.state.apps.append(
+        {"id": "app2", "name": "Proxy", "domain": "proxy.exemple.fr", "type": "self_hosted", "policies": []}
+    )
+    cf.state.account_policies.append(
+        {
+            "id": "p1",
+            "name": "without token",
+            "decision": "allow",
+            "include": [{"email": {"email": "moi@exemple.fr"}}],
+            "exclude": [],
+            "require": [],
+            "connection_rules": {"rdp": {}},
+            "reusable": True,
+        }
+    )
+    cf.state.apps[0]["policies"] = [{"id": "p1", "precedence": 1}]
+    cf.state.apps[1]["policies"] = [{"id": "p1", "precedence": 1}]
+    _ctx, view = connected_view(qtbot, gui, cf)
+    qtbot.waitUntil(lambda: view.apps.rowCount() == 2, timeout=10000)
     view.tabs.setCurrentIndex(1)
-    assert not view.policies_button.isEnabled()
-    view.apps.selectRow(0)
-    assert view.policies_button.isEnabled()
+    assert not view.policies_button.isEnabled() and not view.delete_app_button.isEnabled()
+    row = next(r for r in range(view.apps.rowCount()) if view.apps.item(r, 0).text() == "SSH")
+    view.apps.selectRow(row)
+    assert view.policies_button.isEnabled() and view.delete_app_button.isEnabled()
 
     opened: list[PoliciesDialog] = []
     monkeypatch.setattr(cloud_module, "show_policies", opened.append)
     view.manage_policies()
     qtbot.waitUntil(lambda: bool(opened), timeout=10000)
     dialog = opened[0]
-    assert dialog.table.rowCount() == 0 and "Aucune politique" in dialog.status.text()
+    assert dialog.table.rowCount() == 1 and dialog.table.item(0, 3).text() == "Partagée : 2 applications"
     assert dialog.groups == [AccessGroup("g1", "Admins")]
 
-    team = AccessPolicy("", "Équipe", "allow", (PolicyRule("email_domain", "exemple.fr"),))
+    # Nouvelle politique : créée dans le compte et attachée à l'application.
+    team = AccessPolicy("", "Équipe", "allow", (PolicyRule("email_domain", "exemple.fr"),), reusable=True)
     monkeypatch.setattr(policies_module, "ask_policy", lambda *_a: team)
     dialog.add_policy()
+    qtbot.waitUntil(lambda: dialog.table.rowCount() == 2 and dialog.isEnabled(), timeout=10000)
+    assert (
+        dialog.table.item(1, 2).text() == "@exemple.fr"
+        and dialog.table.item(1, 3).text() == "Une seule application"
+    )
+
+    # Modifier la politique partagée : dans le compte, règles RDP conservées.
+    dialog.table.selectRow(0)
+    shared = dialog.policies[0]
+    monkeypatch.setattr(policies_module, "ask_policy", lambda *_a: replace(shared, name="Moi"))
+    dialog.edit_policy(dialog.save)
+    qtbot.waitUntil(lambda: dialog.table.item(0, 0).text() == "Moi", timeout=10000)
+    stored = cf.state.account_policies[0]
+    assert stored["name"] == "Moi" and stored["connection_rules"] == {"rdp": {}}
+
+    # Retirer la politique partagée : l'autre application la garde.
+    dialog.table.selectRow(0)
+    monkeypatch.setattr(policies_module, "confirm", lambda *_a: True)
+    dialog.remove_policy()
     qtbot.waitUntil(lambda: dialog.table.rowCount() == 1 and dialog.isEnabled(), timeout=10000)
-    assert dialog.table.item(0, 2).text() == "@exemple.fr"
+    assert cf.state.apps[1]["policies"] == [{"id": "p1", "precedence": 1}]
 
-    dialog.table.selectRow(0)
-    renamed = AccessPolicy(dialog.policies[0].id, "Admins", "allow", (PolicyRule("group", "g1"),))
-    monkeypatch.setattr(policies_module, "ask_policy", lambda *_a: renamed)
-    dialog.edit_policy()
-    qtbot.waitUntil(lambda: dialog.table.item(0, 0).text() == "Admins", timeout=10000)
-    assert dialog.table.item(0, 2).text() == "groupe : Admins"
-    assert cf.state.policies["app1"][0]["include"] == [{"group": {"id": "g1"}}]
+    # Ajouter une politique existante du compte.
+    monkeypatch.setattr(policies_module, "ask_existing_policy", lambda _p, candidates, *_a: candidates[0])
+    dialog.add_existing()
+    qtbot.waitUntil(lambda: dialog.table.rowCount() == 2 and dialog.isEnabled(), timeout=10000)
+    assert [link["id"] for link in cf.state.apps[0]["policies"]][-1] == "p1"
 
+    # Une erreur de l'API réactive la boîte de dialogue.
+    ghost = AccessPolicy("disparue", "Fantôme", "allow", (PolicyRule("everyone"),), reusable=True)
+    dialog.policies = [ghost]
     dialog.table.selectRow(0)
+    monkeypatch.setattr(policies_module, "ask_policy", lambda *_a: ghost)
+    dialog.edit_policy(dialog.save)
+    qtbot.waitUntil(dialog.isEnabled, timeout=10000)
+
+
+def test_cloud_view_account_policies_and_cleanup(qtbot, gui, cf, monkeypatch):
+    import cma.ui.views.cloud.policies as policies_module
+
+    cf.state.account_policies.append(
+        {
+            "id": "p9",
+            "name": "Oubliée",
+            "decision": "allow",
+            "include": [{"everyone": {}}],
+            "exclude": [],
+            "require": [],
+        }
+    )
+    ctx, view = connected_view(qtbot, gui, cf)
+    opened: list[AccountPoliciesDialog] = []
+    monkeypatch.setattr(cloud_module, "show_policies", opened.append)
+    view.manage_account_policies()
+    qtbot.waitUntil(lambda: bool(opened), timeout=10000)
+    dialog = opened[0]
+    assert (
+        dialog.table.item(0, 3).text() == "Inutilisée"
+        and "1 politique(s) inutilisée(s)" in dialog.status.text()
+    )
+    dialog.table.selectRow(0)
+    assert dialog.delete_button.isEnabled()
     monkeypatch.setattr(policies_module, "confirm", lambda *_a: True)
     dialog.delete_policy()
     qtbot.waitUntil(lambda: dialog.table.rowCount() == 0 and dialog.isEnabled(), timeout=10000)
-    assert cf.state.policies["app1"] == []
+    assert cf.state.account_policies == []
 
-    # Une erreur de l'API réactive la boîte de dialogue.
-    cf.state.policies["app1"] = []
-    monkeypatch.setattr(policies_module, "ask_policy", lambda *_a: renamed)  # id disparu : 404
-    dialog.table.setRowCount(0)
-    dialog.policies = [renamed]
-    dialog.edit_policy()
-    qtbot.waitUntil(dialog.isEnabled, timeout=10000)
+    # Ménage : renommer et supprimer un tunnel arrêté, supprimer une application et un token.
+    monkeypatch.setattr(cloud_module, "confirm", lambda *_a: True)
+    labo = view.tree.topLevelItem(1).data(0, cloud_module.TUNNEL_ROLE)
+    monkeypatch.setattr(cloud_module, "ask_tunnel_name", lambda _p, _existing, current: current + "-2")
+    view.rename_tunnel(labo)
+    qtbot.waitUntil(lambda: cf.state.tunnels[1]["name"] == "labo-2", timeout=10000)
+    view.delete_tunnel(labo)
+    qtbot.waitUntil(lambda: len(cf.state.tunnels) == 1, timeout=10000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 1, timeout=10000)
+    notes: list[tuple[str, str]] = []
+    ctx._notifier = lambda level, text, **_k: notes.append((level, text))
+    view.delete_tunnel(
+        view.tree.topLevelItem(0).data(0, cloud_module.TUNNEL_ROLE)
+    )  # connecteur actif : refus
+    qtbot.waitUntil(lambda: any(level == "error" for level, _ in notes), timeout=10000)
+    assert len(cf.state.tunnels) == 1
+
+    view.tabs.setCurrentIndex(1)
+    view.apps.selectRow(0)
+    view.delete_selected_app()
+    qtbot.waitUntil(lambda: cf.state.apps == [], timeout=10000)
+    cf.state.service_tokens.append(
+        {"id": "tk", "name": "Vieux", "client_id": "vieux.access", "expires_at": ""}
+    )
+    view.refresh()
+    qtbot.waitUntil(lambda: view.remote_tokens.rowCount() == 1, timeout=10000)
+    view.remote_tokens.selectRow(0)
+    assert view.delete_token_button.isEnabled()
+    view.delete_selected_token()
+    qtbot.waitUntil(lambda: cf.state.service_tokens == [], timeout=10000)
 
 
 def test_policy_editor_validates_the_rules(qtbot, gui):
@@ -268,6 +375,20 @@ def test_policy_editor_validates_the_rules(qtbot, gui):
         value is not None and value.id == "p1" and value.decision == "non_identity" and value.precedence == 3
     )
     assert value.include == (PolicyRule("group", "g1"), PolicyRule("service_token", "tok1"), unknown)
+
+    shared = AccessPolicy(
+        "p2",
+        "Partagée",
+        "allow",
+        (PolicyRule("email", "a@b.fr"),),
+        reusable=True,
+        app_count=3,
+        extra={"connection_rules": {"rdp": {}}},
+    )
+    edited = PolicyEditDialog(window, shared, groups, {})
+    kept = edited.value()
+    assert kept is not None and kept.reusable and kept.extra == {"connection_rules": {"rdp": {}}}
+    assert edited.findChildren(type(edited.warning))  # avertissement de partage affiché
 
     fresh = PolicyEditDialog(window, None, groups, {})
     assert fresh.value() is None and "nom" in fresh.error.text()

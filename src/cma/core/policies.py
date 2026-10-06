@@ -53,6 +53,14 @@ class PolicyRule:
 
 @dataclass(frozen=True)
 class AccessPolicy:
+    """Une politique Access.
+
+    `reusable` : politique du compte, partagée entre applications (`app_count` d'entre elles) ; elle se modifie
+    par `/access/policies/{id}`. Sinon, politique « legacy » propre à une application. `precedence` est son rang
+    dans l'application lue. `extra` garde les champs que CMA ne gère pas (`connection_rules` pour le RDP,
+    approbations, isolation…) : ils repartent tels quels à l'enregistrement.
+    """
+
     id: str
     name: str
     decision: str
@@ -60,6 +68,14 @@ class AccessPolicy:
     exclude: tuple[dict[str, Any], ...] = ()
     require: tuple[dict[str, Any], ...] = ()
     precedence: int | None = None
+    reusable: bool = False
+    app_count: int | None = None
+    extra: dict[str, Any] = field(default_factory=dict[str, Any], compare=False, hash=False)
+
+    @property
+    def shared(self) -> bool:
+        """Partagée avec au moins une autre application : la modifier change aussi leur accès."""
+        return self.reusable and (self.app_count or 0) > 1
 
 
 # --- Conversion depuis et vers l'API -----------------------------------------------------------------------
@@ -91,8 +107,14 @@ def rule_to_api(rule: PolicyRule) -> dict[str, Any]:
     return {rule.kind: {key: rule.value} if key else {}}
 
 
+_MANAGED = {"name", "decision", "include", "exclude", "require"}
+# Champs calculés par Cloudflare, jamais renvoyés.
+_READ_ONLY = {"id", "uid", "created_at", "updated_at", "app_count", "reusable", "precedence"}
+
+
 def policy_from_api(data: dict[str, Any]) -> AccessPolicy:
     precedence = data.get("precedence")
+    app_count = data.get("app_count")
     return AccessPolicy(
         id=str(data.get("id", "")),
         name=str(data.get("name", "")),
@@ -101,18 +123,24 @@ def policy_from_api(data: dict[str, Any]) -> AccessPolicy:
         exclude=tuple(cast(list[dict[str, Any]], data.get("exclude") or [])),
         require=tuple(cast(list[dict[str, Any]], data.get("require") or [])),
         precedence=int(precedence) if isinstance(precedence, int) else None,
+        reusable=bool(data.get("reusable", False)),
+        app_count=int(app_count) if isinstance(app_count, int) else None,
+        extra={k: v for k, v in data.items() if k not in _MANAGED | _READ_ONLY},
     )
 
 
 def policy_to_api(policy: AccessPolicy) -> dict[str, Any]:
+    """Corps d'une création ou d'une modification. Le rang n'est envoyé que pour une politique legacy : celui
+    d'une politique réutilisable dépend de l'application et se règle en l'y attachant."""
     body: dict[str, Any] = {
+        **policy.extra,
         "name": policy.name,
         "decision": policy.decision,
         "include": [rule_to_api(r) for r in policy.include],
         "exclude": list(policy.exclude),
         "require": list(policy.require),
     }
-    if policy.precedence is not None:
+    if policy.precedence is not None and not policy.reusable:
         body["precedence"] = policy.precedence
     return body
 

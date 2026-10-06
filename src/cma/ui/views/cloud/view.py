@@ -87,7 +87,7 @@ from cma.ui.views.cloud.helpers import (
     plural,
     tunnel_state,
 )
-from cma.ui.views.cloud.policies import PoliciesDialog, show_policies
+from cma.ui.views.cloud.policies import AccountPoliciesDialog, PoliciesDialog, show_policies
 from cma.ui.views.cloud.tunnel_create import ask_tunnel_name, show_new_tunnel
 from cma.ui.views.common import confirm
 from cma.ui.widgets import (
@@ -128,6 +128,7 @@ class CloudView(QWidget):
         self.read_at: datetime | None = None
         self._auto_done = False
         self._loading = False
+        self._refresh_again = False
         self._preferred_tunnel: Tunnel | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 16)
@@ -375,10 +376,16 @@ class CloudView(QWidget):
         self.policies_button = button(tr("Politiques…"), "user")
         self.policies_button.setToolTip(tr("Qui peut atteindre l'application"))
         self.policies_button.clicked.connect(self.manage_policies)
+        self.delete_app_button = button(tr("Supprimer…"), "trash", danger=True)
+        self.delete_app_button.clicked.connect(self.delete_selected_app)
+        account_policies = button(tr("Politiques du compte…"), "list-details")
+        account_policies.clicked.connect(self.manage_account_policies)
         row.addWidget(protect)
         row.addWidget(self.allow_button)
         row.addWidget(self.policies_button)
+        row.addWidget(self.delete_app_button)
         row.addStretch()
+        row.addWidget(account_policies)
         box.addLayout(row)
         self.apps_hint = label(
             tr("Sélectionnez une application pour voir qui y a accès ou y autoriser un service token."),
@@ -421,6 +428,9 @@ class CloudView(QWidget):
         self.rotate_button = button(tr("Changer le secret…"), "rotate-clockwise")
         self.rotate_button.clicked.connect(self.rotate_selected_token)
         row.addWidget(self.rotate_button)
+        self.delete_token_button = button(tr("Supprimer…"), "trash", danger=True)
+        self.delete_token_button.clicked.connect(self.delete_selected_token)
+        row.addWidget(self.delete_token_button)
         row.addStretch()
         box.addLayout(row)
         box.addWidget(
@@ -539,9 +549,14 @@ class CloudView(QWidget):
 
     def refresh(self) -> None:
         account = self.account.currentData()
-        if not isinstance(account, Account) or self._loading:
+        if not isinstance(account, Account):
+            return
+        if self._loading:
+            # Une lecture est en cours, peut-être d'avant la dernière modification : relire juste après elle.
+            self._refresh_again = True
             return
         self._loading = True
+        self._refresh_again = False
         self.refresh_button.setEnabled(False)
         self.status.setText(tr("Lecture du compte…"))
 
@@ -551,6 +566,8 @@ class CloudView(QWidget):
             self.tabs.setEnabled(True)
             self.read_at = datetime.now()
             self._fill(overview)
+            if self._refresh_again:
+                self.refresh()
 
         self.ctx.run(self.admin.overview(account), done, self._error)
 
@@ -806,14 +823,18 @@ class CloudView(QWidget):
             publish = menu.addAction(tr("Publier un service sur ce tunnel…"), lambda: self.publish(tunnel))
             publish.setEnabled(self.publish_button.isEnabled())
             menu.addAction(tr("État des connecteurs…"), lambda: self.check_connectors(tunnel))
+            menu.addSeparator()
+            menu.addAction(tr("Renommer…"), lambda: self.rename_tunnel(tunnel))
+            menu.addAction(tr("Supprimer le tunnel…"), lambda: self.delete_tunnel(tunnel))
         menu.exec(self.tree.viewport().mapToGlobal(pos))
         menu.deleteLater()
 
     def edit_service(self, tunnel: Tunnel, rule: IngressRule) -> None:
         """Change la cible d'un nom d'hôte publié (même nom, même DNS, même protection Access)."""
-        service = ask_service(self, tunnel, rule)
-        if not service:
+        answer = ask_service(self, tunnel, rule)
+        if not answer:
             return
+        service, origin = answer
         self.status.setText(tr("Modification du service…"))
 
         def done(updated: IngressRule) -> None:
@@ -825,7 +846,7 @@ class CloudView(QWidget):
             )
             self.refresh()
 
-        self.ctx.run(self.admin.edit_hostname(tunnel, rule.hostname, service), done, self._error)
+        self.ctx.run(self.admin.edit_hostname(tunnel, rule.hostname, service, origin), done, self._error)
 
     def create_tunnel(self) -> None:
         """Crée un tunnel géré depuis Cloudflare, puis donne la commande d'installation de son connecteur."""
@@ -929,23 +950,31 @@ class CloudView(QWidget):
         has_app = self._selected_app() is not None
         self.allow_button.setEnabled(has_app)
         self.policies_button.setEnabled(has_app)
+        self.delete_app_button.setEnabled(has_app)
         self.apps_hint.setVisible(not has_app and bool(self.overview and self.overview.apps))
+
+    def _policy_tokens(self) -> dict[str, str]:
+        """Service tokens du compte par nom, pour la saisie « token : Nom »."""
+        return {t.name: t.id for t in (self.overview.tokens if self.overview else [])}
 
     def manage_policies(self) -> None:
         """Politiques Access de l'application sélectionnée : lecture, puis modification dans une boîte de dialogue."""
         app = self._selected_app()
         if app is None:
             return
-        tokens = {t.name: t.id for t in (self.overview.tokens if self.overview else [])}
         self.status.setText(tr("Lecture des politiques…"))
+
+        async def load() -> tuple[list[AccessPolicy], list[AccessGroup], list[AccessPolicy]]:
+            policies, groups = await self.admin.policies(app)
+            return policies, groups, await self.admin.account_policies()
 
         async def after(action: Awaitable[object]) -> list[AccessPolicy]:
             await action
             return (await self.admin.policies(app))[0]
 
-        def loaded(result: tuple[list[AccessPolicy], list[AccessGroup]]) -> None:
+        def loaded(result: tuple[list[AccessPolicy], list[AccessGroup], list[AccessPolicy]]) -> None:
             self._show_summary()
-            policies, groups = result
+            policies, groups, account = result
             dialog: PoliciesDialog | None = None
 
             def failed(error: BaseException) -> None:
@@ -956,13 +985,147 @@ class CloudView(QWidget):
             def save(policy: AccessPolicy, done: Callable[[list[AccessPolicy]], None]) -> None:
                 self.ctx.run(after(self.admin.save_policy(app, policy)), done, failed)
 
-            def delete(policy: AccessPolicy, done: Callable[[list[AccessPolicy]], None]) -> None:
-                self.ctx.run(after(self.admin.delete_policy(app, policy)), done, failed)
+            def remove(policy: AccessPolicy, done: Callable[[list[AccessPolicy]], None]) -> None:
+                self.ctx.run(after(self.admin.remove_policy(app, policy)), done, failed)
 
-            dialog = PoliciesDialog(self, app, policies, groups, tokens, save=save, delete=delete)
+            def attach(policy: AccessPolicy, done: Callable[[list[AccessPolicy]], None]) -> None:
+                self.ctx.run(after(self.admin.attach_policy(app, policy)), done, failed)
+
+            dialog = PoliciesDialog(
+                self,
+                app,
+                policies,
+                groups,
+                self._policy_tokens(),
+                account,
+                save=save,
+                remove=remove,
+                attach=attach,
+            )
             show_policies(dialog)
 
-        self.ctx.run(self.admin.policies(app), loaded, self._error)
+        self.ctx.run(load(), loaded, self._error)
+
+    def manage_account_policies(self) -> None:
+        """Toutes les politiques réutilisables du compte : modifier, supprimer celles qui ne servent plus."""
+        self.status.setText(tr("Lecture des politiques…"))
+
+        async def load() -> tuple[list[AccessPolicy], list[AccessGroup]]:
+            return await self.admin.account_policies(), await self.admin.groups()
+
+        async def after(action: Awaitable[object]) -> list[AccessPolicy]:
+            await action
+            return await self.admin.account_policies()
+
+        def loaded(result: tuple[list[AccessPolicy], list[AccessGroup]]) -> None:
+            self._show_summary()
+            policies, groups = result
+            dialog: AccountPoliciesDialog | None = None
+
+            def failed(error: BaseException) -> None:
+                if dialog is not None:
+                    dialog.failed()
+                self._error(error)
+
+            def save(policy: AccessPolicy, done: Callable[[list[AccessPolicy]], None]) -> None:
+                self.ctx.run(after(self.admin.save_policy(None, policy)), done, failed)
+
+            def delete(policy: AccessPolicy, done: Callable[[list[AccessPolicy]], None]) -> None:
+                self.ctx.run(after(self.admin.delete_account_policy(policy)), done, failed)
+
+            dialog = AccountPoliciesDialog(
+                self, policies, groups, self._policy_tokens(), save=save, delete=delete
+            )
+            show_policies(dialog)
+
+        self.ctx.run(load(), loaded, self._error)
+
+    # --- Ménage -----------------------------------------------------------------------------------------------
+
+    def rename_tunnel(self, tunnel: Tunnel) -> None:
+        existing = [v.tunnel.name for v in self.overview.tunnels] if self.overview else []
+        name = ask_tunnel_name(self, existing, tunnel.name)
+        if not name:
+            return
+        self.status.setText(tr("Renommage du tunnel…"))
+
+        def done(renamed: Tunnel) -> None:
+            self.ctx.notify("success", tr("Tunnel renommé : {name}.").format(name=renamed.name))
+            self.refresh()
+
+        self.ctx.run(self.admin.rename_tunnel(tunnel, name), done, self._error)
+
+    def delete_tunnel(self, tunnel: Tunnel) -> None:
+        view = (
+            next((v for v in self.overview.tunnels if v.tunnel.id == tunnel.id), None)
+            if self.overview
+            else None
+        )
+        hostnames = [r.hostname for r in view.hostnames] if view else []
+        text = tr(
+            "Le tunnel doit être arrêté sur son serveur (aucun connecteur actif). Ses {n} nom(s) d'hôte publié(s) "
+            "cessent de répondre et leurs enregistrements DNS qui le visent sont supprimés. Les applications Access "
+            "et les profils CMA ne sont pas touchés."
+        ).format(n=len(hostnames))
+        if not confirm(
+            self, tr("Supprimer le tunnel « {name} » ?").format(name=tunnel.name), text, tr("Supprimer")
+        ):
+            return
+        self.status.setText(tr("Suppression du tunnel…"))
+
+        def done(removed: int) -> None:
+            self.ctx.notify(
+                "success",
+                tr("Tunnel « {name} » supprimé, {n} enregistrement(s) DNS retiré(s).").format(
+                    name=tunnel.name, n=removed
+                ),
+            )
+            self.refresh()
+
+        self.ctx.run(self.admin.delete_tunnel(tunnel, hostnames), done, self._error)
+
+    def delete_selected_app(self) -> None:
+        app = self._selected_app()
+        if app is None or not confirm(
+            self,
+            tr("Supprimer l'application Access « {name} » ?").format(name=app.name),
+            tr(
+                "{domain} ne sera plus protégé par Cloudflare Access : s'il est publié par un tunnel, il devient "
+                "joignable sans authentification. Les politiques réutilisables restent dans le compte."
+            ).format(domain=app.domain),
+            tr("Supprimer"),
+        ):
+            return
+        self.status.setText(tr("Suppression de l'application…"))
+
+        def done(_result: object) -> None:
+            self.ctx.notify("success", tr("Application « {name} » supprimée.").format(name=app.name))
+            self.refresh()
+
+        self.ctx.run(self.admin.delete_app(app), done, self._error)
+
+    def delete_selected_token(self) -> None:
+        remote = self.selected_remote_token()
+        if remote is None:
+            return
+        local = self._local_token(remote)
+        text = tr("Cloudflare révoque le token aussitôt : les accès qui l'utilisent sont refusés.")
+        if local is not None:
+            text += " " + tr("Sa copie dans CMA reste dans la vue Service tokens, à supprimer à part.")
+        if not confirm(
+            self,
+            tr("Supprimer le service token « {name} » ?").format(name=remote.name),
+            text,
+            tr("Supprimer"),
+        ):
+            return
+        self.status.setText(tr("Suppression du service token…"))
+
+        def done(_result: object) -> None:
+            self.ctx.notify("success", tr("Service token « {name} » supprimé.").format(name=remote.name))
+            self.refresh()
+
+        self.ctx.run(self.admin.delete_remote_token(remote), done, self._error)
 
     def protect_hostname(self) -> None:
         hostnames = []
@@ -1062,6 +1225,7 @@ class CloudView(QWidget):
         remote = self.selected_remote_token()
         self.extend_button.setEnabled(remote is not None)
         self.rotate_button.setEnabled(self._local_token(remote) is not None)
+        self.delete_token_button.setEnabled(remote is not None)
 
     def extend_selected_token(self) -> None:
         remote = self.selected_remote_token()

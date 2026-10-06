@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -212,6 +214,19 @@ class EditServiceDialog(QDialog):
         self.service = QLineEdit(rule.service)
         self.service.setAccessibleName(tr("Service"))
         form.addRow(tr("Service"), self.service)
+        self.no_tls_verify = QCheckBox(
+            tr("Accepter le certificat de l'origine sans le vérifier (auto-signé)")
+        )
+        self.no_tls_verify.setChecked(bool(rule.origin.get("noTLSVerify")))
+        form.addRow(self.no_tls_verify)
+        self.host_header = QLineEdit(str(rule.origin.get("httpHostHeader") or ""))
+        self.host_header.setAccessibleName(tr("En-tête Host envoyé à l'origine"))
+        self.host_header.setPlaceholderText(tr("inchangé"))
+        form.addRow(tr("En-tête Host envoyé à l'origine"), self.host_header)
+        self.server_name = QLineEdit(str(rule.origin.get("originServerName") or ""))
+        self.server_name.setAccessibleName(tr("Nom attendu dans le certificat de l'origine"))
+        self.server_name.setPlaceholderText(tr("inchangé"))
+        form.addRow(tr("Nom attendu dans le certificat de l'origine"), self.server_name)
         layout.addLayout(form)
         layout.addWidget(
             label(
@@ -231,13 +246,30 @@ class EditServiceDialog(QDialog):
         self.ok_button.clicked.connect(self._accept)
         layout.addWidget(buttons)
         self.service.textChanged.connect(self._refresh)
+        self.host_header.textChanged.connect(self._refresh)
+        self.server_name.textChanged.connect(self._refresh)
+        self.no_tls_verify.toggled.connect(self._refresh)
         self._refresh()
 
     def value(self) -> str:
         return self.service.text().strip()
 
+    def origin(self) -> dict[str, Any]:
+        """Options d'origine modifiables ici ; une valeur vide ou fausse retire l'option."""
+        return {
+            "noTLSVerify": self.no_tls_verify.isChecked(),
+            "httpHostHeader": self.host_header.text().strip(),
+            "originServerName": self.server_name.text().strip(),
+        }
+
+    def changed(self) -> bool:
+        before = {
+            key: self.rule.origin.get(key) or ("" if key != "noTLSVerify" else False) for key in self.origin()
+        }
+        return self.value() != self.rule.service or self.origin() != before
+
     def _refresh(self, *_args: object) -> None:
-        self.ok_button.setEnabled(bool(self.value()) and self.value() != self.rule.service)
+        self.ok_button.setEnabled(bool(self.value()) and self.changed())
 
     def _accept(self) -> None:
         problem = service_error(self.value())
@@ -404,9 +436,9 @@ class CreateTokenDialog(QDialog):
 # Fonctions de module : les tests les remplacent pour ne pas ouvrir de boîte modale.
 
 
-def ask_service(parent: QWidget, tunnel: Tunnel, rule: IngressRule) -> str | None:
+def ask_service(parent: QWidget, tunnel: Tunnel, rule: IngressRule) -> tuple[str, dict[str, Any]] | None:
     dialog = EditServiceDialog(parent, tunnel, rule)
-    return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
+    return (dialog.value(), dialog.origin()) if dialog.exec() == QDialog.DialogCode.Accepted else None
 
 
 def ask_protect(parent: QWidget, hostnames: list[str]) -> str | None:

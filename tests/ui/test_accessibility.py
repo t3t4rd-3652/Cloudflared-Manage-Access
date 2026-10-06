@@ -41,7 +41,12 @@ def test_dialogs_have_no_unnamed_control(qtbot, gui, tmp_path):
     from cma.core.policies import AccessGroup, AccessPolicy, PolicyRule
     from cma.core.transfer import build_export, plan_import
     from cma.ui.views import cloud
-    from cma.ui.views.cloud.policies import PoliciesDialog, PolicyEditDialog
+    from cma.ui.views.cloud.policies import (
+        AccountPoliciesDialog,
+        ChoosePolicyDialog,
+        PoliciesDialog,
+        PolicyEditDialog,
+    )
     from cma.ui.views.cloud.tunnel_create import CreateTunnelDialog, NewTunnelDialog
 
     ctx, window = gui
@@ -77,8 +82,14 @@ def test_dialogs_have_no_unnamed_control(qtbot, gui, tmp_path):
             [AccessPolicy("p1", "Équipe", "allow", (PolicyRule("email_domain", "exemple.fr"),))],
             [],
             {},
+            [],
             save=lambda *_a: None,
-            delete=lambda *_a: None,
+            remove=lambda *_a: None,
+            attach=lambda *_a: None,
+        ),
+        AccountPoliciesDialog(window, [], [], {}, save=lambda *_a: None, delete=lambda *_a: None),
+        ChoosePolicyDialog(
+            window, [AccessPolicy("p1", "Équipe", "allow", reusable=True, app_count=2)], [], {}
         ),
         CreateTunnelDialog(window, ["bureau"]),
         NewTunnelDialog(window, NewTunnel(tunnel, "jeton-de-connecteur-assez-long")),

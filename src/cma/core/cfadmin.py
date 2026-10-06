@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from typing import Any
 
 from cma.core.cfapi import (
     API_BASE,
@@ -366,6 +367,8 @@ class CloudflareAdmin:
 
         def load() -> tuple[list[AccessPolicy], list[AccessGroup]]:
             policies = api.list_policies(account, app.id)
+            shared = {p.id: p.app_count for p in api.list_account_policies(account)}
+            policies = [replace(p, app_count=shared.get(p.id)) if p.reusable else p for p in policies]
             try:
                 groups = api.list_access_groups(account)
             except CloudflareApiError:
@@ -374,13 +377,98 @@ class CloudflareAdmin:
 
         return await asyncio.to_thread(load)
 
-    async def save_policy(self, app: AccessApp, policy: AccessPolicy) -> AccessPolicy:
+    async def groups(self) -> list[AccessGroup]:
+        """Groupes Access du compte ; vide sans la permission (facultative) de les lire."""
         api = self.api()
-        return await asyncio.to_thread(api.save_policy, self.account_id(), app.id, policy)
+        try:
+            return await asyncio.to_thread(api.list_access_groups, self.account_id())
+        except CloudflareApiError:
+            return []
 
-    async def delete_policy(self, app: AccessApp, policy: AccessPolicy) -> None:
+    async def account_policies(self) -> list[AccessPolicy]:
+        """Politiques réutilisables du compte, avec leur nombre d'applications."""
         api = self.api()
-        await asyncio.to_thread(api.delete_policy, self.account_id(), app.id, policy.id)
+        return await asyncio.to_thread(api.list_account_policies, self.account_id())
+
+    async def save_policy(self, app: AccessApp | None, policy: AccessPolicy) -> AccessPolicy:
+        """Nouvelle politique (sans id) : créée dans le compte, puis attachée à `app` s'il y en a une.
+        Politique existante : modifiée là où elle vit (dans le compte si elle est réutilisable)."""
+        api = self.api()
+        account = self.account_id()
+
+        def run() -> AccessPolicy:
+            if policy.id:
+                return api.update_policy(account, app.id if app else "", policy)
+            if app is not None:
+                api.app_for_update(
+                    account, app.id
+                )  # avant de créer : pas de politique orpheline en cas de refus
+            created = api.create_account_policy(account, policy)
+            if app is not None:
+                api.attach_policy(account, app.id, created.id)
+            return created
+
+        return await asyncio.to_thread(run)
+
+    async def attach_policy(self, app: AccessApp, policy: AccessPolicy) -> None:
+        api = self.api()
+        await asyncio.to_thread(api.attach_policy, self.account_id(), app.id, policy.id)
+
+    async def remove_policy(self, app: AccessApp, policy: AccessPolicy) -> None:
+        """Retire la politique de l'application. Réutilisable : elle reste dans le compte. Legacy : supprimée."""
+        api = self.api()
+        account = self.account_id()
+        if policy.reusable:
+            await asyncio.to_thread(api.detach_policy, account, app.id, policy.id)
+        else:
+            await asyncio.to_thread(api.delete_legacy_policy, account, app.id, policy.id)
+
+    async def delete_account_policy(self, policy: AccessPolicy) -> None:
+        """Supprime une politique réutilisable que plus aucune application n'utilise."""
+        if policy.app_count:
+            raise CloudflareApiError(
+                tr("« {name} » sert encore à {n} application(s) : retirez-la d'abord de chacune.").format(
+                    name=policy.name, n=policy.app_count
+                )
+            )
+        api = self.api()
+        await asyncio.to_thread(api.delete_account_policy, self.account_id(), policy.id)
+
+    # --- Ménage --------------------------------------------------------------------------------------------
+
+    async def rename_tunnel(self, tunnel: Tunnel, name: str) -> Tunnel:
+        api = self.api()
+        return await asyncio.to_thread(api.rename_tunnel, self.account_id(), tunnel, name)
+
+    async def delete_tunnel(self, tunnel: Tunnel, hostnames: list[str]) -> int:
+        """Supprime un tunnel arrêté et les enregistrements DNS de ses noms d'hôte qui le visent encore.
+        Renvoie le nombre d'enregistrements DNS supprimés. Refusé tant qu'un connecteur est actif."""
+        api = self.api()
+        account = self.account_id()
+
+        def run() -> int:
+            active = api.tunnel_connectors(account, tunnel.id)
+            if active:
+                raise CloudflareApiError(
+                    tr(
+                        "Le tunnel {name} a encore {n} connecteur(s) actif(s) : arrêtez ou désinstallez cloudflared "
+                        "sur le serveur, puis recommencez."
+                    ).format(name=tunnel.name, n=len(active))
+                )
+            removed = sum(1 for hostname in hostnames if api.delete_tunnel_cname(account, tunnel, hostname))
+            api.delete_tunnel(account, tunnel.id)
+            return removed
+
+        return await asyncio.to_thread(run)
+
+    async def delete_app(self, app: AccessApp) -> None:
+        api = self.api()
+        await asyncio.to_thread(api.delete_access_app, self.account_id(), app.id)
+
+    async def delete_remote_token(self, remote: RemoteServiceToken) -> None:
+        """Révoque le token chez Cloudflare. Sa copie dans CMA, si elle existe, reste à supprimer à part."""
+        api = self.api()
+        await asyncio.to_thread(api.delete_service_token, self.account_id(), remote.id)
 
     async def protect_hostname(self, hostname: str) -> AccessApp:
         """Application Access « self-hosted » pour ce nom d'hôte ; l'existante est réutilisée."""
@@ -443,12 +531,14 @@ class CloudflareAdmin:
                 steps.append(PublishStep("profile", False, str(exc)))
         return PublishResult(rule, app, profile, tuple(steps))
 
-    async def edit_hostname(self, tunnel: Tunnel, hostname: str, service: str) -> IngressRule:
-        """Change le service publié pour `hostname`. Le profil CMA lié suit si le type de service change
-        (ssh:// → rdp://…) ; son port local est gardé."""
+    async def edit_hostname(
+        self, tunnel: Tunnel, hostname: str, service: str, origin: dict[str, Any] | None = None
+    ) -> IngressRule:
+        """Change le service publié pour `hostname` et, si `origin` est donné, ses options d'origine. Le profil
+        CMA lié suit si le type de service change (ssh:// → rdp://…) ; son port local est gardé."""
         api = self.api()
         rule = await asyncio.to_thread(
-            api.update_hostname_service, self.account_id(), tunnel, hostname, service
+            api.update_hostname_service, self.account_id(), tunnel, hostname, service, origin
         )
         scheme, _port = guess_service_from_ingress(service)
         kind = _SCHEME_TYPES.get(scheme)

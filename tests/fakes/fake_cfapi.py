@@ -72,10 +72,14 @@ class FakeCloudflare:
     )
     apps: list[dict[str, Any]] = field(
         default_factory=lambda: [
-            {"id": "app1", "name": "SSH", "domain": "ssh.exemple.fr", "type": "self_hosted"}
+            {"id": "app1", "name": "SSH", "domain": "ssh.exemple.fr", "type": "self_hosted", "policies": []}
         ]
     )
+    # Politiques legacy (propres à une application), par application.
     policies: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    # Politiques réutilisables du compte ; une application y renvoie par ses liens {id, precedence}.
+    account_policies: list[dict[str, Any]] = field(default_factory=list)
+    app_puts: int = 0
     groups: list[dict[str, Any]] = field(default_factory=lambda: [{"id": "g1", "name": "Admins"}])
     # Jeton sans « Access: Organizations, Identity Providers, and Groups : Read » : /access/groups est refusé.
     groups_forbidden: bool = False
@@ -134,9 +138,40 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.headers.get("Authorization") != f"Bearer {state.token}":
             self._error(401, 10000, "Authentication error")
             return
-        body = self._body() if method in ("POST", "PUT") else None
+        body = self._body() if method in ("POST", "PUT", "PATCH") else None
         with state.lock:
             self._route(method, path, query, body)
+
+    def _links(self, policies: list[Any]) -> list[dict[str, Any]] | None:
+        """Liens d'une application vers des politiques réutilisables (ids ou objets {id, precedence})."""
+        known = {p["id"] for p in self.state.account_policies}
+        links = []
+        for rank, item in enumerate(policies, start=1):
+            pid = item if isinstance(item, str) else item.get("id")
+            if pid not in known:
+                return None
+            links.append(
+                {"id": pid, "precedence": rank if isinstance(item, str) else item.get("precedence", rank)}
+            )
+        return links
+
+    def _shared(self, policy: dict[str, Any]) -> dict[str, Any]:
+        count = sum(
+            1 for a in self.state.apps for link in a.get("policies") or [] if link["id"] == policy["id"]
+        )
+        return {**policy, "app_count": count}
+
+    def _app(self, app: dict[str, Any]) -> dict[str, Any]:
+        """L'application telle que l'API la renvoie : politiques développées, rang compris, et legacy à la suite."""
+        if not app:
+            return {}
+        by_id = {p["id"]: p for p in self.state.account_policies}
+        expanded = [
+            {**by_id[link["id"]], "precedence": link["precedence"], "reusable": True}
+            for link in sorted(app.get("policies") or [], key=lambda link: link["precedence"])
+        ]
+        expanded += [{**p, "reusable": False} for p in self.state.policies.get(app["id"], [])]
+        return {**{k: v for k, v in app.items() if not k.startswith("_")}, "policies": expanded}
 
     def _route(self, method: str, path: str, query: dict[str, list[str]], body: Any) -> None:
         state = self.state
@@ -157,6 +192,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 state.configs[tunnel["id"]] = {"ingress": [{"service": "http_status:404"}]}
                 return self._send(200, _ok(tunnel))
             return self._send(200, _page(state.tunnels, query))
+        if m := re.fullmatch(r"/accounts/(\w+)/cfd_tunnel/(\w+)", path):
+            tunnel = next((t for t in state.tunnels if t["id"] == m.group(2)), None)
+            if tunnel is None:
+                return self._error(404, 1003, "Tunnel not found")
+            if method == "DELETE":
+                if state.connectors.get(tunnel["id"]):
+                    return self._error(400, 1022, "Cannot delete tunnel with active connections")
+                state.tunnels.remove(tunnel)
+                return self._send(200, _ok(tunnel))
+            if method == "PATCH":
+                if any(t["name"] == body["name"] and t is not tunnel for t in state.tunnels):
+                    return self._error(400, 1013, "You already have a tunnel with that name.")
+                tunnel["name"] = body["name"]
+            return self._send(200, _ok(tunnel))
         if m := re.fullmatch(r"/accounts/(\w+)/cfd_tunnel/(\w+)/token", path):
             return self._send(
                 200, _ok("eyJhIjoiYWNjMSIsInQiOiJ0dW5uZWwiLCJzIjoic2VjcmV0LWRlLXRlc3QtbG9uZyJ9")
@@ -196,28 +245,87 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if method == "POST":
                 if any(a["domain"] == body["domain"] for a in state.apps):
                     return self._error(400, 12130, "access.api.error.conflict: application already exists")
-                app = {**body, "id": uuid.uuid4().hex}
+                app = {
+                    **body,
+                    "id": uuid.uuid4().hex,
+                    "aud": uuid.uuid4().hex,
+                    "created_at": "2026-10-06T00:00:00Z",
+                }
+                app["policies"] = self._links(body.get("policies") or [])
+                app["_new"] = True  # créée par l'API : n'accepte plus de politique legacy
                 state.apps.append(app)
-                return self._send(200, _ok(app))
-            return self._send(200, _page(state.apps, query))
+                return self._send(200, _ok(self._app(app)))
+            return self._send(200, _page([self._app(a) for a in state.apps], query))
+        if m := re.fullmatch(r"/accounts/(\w+)/access/apps/(\w+)", path):
+            app = next((a for a in state.apps if a["id"] == m.group(2)), None)
+            if app is None:
+                return self._error(404, 12130, "access.api.error.not_found")
+            if method == "DELETE":
+                state.apps.remove(app)
+                state.policies.pop(app["id"], None)
+                return self._send(200, _ok({"id": app["id"]}))
+            if method == "PUT":
+                computed = sorted(k for k in body if k in ("id", "uid", "aud", "created_at", "updated_at"))
+                if computed or not body.get("domain") or not body.get("type"):
+                    return self._error(400, 12130, f"access.api.error.invalid_request {computed}")
+                kept = {k: app[k] for k in ("id", "aud", "created_at", "_new") if k in app}
+                links = self._links(body.get("policies") or [])
+                if links is None:
+                    return self._error(400, 12130, "access.api.error.policy_not_found")
+                app.clear()
+                app.update({**body, **kept, "policies": links})
+                state.app_puts += 1
+            return self._send(200, _ok(self._app(app)))
         if m := re.fullmatch(r"/accounts/(\w+)/access/apps/(\w+)/policies", path):
-            policies = state.policies.setdefault(m.group(2), [])
+            app = next((a for a in state.apps if a["id"] == m.group(2)), {})
+            legacy = state.policies.setdefault(m.group(2), [])
             if method == "GET":
-                return self._send(200, _page(policies, query))
-            policy = {**body, "id": uuid.uuid4().hex, "precedence": len(policies) + 1}
-            policies.append(policy)
+                return self._send(200, _page(self._app(app).get("policies", []), query))
+            if app.get("_new"):
+                return self._error(400, 12130, "legacy policies cannot be added to new applications")
+            policy = {**body, "id": uuid.uuid4().hex, "precedence": len(legacy) + 1, "reusable": False}
+            legacy.append(policy)
             return self._send(200, _ok(policy))
         if m := re.fullmatch(r"/accounts/(\w+)/access/apps/(\w+)/policies/(\w+)", path):
-            policies = state.policies.setdefault(m.group(2), [])
-            policy = next((p for p in policies if p["id"] == m.group(3)), None)
+            legacy = state.policies.setdefault(m.group(2), [])
+            policy = next((p for p in legacy if p["id"] == m.group(3)), None)
+            if policy is None:
+                if any(p["id"] == m.group(3) for p in state.account_policies):
+                    return self._error(400, 12130, "reusable policies are managed with /access/policies")
+                return self._error(404, 12131, "access.api.error.policy_not_found")
+            if method == "DELETE":
+                legacy.remove(policy)
+                return self._send(200, _ok({"id": policy["id"]}))
+            policy.clear()
+            policy.update({**body, "id": m.group(3), "reusable": False})
+            return self._send(200, _ok(policy))
+        if m := re.fullmatch(r"/accounts/(\w+)/access/policies", path):
+            if method == "POST":
+                if not body.get("name") or not body.get("decision") or not body.get("include"):
+                    return self._error(400, 12130, "access.api.error.invalid_policy")
+                policy = {k: v for k, v in body.items() if k != "precedence"}
+                policy.update({"id": uuid.uuid4().hex, "reusable": True})
+                state.account_policies.append(policy)
+                return self._send(200, _ok({**policy, "app_count": 0}))
+            return self._send(200, _page([self._shared(p) for p in state.account_policies], query))
+        if m := re.fullmatch(r"/accounts/(\w+)/access/policies/(\w+)", path):
+            policy = next((p for p in state.account_policies if p["id"] == m.group(2)), None)
             if policy is None:
                 return self._error(404, 12131, "access.api.error.policy_not_found")
             if method == "DELETE":
-                policies.remove(policy)
+                if self._shared(policy)["app_count"]:
+                    return self._error(400, 12130, "access.api.error.policy_in_use")
+                state.account_policies.remove(policy)
                 return self._send(200, _ok({"id": policy["id"]}))
-            policy.clear()
-            policy.update({**body, "id": m.group(3)})
-            return self._send(200, _ok(policy))
+            if method == "PUT":
+                computed = sorted(
+                    k for k in body if k in ("id", "uid", "created_at", "updated_at", "app_count")
+                )
+                if computed:
+                    return self._error(400, 12130, f"access.api.error.invalid_request {computed}")
+                policy.clear()
+                policy.update({**body, "id": m.group(2), "reusable": True})
+            return self._send(200, _ok(self._shared(policy)))
         if re.fullmatch(r"/accounts/(\w+)/access/groups", path):
             if state.groups_forbidden:
                 return self._error(403, 10000, "Authentication error")
@@ -234,6 +342,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 state.service_tokens.append(token)
                 return self._send(200, _ok({**token, "client_secret": "secret-" + uuid.uuid4().hex}))
             return self._send(200, _page(state.service_tokens, query))
+        if m := re.fullmatch(r"/accounts/(\w+)/access/service_tokens/(\w+)", path):
+            token = next((t for t in state.service_tokens if t["id"] == m.group(2)), None)
+            if token is None:
+                return self._error(404, 12002, "access.api.error.service_token_not_found")
+            state.service_tokens.remove(token)
+            return self._send(200, _ok({"id": token["id"]}))
         if m := re.fullmatch(r"/accounts/(\w+)/access/service_tokens/(\w+)/(refresh|rotate)", path):
             token = next((t for t in state.service_tokens if t["id"] == m.group(2)), None)
             if token is None:
@@ -255,6 +369,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:
         self._handle("DELETE")
+
+    def do_PATCH(self) -> None:
+        self._handle("PATCH")
 
 
 class FakeCloudflareServer:

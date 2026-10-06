@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -115,9 +116,21 @@ def test_access_apps_policies_and_service_tokens(cf, api):
     created = api.create_service_token("acc1", "Robot")
     assert created.client_secret.startswith("secret-")
     assert created.client_secret not in repr(created)
+
+    # Une application nouvelle n'accepte plus de politique legacy : le token passe par une politique du compte.
     policy = api.allow_service_token("acc1", app.id, created.id, "CMA - Robot")
-    assert cf.state.policies[app.id][0]["id"] == policy
-    assert cf.state.policies[app.id][0]["include"] == [{"service_token": {"token_id": created.id}}]
+    [shared] = cf.state.account_policies
+    assert shared["id"] == policy and shared["decision"] == "non_identity"
+    assert shared["include"] == [{"service_token": {"token_id": created.id}}]
+    assert api.app_policy_ids("acc1", app.id) == [policy]
+
+    # Une deuxième application réutilise la même politique ; la redemander ne change rien.
+    other = api.create_access_app("acc1", "Autre", "autre.exemple.fr")
+    assert api.allow_service_token("acc1", other.id, created.id, "CMA - Robot") == policy
+    puts = cf.state.app_puts
+    api.allow_service_token("acc1", other.id, created.id, "CMA - Robot")
+    assert len(cf.state.account_policies) == 1 and cf.state.app_puts == puts
+    assert [p.app_count for p in api.list_account_policies("acc1")] == [2]
     assert [t.client_id for t in api.list_service_tokens("acc1")] == [created.client_id]
 
 
@@ -218,43 +231,144 @@ async def test_edit_a_published_hostname(cf, api, admin, store):
     assert store.snapshot().cloudflare_profile(profile.id).service_type == ServiceType.SSH
 
 
-async def test_access_policies(cf, admin):
+def shared_policies(cf):
+    """Le cas réel : des politiques réutilisables partagées, dont une avec des règles de connexion RDP."""
+    cf.state.apps.append(
+        {"id": "app2", "name": "Proxy", "domain": "proxy.exemple.fr", "type": "self_hosted", "policies": []}
+    )
+    cf.state.account_policies.extend(
+        [
+            {
+                "id": "p1",
+                "name": "without token",
+                "decision": "allow",
+                "include": [{"email": {"email": "moi@exemple.fr"}}],
+                "exclude": [],
+                "require": [],
+                "reusable": True,
+            },
+            {
+                "id": "p2",
+                "name": "RDP",
+                "decision": "non_identity",
+                "include": [{"service_token": {"token_id": "tok1"}}],
+                "exclude": [],
+                "require": [],
+                "connection_rules": {"rdp": {}},
+                "reusable": True,
+            },
+        ]
+    )
+    app1 = cf.state.apps[0]
+    app1.update({"session_duration": "12h", "app_launcher_visible": False})
+    app1["policies"] = [{"id": "p1", "precedence": 1}, {"id": "p2", "precedence": 2}]
+    cf.state.apps[1]["policies"] = [{"id": "p1", "precedence": 1}]
+
+
+async def test_reusable_access_policies(cf, admin):
+    shared_policies(cf)
     await admin.connect(TOKEN)
     app = AccessApp("app1", "SSH", "ssh.exemple.fr", "self_hosted")
     policies, groups = await admin.policies(app)
-    assert policies == [] and groups == [AccessGroup("g1", "Admins")]
+    assert [(p.name, p.reusable, p.app_count, p.shared, p.precedence) for p in policies] == [
+        ("without token", True, 2, True, 1),
+        ("RDP", True, 1, False, 2),
+    ]
+    assert groups == [AccessGroup("g1", "Admins")]
+    assert policies[1].extra == {"connection_rules": {"rdp": {}}}
 
+    # Modifier une politique réutilisable : dans le compte, champs inconnus de CMA conservés.
+    rdp = policies[1]
+    await admin.save_policy(
+        app, replace(rdp, name="RDP Proxmox", include=(*rdp.include, PolicyRule("group", "g1")))
+    )
+    stored = next(p for p in cf.state.account_policies if p["id"] == "p2")
+    assert stored["name"] == "RDP Proxmox" and stored["connection_rules"] == {"rdp": {}}
+    assert stored["include"] == [{"service_token": {"token_id": "tok1"}}, {"group": {"id": "g1"}}]
+
+    # Nouvelle politique : créée dans le compte et attachée en dernier ; les réglages de l'application restent.
     team = await admin.save_policy(
         app, AccessPolicy("", "Équipe", "allow", (PolicyRule("email_domain", "exemple.fr"),))
     )
-    robots = await admin.save_policy(
-        app, AccessPolicy("", "Robots", "non_identity", (PolicyRule("any_valid_service_token"),))
+    app1 = cf.state.apps[0]
+    assert [link["id"] for link in app1["policies"]] == ["p1", "p2", team.id]
+    assert (app1["session_duration"], app1["app_launcher_visible"], app1["domain"]) == (
+        "12h",
+        False,
+        "ssh.exemple.fr",
     )
-    assert team.id and (team.precedence, robots.precedence) == (1, 2)
-    unknown = {"github-organization": {"name": "acme"}}
-    cf.state.policies["app1"][0]["include"].append(unknown)
 
-    policies, _ = await admin.policies(app)
-    assert [p.name for p in policies] == ["Équipe", "Robots"]
-    edited = AccessPolicy(
-        policies[0].id,
-        "Équipe et Admins",
-        "allow",
-        (PolicyRule("group", "g1"), *[r for r in policies[0].include if not r.editable]),
-        precedence=policies[0].precedence,
-    )
-    await admin.save_policy(app, edited)
-    stored = cf.state.policies["app1"][0]
-    assert stored["name"] == "Équipe et Admins"
-    assert stored["include"] == [{"group": {"id": "g1"}}, unknown]  # la règle inconnue de CMA est gardée
+    # Retirer une politique partagée : elle quitte l'application, pas le compte ni les autres applications.
+    await admin.remove_policy(app, policies[0])
+    assert [link["id"] for link in app1["policies"]] == ["p2", team.id]
+    assert cf.state.apps[1]["policies"] == [{"id": "p1", "precedence": 1}]
+    account = {p.name: p.app_count for p in await admin.account_policies()}
+    assert account == {"without token": 1, "RDP Proxmox": 1, "Équipe": 1}
 
-    await admin.delete_policy(app, robots)
-    assert [p["name"] for p in cf.state.policies["app1"]] == ["Équipe et Admins"]
+    # Remettre une politique existante ; supprimer seulement une politique inutilisée.
+    proxy = AccessApp("app2", "Proxy", "proxy.exemple.fr", "self_hosted")
+    await admin.attach_policy(proxy, team)
+    assert [link["id"] for link in cf.state.apps[1]["policies"]] == ["p1", team.id]
+    in_use = next(p for p in await admin.account_policies() if p.id == "p1")
+    with pytest.raises(CloudflareApiError, match="sert encore"):
+        await admin.delete_account_policy(in_use)
+    await admin.remove_policy(proxy, in_use)
+    unused = next(p for p in await admin.account_policies() if p.id == "p1")
+    await admin.delete_account_policy(unused)
+    assert "p1" not in {p["id"] for p in cf.state.account_policies}
 
     # Sans le droit de lire les groupes, les politiques restent lisibles.
     cf.state.groups_forbidden = True
     policies, groups = await admin.policies(app)
-    assert len(policies) == 1 and groups == []
+    assert len(policies) == 2 and groups == []
+
+
+async def test_legacy_access_policies(cf, admin):
+    await admin.connect(TOKEN)
+    app = AccessApp("app1", "SSH", "ssh.exemple.fr", "self_hosted")
+    cf.state.policies["app1"] = [
+        {"id": "l1", "name": "Ancienne", "decision": "allow", "include": [{"everyone": {}}], "precedence": 1}
+    ]
+    [legacy] = (await admin.policies(app))[0]
+    assert not legacy.reusable and legacy.app_count is None
+    await admin.save_policy(app, replace(legacy, name="Ancienne modifiée"))
+    assert cf.state.policies["app1"][0]["name"] == "Ancienne modifiée"
+    assert cf.state.policies["app1"][0]["precedence"] == 1
+    # Une politique legacy présente : CMA ne modifie pas la liste par un PUT de l'application.
+    with pytest.raises(CloudflareApiError, match="legacy"):
+        await admin.save_policy(app, AccessPolicy("", "Nouvelle", "allow", (PolicyRule("everyone"),)))
+    assert cf.state.account_policies == []  # refusé avant toute création
+    await admin.remove_policy(app, legacy)
+    assert cf.state.policies["app1"] == []
+
+
+async def test_cleanup_tunnels_apps_and_tokens(cf, admin):
+    await admin.connect(TOKEN)
+    bureau, labo = Tunnel("t1", "bureau", "healthy"), Tunnel("t2", "labo", "down")
+    renamed = await admin.rename_tunnel(labo, "atelier")
+    assert renamed.name == "atelier" and cf.state.tunnels[1]["name"] == "atelier"
+    with pytest.raises(CloudflareApiError, match="already have"):
+        await admin.rename_tunnel(labo, "bureau")
+
+    # Un tunnel en service n'est pas supprimé ; un tunnel arrêté l'est, avec ses CNAME vers lui.
+    with pytest.raises(CloudflareApiError, match="1 connecteur"):
+        await admin.delete_tunnel(bureau, ["ssh.exemple.fr"])
+    api = admin.api()
+    api.publish_hostname("acc1", labo, "pg.lab.exemple.fr", "tcp://localhost:5432")
+    cf.state.dns["z1"].append(
+        {"id": "autre", "type": "CNAME", "name": "www.exemple.fr", "content": "ailleurs.fr"}
+    )
+    assert await admin.delete_tunnel(labo, ["pg.lab.exemple.fr", "www.exemple.fr"]) == 1
+    assert [t["id"] for t in cf.state.tunnels] == ["t1"]
+    assert cf.state.dns["z2"] == [] and len(cf.state.dns["z1"]) == 1  # le CNAME d'autrui est gardé
+
+    app = AccessApp("app1", "SSH", "ssh.exemple.fr", "self_hosted")
+    await admin.delete_app(app)
+    assert cf.state.apps == []
+    token = await admin.create_service_token("Robot")
+    [remote] = api.list_service_tokens("acc1")
+    await admin.delete_remote_token(remote)
+    assert cf.state.service_tokens == [] and admin.store.snapshot().token(token.id) is not None
 
 
 async def test_create_a_tunnel(cf, admin):
@@ -319,7 +433,11 @@ async def test_admin_publish_protects_and_creates_the_profile(cf, admin, store):
         PublishRequest(tunnel, "db.lab.exemple.fr", "tcp://localhost:5432", protect=True, token_id=token.id)
     )
     assert result.app is not None and result.app.domain == "db.lab.exemple.fr"
-    assert cf.state.policies[result.app.id][0]["decision"] == "non_identity"
+    [policy] = cf.state.account_policies
+    assert policy["decision"] == "non_identity" and policy["include"] == [
+        {"service_token": {"token_id": cf.state.service_tokens[0]["id"]}}
+    ]
+    assert admin.api().app_policy_ids("acc1", result.app.id) == [policy["id"]]
     profile = store.snapshot().cloudflare_profile(result.profile.id)
     assert profile.auth == AuthMode.SERVICE_TOKEN and profile.token_id == token.id
     assert profile.hostname == "db.lab.exemple.fr" and profile.group == "labo"
