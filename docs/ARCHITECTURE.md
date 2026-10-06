@@ -40,7 +40,10 @@ Deux règles structurent le code :
 | `src/cma/core/cloudflared/` | Commande sans shell, analyse des journaux, session, binaire et téléchargement vérifié. |
 | `src/cma/core/ssh/` | Connexions asyncssh (rebond ProxyJump compris), clés d'hôte, clés, redirections locales, inverses et SOCKS 5, découverte de ports (Linux et Windows). |
 | `src/cma/core/cfapi.py` | Client de l'API Cloudflare v4 : comptes, zones, tunnels, DNS, Access, service tokens. |
-| `src/cma/core/cfadmin.py` | Relie l'API à la configuration et au coffre : import de profils, tokens, publication. |
+| `src/cma/core/cfadmin.py` | Relie l'API à la configuration et au coffre : import de profils, tokens, publication, tunnels. |
+| `src/cma/core/policies.py` | Politiques Access : conversion depuis et vers l'API, saisie une règle par ligne. |
+| `src/cma/core/expiry.py` | Échéance des service tokens : dates de l'API, tokens à renouveler. |
+| `src/cma/core/tunnelhealth.py` | Diagnostic d'un tunnel d'après ses connecteurs. |
 | `src/cma/core/updates.py` | Nouvelles versions de CMA : installeur vérifié, ou mise à jour en place de la version portable. |
 | `src/cma/core/probe.py`, `diagnose.py` | « Tester le service » et diagnostic guidé (cloudflared, port, DNS, proxy, HTTPS, Access). |
 | `src/cma/core/dpapi.py` | Phrase de passe du coffre portable mémorisée par DPAPI (Windows). |

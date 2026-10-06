@@ -1,6 +1,6 @@
 # Plan du projet
 
-État au 2026-10-06, version **2.2.0** (2.3 en cours). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+État au 2026-10-06, version **2.2.0** (2.3 réalisée, à essayer sur un vrai compte avant publication). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -61,10 +61,13 @@ Restent, côté propriétaire :
 
 ### P2 — Administration Cloudflare plus complète (2.3)
 
-Ordre de réalisation : de ce qui évite une panne silencieuse à ce qui ajoute une possibilité. Chaque point
-arrive avec ses routes dans le faux serveur (`tests/fakes/fake_cfapi.py`), ses tests d'API, de `cfadmin` et
-d'interface, et ses traductions. Les appels d'API nouveaux ne sont vérifiés que contre le faux serveur : un
-essai sur un vrai compte est nécessaire avant de publier la 2.3.
+**État au 2026-10-06 : les cinq points sont réalisés** (section « Non publié » du CHANGELOG), avec leurs routes
+dans le faux serveur (`tests/fakes/fake_cfapi.py`), leurs tests d'API, de `cfadmin` et d'interface, et leurs
+traductions. Les appels d'API nouveaux (`…/refresh`, `…/rotate`, `…/connections`, politiques, groupes, création de
+tunnel et `…/token`) ne sont vérifiés que contre le faux serveur : **un essai sur un vrai compte est nécessaire
+avant de publier la 2.3**, avec un jeton qui a les permissions de [SECURITE.md](SECURITE.md).
+
+Ordre de réalisation suivi : de ce qui évite une panne silencieuse à ce qui ajoute une possibilité.
 
 1. **Expiration des service tokens.**
    - Modèle : `ServiceToken.expires_at: datetime | None` (facultatif, aucune migration).

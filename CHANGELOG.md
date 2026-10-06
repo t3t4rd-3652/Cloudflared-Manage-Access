@@ -2,6 +2,21 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Ajouté
+- Service tokens : échéance suivie (lue avec le compte Cloudflare) et affichée dans l'éditeur, alerte dans
+  l'application et la zone de notification 30 jours avant l'expiration. Dans la vue Cloudflare, **Prolonger**
+  repousse l'échéance sans changer le secret, **Changer le secret** en crée un nouveau, rangé dans le coffre
+  (l'ID client et les profils ne changent pas).
+- Tunnels : **État des connecteurs**, avec un diagnostic en clair (aucun connecteur, connexions manquantes,
+  reconnexions, versions différentes) et chaque connexion vers Cloudflare.
+- Noms d'hôte publiés : **Modifier le service** cible sans retirer ni republier ; le profil CMA lié suit.
+- Applications Access : **Politiques**, pour voir et modifier qui y a accès, une règle par ligne (e-mail,
+  domaine, groupe, service token). Les règles que CMA ne sait pas éditer sont conservées.
+- **Créer un tunnel** depuis CMA, avec la commande d'installation du connecteur (Linux, Windows, Docker) ;
+  le jeton du connecteur est masqué et n'est pas conservé.
+
 ## [2.2.0] - 2026-10-06
 
 ### Modifié

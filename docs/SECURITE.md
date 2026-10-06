@@ -32,10 +32,17 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
 ## Administration Cloudflare (API)
 
 - Le jeton d'API est vérifié, puis rangé dans le coffre (clé `cfapi:token`). Il n'est écrit dans aucun fichier ni journal.
-- Permissions conseillées, et rien de plus : Cloudflare Tunnel (modifier), Access: Apps and Policies (modifier),
-  Access: Service Tokens (modifier) sur le compte ; DNS (modifier) et Zone (lire) sur les zones concernées.
+- Permissions conseillées, et rien de plus : Account Settings (lire), Cloudflare Tunnel (modifier), Access: Apps
+  and Policies (modifier), Access: Service Tokens (modifier) sur le compte ; DNS (modifier) et Zone (lire) sur les
+  zones concernées. Facultatif : Access: Organizations, Identity Providers, and Groups (lire), pour désigner un
+  groupe Access dans une politique par son nom.
 - Un service token créé depuis CMA part directement dans le coffre. Cloudflare ne renvoie son secret qu'une fois,
-  et CMA ne l'affiche jamais.
+  et CMA ne l'affiche jamais. « Changer le secret » fait de même avec le nouveau secret ; Cloudflare révoque
+  l'ancien aussitôt.
+- Le jeton du connecteur d'un tunnel créé depuis CMA est masqué à l'écran et dans les journaux, et n'est pas
+  conservé : seul le bouton « Copier » donne la commande d'installation complète.
+- Une politique Access modifiée depuis CMA garde telles quelles les règles que CMA ne sait pas éditer, ainsi que
+  ses conditions « exclude » et « require ». « Tout le monde » avec « Autoriser » est signalé avant l'enregistrement.
 - « Oublier le jeton… » le retire du coffre, après confirmation. Révoquez-le aussi dans le tableau de bord Cloudflare si besoin.
 
 ## Mise à jour de CMA

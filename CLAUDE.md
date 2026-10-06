@@ -79,6 +79,7 @@ Les journaux des jobs ne sont lisibles qu'aux administrateurs ; l'API publique d
 | 2026-10-01 | Vue Cloudflare redessinée (en-tête du compte, tuiles, connexion en trois étapes), puis tunnels en cartes. Release **2.1.1**. |
 | 2026-10-02 | Ménage : spécification de refonte, anciens plans (`docs/archive/`) et banc d'essai v1 (`scripts/bench_tunnel.py`, groupe `bench`) retirés ; vérification des contrastes reprise dans `tests/unit/test_contrast.py`. Ce fichier et `docs/PLAN.md` créés. |
 | 2026-10-05 | Dependabot entièrement fusionné (`upload-artifact` v7, `download-artifact` v8). Délai par test en local, journal des tests en artefact. Compte Cloudflare déduit des zones sans « Account Settings : Read ». |
+| 2026-10-06 | Release à blanc (`release.yml` sans tag), vues `cloud` et `ssh` découpées en paquets. Release **2.2.0**. Puis 2.3 réalisée (non publiée) : échéance et renouvellement des service tokens, état des connecteurs, modification d'un nom d'hôte publié, politiques Access, création de tunnel. |
 
 Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff-filter=D --name-only`).
 
@@ -96,6 +97,12 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   change. Les colonnes 1 et 2 sont masquées mais gardent service et état pour l'accessibilité et les tests.
 - **Compte Cloudflare** : `/accounts` vide signifie presque toujours qu'il manque « Account Settings : Read ».
   Dans ce cas, le compte est déduit des zones (`accounts_from_zones`, `Account.inferred`) et la vue l'explique.
+- **Politiques Access** : une règle que CMA ne comprend pas devient `PolicyRule("raw")` et repart telle quelle à
+  l'enregistrement ; `exclude` et `require` ne sont jamais modifiés. Ne pas « simplifier » cette conservation.
+- **Secrets de la 2.3** : « Changer le secret » (`…/rotate`) révoque l'ancien secret chez Cloudflare, d'où la
+  confirmation ; le jeton d'un connecteur de tunnel passe par `register_secret` et n'est jamais conservé.
+- **Boîtes modales et tests** : chaque boîte ouverte par la vue Cloudflare passe par une fonction de module
+  (`ask_*`, `show_*`) que les tests remplacent ; `exec()` bloquerait le test jusqu'au délai de 180 s.
 
 ## Pièges déjà rencontrés
 
