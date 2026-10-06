@@ -149,7 +149,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             zones = [z for z in state.zones if account is None or z["account"]["id"] == account]
             return self._send(200, _page(zones, query))
         if m := re.fullmatch(r"/accounts/(\w+)/cfd_tunnel", path):
+            if method == "POST":
+                if any(t["name"] == body["name"] for t in state.tunnels):
+                    return self._error(400, 1013, "You already have a tunnel with that name.")
+                tunnel = {"id": uuid.uuid4().hex, "name": body["name"], "status": "inactive"}
+                state.tunnels.append(tunnel)
+                state.configs[tunnel["id"]] = {"ingress": [{"service": "http_status:404"}]}
+                return self._send(200, _ok(tunnel))
             return self._send(200, _page(state.tunnels, query))
+        if m := re.fullmatch(r"/accounts/(\w+)/cfd_tunnel/(\w+)/token", path):
+            return self._send(
+                200, _ok("eyJhIjoiYWNjMSIsInQiOiJ0dW5uZWwiLCJzIjoic2VjcmV0LWRlLXRlc3QtbG9uZyJ9")
+            )
         if m := re.fullmatch(r"/accounts/(\w+)/cfd_tunnel/(\w+)/connections", path):
             return self._send(200, _ok(state.connectors.get(m.group(2), [])))
         if m := re.fullmatch(r"/accounts/(\w+)/cfd_tunnel/(\w+)/configurations", path):

@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from cma.core.cfadmin import CloudflareAdmin, PublishRequest
+from cma.core.cfadmin import CloudflareAdmin, PublishRequest, connector_commands
 from cma.core.cfapi import (
     TOKEN_SECRET_KEY,
     AccessApp,
@@ -20,6 +20,7 @@ from cma.core.cfapi import (
 from cma.core.models import AuthMode, ServiceType
 from cma.core.netutil import find_free_port
 from cma.core.policies import AccessGroup, AccessPolicy, PolicyRule
+from cma.core.redact import redact
 from tests.fakes.fake_cfapi import TOKEN, FakeCloudflare, FakeCloudflareServer
 
 
@@ -254,6 +255,20 @@ async def test_access_policies(cf, admin):
     cf.state.groups_forbidden = True
     policies, groups = await admin.policies(app)
     assert len(policies) == 1 and groups == []
+
+
+async def test_create_a_tunnel(cf, admin):
+    await admin.connect(TOKEN)
+    created = await admin.create_tunnel("nouveau")
+    assert (created.tunnel.name, created.tunnel.status) == ("nouveau", "inactive")
+    assert created.token and created.token not in repr(created)
+    assert redact(f"jeton {created.token}") == "jeton " + redact(created.token) != f"jeton {created.token}"
+    assert ("POST", "/accounts/acc1/cfd_tunnel") in cf.state.requests
+    assert [t["name"] for t in cf.state.tunnels] == ["bureau", "labo", "nouveau"]
+    commands = connector_commands(created.token)
+    assert len(commands) == 3 and all(created.token in command for _system, command in commands)
+    with pytest.raises(CloudflareApiError, match="already have a tunnel"):
+        await admin.create_tunnel("nouveau")
 
 
 async def test_tunnel_connectors(api, admin):

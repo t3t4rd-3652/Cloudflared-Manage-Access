@@ -8,6 +8,7 @@ Permissions conseillées pour le jeton (Mon profil › Jetons d'API › Créer u
 - Compte › Access: Service Tokens : Modifier
 - Zone › DNS : Modifier (sur les zones concernées)
 - Zone › Zone : Lire
+- Facultatif : Compte › Access: Organizations, Identity Providers, and Groups : Lire (groupes dans les politiques)
 
 Les appels sont bloquants : le moteur les exécute via `asyncio.to_thread`.
 """
@@ -256,6 +257,22 @@ class CloudflareApi:
             ),
             key=lambda t: t.name.lower(),
         )
+
+    def create_tunnel(self, account_id: str, name: str) -> Tunnel:
+        """Tunnel dont la configuration (noms d'hôte publiés) est gérée depuis Cloudflare, donc depuis CMA."""
+        result = cast(
+            dict[str, Any],
+            self._result(
+                "POST", f"/accounts/{account_id}/cfd_tunnel", body={"name": name, "config_src": "cloudflare"}
+            ),
+        )
+        return Tunnel(
+            str(result["id"]), str(result.get("name", name)), str(result.get("status") or "inactive")
+        )
+
+    def tunnel_token(self, account_id: str, tunnel_id: str) -> str:
+        """Jeton qui permet à un cloudflared de faire tourner ce tunnel : un secret, à ne jamais journaliser."""
+        return str(self._result("GET", f"/accounts/{account_id}/cfd_tunnel/{tunnel_id}/token") or "")
 
     def tunnel_connectors(self, account_id: str, tunnel_id: str) -> list[Connector]:
         """Connecteurs actifs du tunnel et leurs connexions vers Cloudflare."""

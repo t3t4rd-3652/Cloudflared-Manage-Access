@@ -37,6 +37,7 @@ from cma.core.models import (
     unique_name,
 )
 from cma.core.policies import AccessGroup, AccessPolicy
+from cma.core.redact import register_secret
 from cma.core.secrets import SecretStore
 from cma.i18n import tr
 
@@ -62,6 +63,28 @@ class Overview:
     apps: list[AccessApp] = field(default_factory=list[AccessApp])
     tokens: list[RemoteServiceToken] = field(default_factory=list[RemoteServiceToken])
     zones: list[Zone] = field(default_factory=list[Zone])
+
+
+@dataclass(frozen=True)
+class NewTunnel:
+    tunnel: Tunnel
+    token: str  # secret : sert seulement à installer le connecteur, CMA ne le conserve pas
+
+    def __repr__(self) -> str:  # le jeton ne doit jamais apparaître dans un journal
+        return f"NewTunnel(tunnel={self.tunnel!r})"
+
+
+def connector_commands(token: str) -> list[tuple[str, str]]:
+    """Commandes d'installation du connecteur sur le serveur, par système : (libellé, commande)."""
+    return [
+        (tr("Linux (service systemd)"), f"sudo cloudflared service install {token}"),
+        (tr("Windows (PowerShell administrateur)"), f"cloudflared.exe service install {token}"),
+        (
+            tr("Docker"),
+            "docker run -d --restart unless-stopped --name cloudflared cloudflare/cloudflared:latest "
+            f"tunnel --no-autoupdate run --token {token}",
+        ),
+    ]
 
 
 @dataclass(frozen=True)
@@ -178,6 +201,19 @@ class CloudflareAdmin:
         overview = await asyncio.to_thread(load)
         self.sync_expirations(overview.tokens)
         return overview
+
+    async def create_tunnel(self, name: str) -> NewTunnel:
+        """Crée le tunnel puis lit le jeton de son connecteur (masqué dans les journaux dès sa réception)."""
+        api = self.api()
+        account = self.account_id()
+
+        def run() -> NewTunnel:
+            tunnel = api.create_tunnel(account, name)
+            token = api.tunnel_token(account, tunnel.id)
+            register_secret(token)
+            return NewTunnel(tunnel, token)
+
+        return await asyncio.to_thread(run)
 
     async def connectors(self, tunnel: Tunnel) -> list[Connector]:
         api = self.api()

@@ -40,7 +40,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from cma.core.cfadmin import CloudflareAdmin, Overview, PublishRequest, PublishResult
+from cma.core.cfadmin import CloudflareAdmin, NewTunnel, Overview, PublishRequest, PublishResult
 from cma.core.cfapi import (
     TOKENS_PAGE,
     AccessApp,
@@ -88,6 +88,7 @@ from cma.ui.views.cloud.helpers import (
     tunnel_state,
 )
 from cma.ui.views.cloud.policies import PoliciesDialog, show_policies
+from cma.ui.views.cloud.tunnel_create import ask_tunnel_name, show_new_tunnel
 from cma.ui.views.common import confirm
 from cma.ui.widgets import (
     EmptyState,
@@ -332,6 +333,9 @@ class CloudView(QWidget):
         for widget in (self.publish_button, self.import_button, self.unpublish_button):
             row.addWidget(widget)
         row.addStretch()
+        create = button(tr("Créer un tunnel…"), "plus")
+        create.clicked.connect(self.create_tunnel)
+        row.addWidget(create)
         box.addLayout(row)
         self.tunnel_hint = label("", "meta", wrap=True)
         box.addWidget(self.tunnel_hint)
@@ -344,11 +348,13 @@ class CloudView(QWidget):
         self.tree.customContextMenuRequested.connect(self._tree_menu)
         refresh = button(tr("Actualiser"), "refresh")
         refresh.clicked.connect(self.refresh)
+        create_empty = primary_button(tr("Créer un tunnel…"), "plus")
+        create_empty.clicked.connect(self.create_tunnel)
         self.tunnels_empty = EmptyState(
             "cloud",
             tr("Aucun tunnel disponible dans ce compte."),
-            tr("Créez le connecteur côté serveur dans Cloudflare."),
-            [refresh],
+            tr("Créez un tunnel, puis installez son connecteur sur un serveur de votre réseau."),
+            [create_empty, refresh],
         )
         self.tunnels_stack = QStackedWidget()
         self.tunnels_stack.addWidget(self.tree)
@@ -820,6 +826,20 @@ class CloudView(QWidget):
             self.refresh()
 
         self.ctx.run(self.admin.edit_hostname(tunnel, rule.hostname, service), done, self._error)
+
+    def create_tunnel(self) -> None:
+        """Crée un tunnel géré depuis Cloudflare, puis donne la commande d'installation de son connecteur."""
+        existing = [v.tunnel.name for v in self.overview.tunnels] if self.overview else []
+        name = ask_tunnel_name(self, existing)
+        if not name:
+            return
+        self.status.setText(tr("Création du tunnel…"))
+
+        def done(created: NewTunnel) -> None:
+            self.refresh()
+            show_new_tunnel(self, created)
+
+        self.ctx.run(self.admin.create_tunnel(name), done, self._error)
 
     def check_connectors(self, tunnel: Tunnel) -> None:
         """Lit les connecteurs du tunnel puis affiche le diagnostic et les connexions vers Cloudflare."""

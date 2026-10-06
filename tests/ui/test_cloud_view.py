@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 import cma.ui.views.cloud.view as cloud_module
-from cma.core.cfadmin import PublishRequest
+from cma.core.cfadmin import NewTunnel, PublishRequest
 from cma.core.cfapi import TOKEN_SECRET_KEY, Tunnel
 from cma.core.models import AuthMode
 from cma.core.policies import AccessGroup, AccessPolicy, PolicyRule
@@ -19,6 +19,7 @@ from cma.ui.views.cloud import (
     PublishDialog,
 )
 from cma.ui.views.cloud.policies import PoliciesDialog, PolicyEditDialog
+from cma.ui.views.cloud.tunnel_create import MASK, CreateTunnelDialog, NewTunnelDialog
 from tests.fakes.fake_cfapi import TOKEN, FakeCloudflare, FakeCloudflareServer
 
 
@@ -272,6 +273,44 @@ def test_policy_editor_validates_the_rules(qtbot, gui):
     assert fresh.value() is None and "nom" in fresh.error.text()
     fresh.name.setText("Vide")
     assert fresh.value() is None and "au moins une règle" in fresh.error.text()
+
+
+def test_cloud_view_creates_a_tunnel(qtbot, gui, cf, monkeypatch):
+    import cma.ui.views.cloud.tunnel_create as create_module
+
+    ctx, window = gui
+    ctx.core.manager.cloudflare.base_url = cf.base_url
+    window.show_view("cloud")
+    view = window.cloud
+    view.token_field.set_text(TOKEN)
+    view.connect_account()
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+
+    asked: list[list[str]] = []
+    created: list[NewTunnel] = []
+    monkeypatch.setattr(cloud_module, "ask_tunnel_name", lambda _p, existing: asked.append(existing))
+    view.create_tunnel()  # annulé
+    assert asked == [["bureau", "labo"]] and len(cf.state.tunnels) == 2
+    monkeypatch.setattr(cloud_module, "ask_tunnel_name", lambda *_a: "nouveau")
+    monkeypatch.setattr(cloud_module, "show_new_tunnel", lambda _p, result: created.append(result))
+    view.create_tunnel()
+    qtbot.waitUntil(lambda: bool(created) and view.tree.topLevelItemCount() == 3, timeout=10000)
+
+    # La commande affichée masque le jeton ; « Copier » donne la commande complète.
+    copied: list[str] = []
+    monkeypatch.setattr(create_module, "copy_to_clipboard", copied.append)
+    dialog = NewTunnelDialog(view, created[0])
+    token = created[0].token
+    assert all(token not in field.text() and MASK in field.text() for field in dialog.fields)
+    dialog._copy(dialog.commands[0][1], dialog.commands[0][0])
+    assert copied == [f"sudo cloudflared service install {token}"] and "Linux" in dialog.copied.text()
+
+    ask = CreateTunnelDialog(view, ["bureau"])
+    assert not ask.ok_button.isEnabled()
+    ask.name.setText("Bureau")
+    assert not ask.ok_button.isEnabled() and not ask.error.isHidden()
+    ask.name.setText("  atelier ")
+    assert ask.ok_button.isEnabled() and ask.value() == "atelier"
 
 
 def test_cloud_view_reports_api_errors(qtbot, gui, cf):
