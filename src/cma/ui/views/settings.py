@@ -45,12 +45,16 @@ from cma.core.models import Config, KnownHostsMode, Theme
 from cma.core.secrets import EncryptedFileSecretStore
 from cma.core.updates import (
     UpdateInfo,
+    appimage_path,
     check_for_update,
+    download_asset,
     download_installer,
     download_portable,
+    install_appimage,
     launch_installer,
     launch_portable_update,
     prepare_portable,
+    relaunch_after_exit,
     update_mode,
 )
 from cma.i18n import SUPPORTED_LANGUAGES, tr
@@ -584,12 +588,15 @@ class SettingsView(QWidget):
     # --- Mise à jour de CMA -----------------------------------------------------------------------
 
     def self_update_possible(self) -> bool:
-        return update_mode() in ("installer", "portable")
+        return update_mode() in ("installer", "portable", "appimage")
 
     def install_cma_update(self) -> None:
         info = self._cma_update
         if info is not None and update_mode() == "portable":
             self._install_portable_update(info)
+            return
+        if info is not None and update_mode() == "appimage":
+            self._install_appimage_update(info)
             return
         if info is None or info.installer is None:
             return
@@ -673,6 +680,51 @@ class SettingsView(QWidget):
 
         self.ctx.run(run(), done, failed)
 
+    def _install_appimage_update(self, info: UpdateInfo) -> None:
+        """AppImage Linux : fichier vérifié, puis remplacé d'un coup ; CMA se relance sur la nouvelle version."""
+        target, asset = appimage_path(), info.appimage
+        if target is None or asset is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            tr("Mettre à jour CMA"),
+            tr(
+                "La version {v} va être téléchargée et vérifiée, puis remplacer {path}. CMA se fermera ensuite "
+                "(les sessions ouvertes seront arrêtées) et redémarrera. Continuer ?"
+            ).format(v=info.latest, path=target),
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.cma_install.setEnabled(False)
+        self.cma_progress_bar.setValue(0)
+        self.cma_progress_bar.show()
+        updates_dir = self.ctx.paths.cache_dir / "updates"
+
+        def progress(received: int, total: int | None) -> None:
+            self.cma_progress.emit(received, total)
+
+        async def run() -> Path:
+            downloaded = await asyncio.to_thread(download_asset, info, asset, updates_dir, progress=progress)
+            try:
+                return await asyncio.to_thread(install_appimage, downloaded, target)
+            finally:
+                downloaded.unlink(missing_ok=True)
+
+        def done(installed: Path) -> None:
+            self.cma_progress_bar.hide()
+            relaunch_after_exit(installed)
+            window = self.window()
+            quit_now = getattr(window, "quit_now", None)
+            if callable(quit_now):
+                quit_now()
+
+        def failed(error: BaseException) -> None:
+            self.cma_progress_bar.hide()
+            self.cma_install.setEnabled(True)
+            self.ctx.notify("error", str(error))
+
+        self.ctx.run(run(), done, failed)
+
     # --- Divers -----------------------------------------------------------------------------------
 
     def _diagnostic(self) -> None:
@@ -707,7 +759,7 @@ class SettingsView(QWidget):
         def done(info: UpdateInfo) -> None:
             self._cma_update = info
             mode = update_mode()
-            asset = info.portable_zip if mode == "portable" else info.installer
+            asset = info.asset_for(mode)
             installable = info.available and asset is not None and self.self_update_possible()
             self.cma_install.setVisible(installable)
             if info.latest is None:

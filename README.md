@@ -134,7 +134,8 @@ Avec un jeton d'API Cloudflare, CMA gère aussi le côté serveur :
 - Thème clair, sombre ou système, style Windows 11, interface nette à toutes les échelles d'affichage.
 - Import et export des profils. Les secrets sont exclus par défaut, ou chiffrés par une phrase de passe.
 - Démarrage avec Windows, instance unique, rapport de diagnostic sans secrets.
-- Mise à jour en un clic de la version installée : installeur téléchargé, vérifié par SHA-256, puis relance.
+- Mise à jour en un clic (installeur, version portable Windows, AppImage Linux) : fichier vérifié par SHA-256, puis
+  relance. L'AppImage se met aussi à jour avec AppImageUpdate ou Gear Lever (zsync).
 - Utilisable au clavier et avec un lecteur d'écran (NVDA, Narrateur) : chaque contrôle a un nom.
 
 ![Journaux en thème sombre](docs/captures/logs-sombre.png)

@@ -1,7 +1,8 @@
 """Nouvelles versions de CMA : vérification, téléchargement vérifié de l'installeur et installation.
 
-La mise à jour automatique ne s'applique qu'à une copie installée par l'installeur Windows. En mode
-portable ou depuis les sources, l'application propose seulement la page de la release.
+Modes de mise à jour en un clic (`update_mode`) : copie installée par l'installeur Windows, version portable
+Windows, et AppImage Linux (le fichier est remplacé d'un coup). Scoop, les sources et l'archive Linux renvoient à
+leur propre outil ou à la page de la release.
 
 L'installeur téléchargé est vérifié par son empreinte SHA-256 : celle publiée par GitHub pour le fichier
 (champ `digest`) ou, à défaut, celle du fichier SHA256SUMS.txt joint à la release. Sans empreinte,
@@ -60,8 +61,22 @@ class UpdateInfo:
             return None
         return self.asset(f"CloudflaredManageAccess-{self.latest}-portable.zip")
 
+    @property
+    def appimage(self) -> ReleaseAsset | None:
+        if not self.latest:
+            return None
+        return self.asset(f"CloudflaredManageAccess-{self.latest}-x86_64.AppImage")
+
     def asset(self, name: str) -> ReleaseAsset | None:
         return next((a for a in self.assets if a.name == name), None)
+
+    def asset_for(self, mode: str | None) -> ReleaseAsset | None:
+        """Le fichier de la release qui met à jour une copie de ce mode ; l'installeur par défaut."""
+        if mode == "portable":
+            return self.portable_zip
+        if mode == "appimage":
+            return self.appimage
+        return self.installer
 
 
 def _request(url: str) -> urllib.request.Request:
@@ -224,7 +239,10 @@ def download_asset(
 
 
 def update_mode() -> str | None:
-    """Comment cette copie se met à jour : « installer », « portable », « scoop » ou None (sources, Linux…)."""
+    """Comment cette copie se met à jour : « installer », « portable », « scoop », « appimage » ou None
+    (sources, archive Linux…)."""
+    if appimage_path() is not None:
+        return "appimage"
     if can_self_update():
         return "installer"
     if sys.platform != "win32" or not is_frozen() or portable_data_dir() is None:
@@ -310,6 +328,62 @@ def launch_portable_update(
         close_fds=True,
         creationflags=flags,
     )
+
+
+# --- AppImage (Linux) ---------------------------------------------------------------------------------
+
+
+def appimage_path() -> Path | None:
+    """Le fichier AppImage en cours d'exécution (variable APPIMAGE posée par son runtime), ou None."""
+    if not sys.platform.startswith("linux") or not is_frozen():
+        return None
+    value = os.environ.get("APPIMAGE")
+    path = Path(value) if value else None
+    return path if path is not None and path.is_file() else None
+
+
+def install_appimage(downloaded: Path, target: Path) -> Path:
+    """Remplace l'AppImage `target` par la version téléchargée (déjà vérifiée), d'un coup : la copie en cours
+    continue sur l'ancien fichier jusqu'à sa fermeture. Le dossier doit être accessible en écriture."""
+    temp = target.with_name(f".{target.name}.new")
+    try:
+        shutil.copyfile(downloaded, temp)
+        temp.chmod(0o755)
+        os.replace(temp, target)
+    except OSError as exc:
+        temp.unlink(missing_ok=True)
+        raise DownloadError(
+            tr(
+                "Impossible de remplacer {path} : {error}. Téléchargez la nouvelle version depuis la page de la "
+                "release."
+            ).format(path=target, error=exc)
+        ) from exc
+    return target
+
+
+APPIMAGE_RELAUNCH = 'while kill -0 "$CMA_WAIT_PID" 2>/dev/null; do sleep 0.5; done; exec "$CMA_APP"'
+
+
+def clean_environment() -> dict[str, str]:
+    """Environnement d'un programme lancé depuis CMA, sans ce que PyInstaller et le runtime AppImage y ont mis."""
+    env = dict(os.environ)
+    original = env.pop("LD_LIBRARY_PATH_ORIG", None)
+    env.pop("LD_LIBRARY_PATH", None)
+    if original:
+        env["LD_LIBRARY_PATH"] = original
+    for name in ("APPIMAGE", "APPDIR", "ARGV0", "OWD"):
+        env.pop(name, None)
+    return env
+
+
+def relaunch_after_exit(app: Path, *, wait_pid: int | None = None) -> None:
+    """Relance `app` une fois CMA fermé (le verrou d'instance unique l'empêcherait avant)."""
+    env = {
+        **clean_environment(),
+        "CMA_WAIT_PID": str(wait_pid if wait_pid is not None else os.getpid()),
+        "CMA_APP": str(app),
+    }
+    subprocess.Popen(["/bin/sh", "-c", APPIMAGE_RELAUNCH], env=env, close_fds=True, start_new_session=True)
 
 
 def signature_is_acceptable(path: Path) -> tuple[bool, str]:

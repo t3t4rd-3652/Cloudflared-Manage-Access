@@ -120,13 +120,16 @@ jobs:
       - name: Archive portable et AppImage
         run: uv run python packaging/build.py --stage package
       - name: Vérification rapide
-        run: QT_QPA_PLATFORM=offscreen ./dist/CloudflaredManageAccess/cma --version
+        run: |
+          QT_QPA_PLATFORM=offscreen ./dist/CloudflaredManageAccess/cma --version
+          test -s dist/CloudflaredManageAccess-*-x86_64.AppImage.zsync
       - uses: actions/upload-artifact@v7
         with:
           name: linux
           path: |
             dist/CloudflaredManageAccess-*-linux-x86_64.tar.gz
             dist/CloudflaredManageAccess-*-x86_64.AppImage
+            dist/CloudflaredManageAccess-*-x86_64.AppImage.zsync
           if-no-files-found: error
 
   macos:

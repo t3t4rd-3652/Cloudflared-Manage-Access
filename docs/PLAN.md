@@ -21,7 +21,7 @@ anciens plans, qui ont tous été appliqués. L'historique des étapes est dans 
 
 - Windows : installeur Inno Setup (sans droits administrateur), zip portable, bucket Scoop. Mise à jour en un clic
   pour les deux.
-- Linux : AppImage et archive portable. Pas de mise à jour intégrée.
+- Linux : AppImage (mise à jour en un clic, informations zsync pour AppImageUpdate) et archive portable.
 - macOS : application `.app` non signée (Apple Silicon), zip publié avec chaque release depuis le 2026-10-07.
 - Chaque release publie les sommes SHA-256, un SBOM CycloneDX et les manifestes winget.
 
@@ -39,7 +39,7 @@ anciens plans, qui ont tous été appliqués. L'historique des étapes est dans 
 | Soumission winget | Propriétaire | `wingetcreate submit` avec les manifestes de la dernière release (`winget-manifests-X.Y.Z.zip`). |
 | Signature du code | Propriétaire | Exécutables et installeur non signés : SmartScreen avertit au premier lancement. SignPath Foundation (gratuit pour l'open source) est la piste retenue ; `packaging/sign.ps1` et la CI sont prêts à recevoir un certificat. |
 | Mises à jour Dependabot | Développement | Toutes fusionnées (2026-10-02 et 2026-10-05). Une mise à jour d'action qui touche `release.yml` déclenche désormais une release à blanc. |
-| Instabilité ponctuelle des tests | Développement | Une exécution locale complète s'est figée une fois sans sortie (2026-10-01), et le job « Tests (ubuntu-latest) » s'est arrêté une fois sur SIGABRT, code 134 (2026-10-02). Non reproduits. Depuis le 2026-10-05, un gel échoue après 180 s avec la pile de chaque thread, et le journal du job (avec `PYTHONFAULTHANDLER`) est publié en artefact `pytest-log-<os>` quand il échoue : à lire au prochain incident. |
+| Instabilité ponctuelle des tests | Résolu (à surveiller) | Le SIGABRT intermittent du job « Tests (ubuntu-latest) » (2026-10-02, 2026-10-07) est une double libération de `QTreeWidgetItem` par PySide après `QTreeWidget.clear()` (pile C : `free(): invalid pointer` dans `Shiboken::Object::destroy`). Reproduit dans un conteneur Linux, corrigé le 2026-10-07 par `clear_tree` (`ui/widgets.py`). Le gel local du 2026-10-01 n'a pas été revu depuis. |
 
 ## Plan d'amélioration
 
@@ -136,8 +136,10 @@ Ordre de réalisation suivi : de ce qui évite une panne silencieuse à ce qui a
 
 ### P3 — Plateformes et confort
 
-1. **Linux** : mise à jour intégrée de l'AppImage (zsync) et vérification du verrouillage, de la zone de
-   notification et du démarrage automatique sur GNOME et KDE.
+1. **Linux** : ~~mise à jour intégrée de l'AppImage~~ faite le 2026-10-07 (fichier vérifié par SHA-256 puis
+   remplacé d'un coup, relance après fermeture ; informations zsync et fichier `.zsync` publiés pour
+   AppImageUpdate et Gear Lever). Reste la vérification à la main du verrouillage, de la zone de notification
+   et du démarrage automatique sur GNOME et KDE.
 2. ~~**macOS** : build `.app` non signée en CI~~ : faite le 2026-10-07 (job `macos` de `release.yml`, validé par la
    release à blanc). Restent la signature et la notarisation (compte Apple Developer), si le besoin existe, et
    des tests sur macOS en CI.

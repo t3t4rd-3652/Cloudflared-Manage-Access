@@ -32,10 +32,14 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
   détail de chaque session. Depuis le Journal, la palette Ctrl+K ou le menu d'une session.
 - Serveurs SSH : onglet **Fichiers** (SFTP) pour parcourir le serveur, télécharger et envoyer fichiers ou dossiers
   (avec la progression), créer un dossier, renommer et supprimer ; remplacer ou supprimer demande confirmation.
+- **AppImage Linux** : mise à jour en un clic (fichier vérifié par SHA-256, remplacé d'un coup, relance après
+  fermeture), et informations zsync pour AppImageUpdate et Gear Lever (fichier `.zsync` publié).
 - **macOS** : application `.app` (Apple Silicon, non signée) publiée avec chaque release, données dans
   `~/Library/Application Support`, secrets dans le trousseau macOS.
 
 ### Corrigé
+- Plantage possible en vidant une liste en arbre (profils, tunnels, espaces de travail) : double libération
+  d'éléments par PySide, constatée sous Linux. Les éléments sont désormais détachés avant d'être libérés.
 - « Autoriser un service token » et « Publier un service » : Cloudflare refuse désormais une politique propre à
   une application nouvellement créée. CMA réutilise la politique du compte qui autorise exactement ce token, ou
   la crée, puis l'attache à l'application.

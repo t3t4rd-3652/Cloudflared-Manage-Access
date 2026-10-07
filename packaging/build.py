@@ -143,6 +143,8 @@ Categories=Network;Utility;
 Terminal=false
 """
 
+ZSYNC_UPDATE_INFO = "gh-releases-zsync|t3t4rd-3652|Cloudflared-Manage-Access|latest|CloudflaredManageAccess-*-x86_64.AppImage.zsync"
+
 APP_RUN = """#!/bin/sh
 HERE="$(dirname "$(readlink -f "$0")")"
 exec "$HERE/usr/lib/cma/CloudflaredManageAccess" "$@"
@@ -165,7 +167,9 @@ def appimage(ver: str) -> Path | None:
     target = DIST / f"CloudflaredManageAccess-{ver}-x86_64.AppImage"
     # APPIMAGE_EXTRACT_AND_RUN : appimagetool (lui-même une AppImage) tourne sans FUSE, comme en CI.
     env = {**os.environ, "ARCH": "x86_64", "APPIMAGE_EXTRACT_AND_RUN": "1"}
-    subprocess.run([tool, str(appdir), str(target)], check=True, env=env)
+    # Informations de mise à jour : AppImageUpdate, Gear Lever… téléchargent seulement les blocs modifiés,
+    # grâce au fichier .zsync publié à côté de l'AppImage.
+    subprocess.run([tool, "-u", ZSYNC_UPDATE_INFO, str(appdir), str(target)], check=True, env=env, cwd=DIST)
     return target
 
 
