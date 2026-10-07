@@ -34,6 +34,7 @@ from cma.core.prompts import NonInteractivePrompter
 from cma.core.secrets import MemorySecretStore
 from cma.core.sessions import SessionInfo, SessionKind, SessionState
 from cma.core.ssh.discovery import DiscoveryResult, RemotePort
+from cma.i18n import set_language
 from cma.paths import AppPaths
 from cma.ui.bridge import EngineBridge, TaskRunner
 from cma.ui.context import GuiContext
@@ -221,6 +222,8 @@ def main() -> int:
     paths = AppPaths(Path(temp.name))
     theme = ThemeManager(app)
     core = create_context(paths, NonInteractivePrompter(), secrets=DemoStore())
+    # CMA_CAPTURE_LANGUAGE=de (ou en, es) : captures dans une autre langue, pour vérifier la mise en page.
+    set_language(os.environ.get("CMA_CAPTURE_LANGUAGE", "fr"))
     engine = Engine()
     engine.start()
     bridge = EngineBridge(core.bus)

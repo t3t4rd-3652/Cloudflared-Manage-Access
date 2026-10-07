@@ -73,7 +73,8 @@ excludes = [
 
 hiddenimports = [
     KEYRING_BACKEND,
-    "cma.i18n_en",
+    # Catalogues de traduction, importés à la demande selon la langue choisie.
+    *(f"cma.{p.stem}" for p in sorted((SRC / "cma").glob("i18n_*.py"))),
 ]
 
 
@@ -100,7 +101,7 @@ DROP_FILES = {
     "qoffscreen.dll",
 }
 KEEP_IMAGE_FORMATS = {"qico.dll", "qsvg.dll"}
-KEEP_TRANSLATIONS = ("qtbase_fr", "qtbase_en")
+KEEP_TRANSLATIONS = ("qtbase_fr", "qtbase_en", "qtbase_de", "qtbase_es")
 
 
 def keep(entry) -> bool:

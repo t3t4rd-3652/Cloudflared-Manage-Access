@@ -80,7 +80,7 @@ class CliPrompter:
             print(tr("Premier contact avec {host}.").format(host=prompt.identity))
         print(tr("  clé {alg} : {fp}").format(alg=prompt.algorithm, fp=prompt.fingerprint))
         answer = await asyncio.to_thread(input, tr("Faire confiance à cette clé ? [o/N] "))
-        return answer.strip().lower() in ("o", "oui", "y", "yes")
+        return answer.strip().lower() in ("o", "oui", "y", "yes", "j", "ja", "s", "si", "sí")
 
     async def ask_password(self, request: PasswordRequest) -> PasswordAnswer | None:
         if request.error:

@@ -26,10 +26,20 @@ from cma.i18n import tr
 DECISIONS = ("allow", "deny", "non_identity", "bypass")
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _DOMAIN = re.compile(r"^@?([a-z0-9-]+\.)+[a-z]{2,}$", re.IGNORECASE)
-EVERYONE_WORDS = ("tout le monde", "everyone")
-ANY_TOKEN_WORDS = ("tout service token", "any service token")
-GROUP_PREFIXES = ("groupe", "group")
 TOKEN_PREFIXES = ("token",)
+
+
+def keywords(source: str) -> tuple[str, ...]:
+    """Un mot-clé de la saisie dans toutes les langues de l'interface : « tout le monde », « everyone », « jeder »…
+    La saisie est ainsi comprise quelle que soit la langue dans laquelle CMA l'a affichée."""
+    from cma.i18n import SUPPORTED_LANGUAGES, catalog
+
+    found = {source.lower()}
+    for language in SUPPORTED_LANGUAGES:
+        value = catalog(language).get(source)
+        if value:
+            found.add(value.lower())
+    return tuple(sorted(found))
 
 
 @dataclass(frozen=True)
@@ -171,11 +181,11 @@ def parse_rules(
             continue
         lowered = line.lower()
         rule: PolicyRule | None = None
-        if lowered in EVERYONE_WORDS:
+        if lowered in keywords("tout le monde"):
             rule = PolicyRule("everyone")
-        elif lowered in ANY_TOKEN_WORDS:
+        elif lowered in keywords("tout service token"):
             rule = PolicyRule("any_valid_service_token")
-        elif (name := _prefixed(line, GROUP_PREFIXES)) is not None:
+        elif (name := _prefixed(line, keywords("groupe"))) is not None:
             if name.lower() in by_group:
                 rule = PolicyRule("group", by_group[name.lower()])
             else:

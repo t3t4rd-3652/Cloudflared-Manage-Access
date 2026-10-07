@@ -15,7 +15,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from cma.i18n import tr
+from cma.i18n import SUPPORTED_LANGUAGES, tr
 
 SCHEMA_VERSION = 2
 
@@ -392,7 +392,7 @@ class KnownHostsMode(StrEnum):
 class Settings(Model):
     cloudflared_path: str | None = None
     theme: Theme = Theme.SYSTEM
-    language: Literal["fr", "en"] = "fr"
+    language: str = "fr"  # une clé de SUPPORTED_LANGUAGES
     close_to_tray: bool = True
     start_minimized: bool = False
     start_with_system: bool = False
@@ -412,6 +412,12 @@ class Settings(Model):
     # Coffre chiffré (version portable ou sans trousseau) : verrouillage de l'interface après inactivité.
     lock_after_minutes: int = Field(default=0, ge=0, le=1440)
     cloudflare_account_id: str | None = None
+
+    @field_validator("language", mode="before")
+    @classmethod
+    def _known_language(cls, value: object) -> str:
+        """Une langue inconnue (configuration d'une version plus récente, faute de frappe) revient au français."""
+        return value if isinstance(value, str) and value in SUPPORTED_LANGUAGES else "fr"
 
     @model_validator(mode="after")
     def _port_range(self) -> Settings:

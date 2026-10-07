@@ -118,3 +118,19 @@ def test_descriptions():
         "Contourner",
         "autre",
     ]
+
+
+def test_keywords_are_understood_in_every_language():
+    from cma.i18n import get_language, set_language
+
+    previous = get_language()
+    try:
+        for language in ("fr", "en", "de", "es"):
+            set_language(language)
+            rules = (PolicyRule("group", "g1"), PolicyRule("any_valid_service_token"), PolicyRule("everyone"))
+            lines = "\n".join(format_rule(r, GROUPS, TOKENS) for r in rules)
+            assert parse_rules(lines, GROUPS, TOKENS) == (list(rules), []), language
+    finally:
+        set_language(previous)
+    # Ce que CMA affiche dans une langue reste compris dans une autre.
+    assert parse_rules("jeder\ntodo el mundo\nGruppe : Admins\ngrupo : Admins", GROUPS, TOKENS)[1] == []

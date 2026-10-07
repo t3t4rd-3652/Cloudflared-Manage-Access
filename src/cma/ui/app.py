@@ -10,7 +10,7 @@ import sys
 import time
 from typing import Any
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QLibraryInfo, QTimer, QTranslator
 from PySide6.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 
 from cma import APP_ID, APP_NAME, __version__
@@ -37,6 +37,16 @@ from cma.ui.icons import app_icon
 from cma.ui.theme import ThemeManager
 
 log = logging.getLogger(__name__)
+
+
+def install_qt_translation(app: QApplication, language: str) -> QTranslator | None:
+    """Boutons et boîtes standard de Qt (Oui, Annuler, sélecteur de fichiers) dans la langue de CMA."""
+    translator = QTranslator(app)
+    folder = QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)
+    if language != "en" and translator.load(f"qtbase_{language}", folder):
+        app.installTranslator(translator)
+        return translator
+    return None
 
 
 def _open_secret_store(paths: AppPaths) -> SecretStore:
@@ -132,6 +142,7 @@ def run_gui(args: argparse.Namespace) -> int:
     core = create_context(paths, prompter, secrets=secrets)
     settings = core.store.snapshot().settings
     set_language(settings.language)
+    qt_translator = install_qt_translation(app, settings.language)  # noqa: F841 (gardé en vie)
     theme.set_theme(settings.theme)
 
     engine = Engine()
