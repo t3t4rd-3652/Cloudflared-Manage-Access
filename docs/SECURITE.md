@@ -11,6 +11,7 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
 | Phrases de passe des clés SSH | Gardées en mémoire pour la session. |
 | Clés privées SSH générées | Dossier `ssh_keys` du dossier de données, chiffrables par phrase de passe (bcrypt/OpenSSH). |
 | Configuration `config.json` | Ne contient aucun secret. |
+| Historique `history.json` | Nom des accès, horaires, compteurs et messages d'incident déjà masqués ; 90 jours au plus, effaçable depuis CMA. |
 | Journaux et rapport de diagnostic | Les secrets connus et les motifs habituels (en-tête `Cf-Access-Client-Secret`, `password=`…) sont masqués. |
 | Exports | Secrets exclus par défaut, ou chiffrés par phrase de passe (scrypt, AES-256-GCM). |
 
@@ -27,6 +28,8 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
 - Les empreintes sont conservées dans le fichier `known_hosts` de l'application (celui de `~/.ssh` est lu en plus). Réglage possible pour écrire dans `~/.ssh/known_hosts`.
 - Pour un SSH qui passe par Cloudflare, l'identité vérifiée est celle du vrai serveur, pas `127.0.0.1` avec un port local variable.
 - Déploiement de clé publique par SFTP : lecture d'`authorized_keys`, ajout seulement si la clé manque, droits 700/600, relecture de contrôle.
+- Onglet Fichiers : SFTP sur la connexion SSH du serveur, donc avec sa clé d'hôte vérifiée. Remplacer un fichier
+  (local ou distant) et supprimer demandent une confirmation ; un nom saisi ne peut pas contenir de séparateur.
 - Les redirections n'écoutent que sur `127.0.0.1`.
 
 ## Administration Cloudflare (API)

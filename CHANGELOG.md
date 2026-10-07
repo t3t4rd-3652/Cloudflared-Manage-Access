@@ -27,6 +27,14 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
 - `scripts/cloudflare_recette.py` : recette sur un vrai compte, en lecture seule ou, avec `--ecriture`, sur des
   ressources jetables « cma-essai » supprimées à la fin (aucun DNS).
 
+- **Historique des sessions** : pour chaque accès, sessions, temps à l'écoute, disponibilité, reconnexions,
+  erreurs, données (redirections SSH) et dernier incident, sur 7, 30 ou 90 jours, le plus instable en tête ;
+  détail de chaque session. Depuis le Journal, la palette Ctrl+K ou le menu d'une session.
+- Serveurs SSH : onglet **Fichiers** (SFTP) pour parcourir le serveur, télécharger et envoyer fichiers ou dossiers
+  (avec la progression), créer un dossier, renommer et supprimer ; remplacer ou supprimer demande confirmation.
+- **macOS** : application `.app` (Apple Silicon, non signée) publiée avec chaque release, données dans
+  `~/Library/Application Support`, secrets dans le trousseau macOS.
+
 ### Corrigé
 - « Autoriser un service token » et « Publier un service » : Cloudflare refuse désormais une politique propre à
   une application nouvellement créée. CMA réutilise la politique du compte qui autorise exactement ce token, ou

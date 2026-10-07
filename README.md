@@ -25,6 +25,9 @@ scoop install cma/cloudflared-manage-access
 Sous Linux : `CloudflaredManageAccess-<version>-x86_64.AppImage` (un seul fichier, à rendre exécutable) ou
 `CloudflaredManageAccess-<version>-linux-x86_64.tar.gz` (version portable, avec son dossier `data/`).
 
+Sous macOS (Apple Silicon) : `CloudflaredManageAccess-<version>-macos-arm64.zip`, à décompresser dans Applications.
+L'application n'est pas signée : au premier lancement, clic droit sur l'application, puis « Ouvrir ».
+
 ### Version portable
 
 Décompressez le zip où vous voulez, clé USB comprise, puis lancez `CloudflaredManageAccess.exe`. Le dossier `data/`
@@ -98,6 +101,8 @@ qui la corrige.
 - Authentification par mot de passe (mémorisable dans le coffre), par clé (générée ici, avec phrase de passe) ou par agent SSH.
 - Vérification de la clé d'hôte au premier contact, avec son empreinte SHA-256.
 - Passage par un profil Cloudflare pour les serveurs SSH publiés par Access, ou rebond par un autre serveur (ProxyJump).
+- Onglet **Fichiers** (SFTP) : parcourir le serveur, télécharger et envoyer fichiers ou dossiers, créer, renommer,
+  supprimer, sur la connexion SSH du serveur.
 
 ### Administration Cloudflare
 

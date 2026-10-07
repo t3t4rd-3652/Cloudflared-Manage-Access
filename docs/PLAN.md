@@ -22,7 +22,7 @@ anciens plans, qui ont tous été appliqués. L'historique des étapes est dans 
 - Windows : installeur Inno Setup (sans droits administrateur), zip portable, bucket Scoop. Mise à jour en un clic
   pour les deux.
 - Linux : AppImage et archive portable. Pas de mise à jour intégrée.
-- macOS : le code tient compte de la plateforme (chemins, trousseau, lanceurs) mais aucune build n'est produite.
+- macOS : application `.app` non signée (Apple Silicon), zip publié avec chaque release depuis le 2026-10-07.
 - Chaque release publie les sommes SHA-256, un SBOM CycloneDX et les manifestes winget.
 
 ### Qualité
@@ -138,9 +138,14 @@ Ordre de réalisation suivi : de ce qui évite une panne silencieuse à ce qui a
 
 1. **Linux** : mise à jour intégrée de l'AppImage (zsync) et vérification du verrouillage, de la zone de
    notification et du démarrage automatique sur GNOME et KDE.
-2. **macOS** : build `.app` non signée en CI pour commencer, puis signature et notarisation si le besoin existe.
-3. **Historique des sessions** : durée, octets transférés et incidents par profil, pour voir ce qui décroche.
-4. **Transfert de fichiers SFTP** sur les profils SSH existants.
+2. ~~**macOS** : build `.app` non signée en CI~~ : faite le 2026-10-07 (job `macos` de `release.yml`, validé par la
+   release à blanc). Restent la signature et la notarisation (compte Apple Developer), si le besoin existe, et
+   des tests sur macOS en CI.
+3. ~~**Historique des sessions**~~ : fait le 2026-10-07 (`cma.core.history`, boîte « Historique des
+   sessions » ouverte depuis le Journal, la palette et le menu d'une session). Les octets ne sont connus que
+   pour les redirections SSH : cloudflared ne les remonte pas.
+4. ~~**Transfert de fichiers SFTP**~~ : fait le 2026-10-07 (`cma.core.ssh.sftp`, onglet « Fichiers » des serveurs
+   SSH : parcourir, télécharger, envoyer, créer, renommer, supprimer).
 5. **Autres langues** : le catalogue anglais sert de modèle ; ajouter une langue revient à fournir un catalogue.
 
 ### Dette technique à surveiller
