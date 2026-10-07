@@ -53,7 +53,7 @@ Deux règles structurent le code :
 | `src/cma/core/instance.py` | Verrou d'instance unique et canal de commande local. |
 | `src/cma/platform/` | Job Object Windows, démarrage automatique, lanceurs (terminal, RDP, Compass). |
 | `src/cma/ui/` | Interface : fenêtre, vues, boîtes de dialogue (palette Ctrl+K, espaces de travail, diagnostic), thème, verrouillage, zone de notification. |
-| `src/cma/i18n.py`, `i18n_en.py` | Traduction (source en français, catalogue anglais vérifié par test). |
+| `src/cma/i18n.py`, `i18n_<code>.py` | Traduction : source en français, catalogues anglais, allemand et espagnol vérifiés par test, repli sur l'anglais. |
 | `server/` | `ports-report` (Linux), `ports-report.ps1` (Windows) et l'installeur du helper Docker. |
 | `src/cma/ui/a11y.py` | Noms accessibles déduits des formulaires, et contrôle automatique en test. |
 | `packaging/` | Spec PyInstaller, installeur Inno Setup, build Windows et Linux, signature, manifestes winget et Scoop. |

@@ -42,9 +42,12 @@ Depuis Windows, l'environnement est `.venv` (uv n'est pas forcément dans le PAT
   libglib2.0-0`, `pip install uv`, `UV_PROJECT_ENVIRONMENT=/opt/venv`, `QT_QPA_PLATFORM=offscreen`, puis
   `uv sync --locked` et la commande pytest de `ci.yml` (`MSYS_NO_PATHCONV=1` devant `docker run` depuis Git Bash).
 - Captures de la documentation : `scripts/capture_screenshots.py <dossier>`, à regarder en clair et en sombre
-  avant de copier dans `docs/captures/`.
-- Traductions : chaque nouveau `tr("…")` doit avoir son entrée dans `src/cma/i18n_en.py`
-  (`tests/unit/test_i18n.py` liste les manquants).
+  avant de copier dans `docs/captures/`. Sans `QT_QPA_PLATFORM=offscreen` sous Windows (pas de police en
+  offscreen sur ce poste). `CMA_CAPTURE_LANGUAGE=de` (ou `en`, `es`) pour vérifier la mise en page d'une langue.
+- Traductions : chaque nouveau `tr("…")` doit avoir son entrée dans **chaque** catalogue : `i18n_en.py`,
+  `i18n_de.py` et `i18n_es.py` (`tests/unit/test_i18n.py` liste les manquants par langue). Les catalogues sont
+  triés sans tenir compte de la casse (`str.casefold`). Les mots-clés de la saisie des politiques (`groupe`,
+  `tout le monde`, `tout service token`) sont lus dans tous les catalogues : les traduire change ce qui est compris.
 
 ## Publier une version
 

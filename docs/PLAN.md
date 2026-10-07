@@ -15,7 +15,7 @@ anciens plans, qui ont tous été appliqués. L'historique des étapes est dans 
 | Administration Cloudflare | Lecture du compte (tunnels, noms d'hôte, applications Access, service tokens), publication d'un service de bout en bout, retrait d'un nom d'hôte, création de tokens, import en profils. |
 | Quotidien | Palette Ctrl+K, espaces de travail, zone de notification, CLI `cma`, démarrage avec le système, verrouillage. |
 | Secrets | Coffre du système, ou coffre chiffré en mode portable (phrase de passe mémorisable par DPAPI). Rien en clair dans la configuration, les arguments ou les journaux. |
-| Interface | Thèmes clair et sombre aux contrastes vérifiés, accessibilité contrôlée par test, français et anglais. |
+| Interface | Thèmes clair et sombre aux contrastes vérifiés, accessibilité contrôlée par test, français, anglais, allemand et espagnol. |
 
 ### Distribution
 
@@ -148,7 +148,9 @@ Ordre de réalisation suivi : de ce qui évite une panne silencieuse à ce qui a
    pour les redirections SSH : cloudflared ne les remonte pas.
 4. ~~**Transfert de fichiers SFTP**~~ : fait le 2026-10-07 (`cma.core.ssh.sftp`, onglet « Fichiers » des serveurs
    SSH : parcourir, télécharger, envoyer, créer, renommer, supprimer).
-5. **Autres langues** : le catalogue anglais sert de modèle ; ajouter une langue revient à fournir un catalogue.
+5. ~~**Autres langues**~~ : fait le 2026-10-07. Allemand et espagnol (catalogues complets, vérifiés par test),
+   boîtes standard de Qt traduites, saisie des politiques comprise dans toutes les langues. Une relecture par des
+   personnes de langue allemande et espagnole reste souhaitable. Ajouter une langue : voir CONTRIBUTING.md.
 
 ### Dette technique à surveiller
 

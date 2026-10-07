@@ -132,6 +132,7 @@ Avec un jeton d'API Cloudflare, CMA gère aussi le côté serveur :
 - Icône dans la zone de notification, dont la couleur reflète l'état global, avec les favoris dans son menu.
 - Notifications au lieu de fenêtres bloquantes, journaux en direct filtrables (thème sombre ci-dessous).
 - Thème clair, sombre ou système, style Windows 11, interface nette à toutes les échelles d'affichage.
+- Interface en français, anglais, allemand ou espagnol (Paramètres › Langue).
 - Import et export des profils. Les secrets sont exclus par défaut, ou chiffrés par une phrase de passe.
 - Démarrage avec Windows, instance unique, rapport de diagnostic sans secrets.
 - Mise à jour en un clic (installeur, version portable Windows, AppImage Linux) : fichier vérifié par SHA-256, puis

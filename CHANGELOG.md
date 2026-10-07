@@ -34,6 +34,9 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
   (avec la progression), créer un dossier, renommer et supprimer ; remplacer ou supprimer demande confirmation.
 - **AppImage Linux** : mise à jour en un clic (fichier vérifié par SHA-256, remplacé d'un coup, relance après
   fermeture), et informations zsync pour AppImageUpdate et Gear Lever (fichier `.zsync` publié).
+- **Allemand et espagnol** : interface traduite (Paramètres › Langue) ; un texte sans traduction s'affiche en
+  anglais. Les boutons et boîtes standard de Qt (Oui, Annuler, sélecteur de fichiers) suivent aussi la langue,
+  y compris en français où ils restaient en anglais.
 - **macOS** : application `.app` (Apple Silicon, non signée) publiée avec chaque release, données dans
   `~/Library/Application Support`, secrets dans le trousseau macOS.
 
