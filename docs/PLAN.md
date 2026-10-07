@@ -1,6 +1,6 @@
 # Plan du projet
 
-État au 2026-10-06, version **2.2.0** (2.3 réalisée, à essayer sur un vrai compte avant publication). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+État au 2026-10-07, version **2.3.0** (recette en écriture réussie sur un vrai compte). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -39,8 +39,7 @@ anciens plans, qui ont tous été appliqués. L'historique des étapes est dans 
 | Soumission winget | Propriétaire | `wingetcreate submit` avec les manifestes de la dernière release (`winget-manifests-X.Y.Z.zip`). |
 | Signature du code | Propriétaire | Exécutables et installeur non signés : SmartScreen avertit au premier lancement. SignPath Foundation (gratuit pour l'open source) est la piste retenue ; `packaging/sign.ps1` et la CI sont prêts à recevoir un certificat. |
 | Mises à jour Dependabot | Développement | Toutes fusionnées (2026-10-02 et 2026-10-05). Une mise à jour d'action qui touche `release.yml` déclenche désormais une release à blanc. |
-| Instabilité ponctuelle des tests | Résolu (à surveiller) | Le SIGABRT intermittent du job « Tests (ubuntu-latest) » (2026-10-02, 2026-10-07) est une double libération de `QTreeWidgetItem` par PySide après `QTreeWidget.clear()` (pile C : `free(): invalid pointer` dans `Shiboken::Object::destroy`). Reproduit dans un conteneur Linux, corrigé le 2026-10-07 par `clear_items` (`ui/widgets.py`), étendu le même jour aux tableaux et aux listes
-après un nouvel abandon sur le tableau des service tokens. Le gel local du 2026-10-01 n'a pas été revu depuis. |
+| Instabilité ponctuelle des tests | Résolu (à surveiller) | Le SIGABRT intermittent du job « Tests (ubuntu-latest) » (2026-10-02, 2026-10-07) est une double libération de `QTreeWidgetItem` par PySide après `QTreeWidget.clear()` (pile C : `free(): invalid pointer` dans `Shiboken::Object::destroy`). Reproduit dans un conteneur Linux, corrigé le 2026-10-07 par `clear_items` (`ui/widgets.py`), étendu le même jour aux tableaux et aux listes après un nouvel abandon sur le tableau des service tokens. Le gel local du 2026-10-01 n'a pas été revu depuis. |
 
 ## Plan d'amélioration
 
@@ -60,12 +59,12 @@ Restent, côté propriétaire :
 2. **Publication winget**, puis mise à jour automatique des manifestes à chaque release (PR vers
    `winget-pkgs` depuis le workflow, avec un jeton dédié : il faut d'abord que le paquet existe).
 
-### P2 — Administration Cloudflare plus complète (2.3)
+### P2 — Administration Cloudflare plus complète (2.3, publiée le 2026-10-07)
 
 **Ajouts du 2026-10-06** : ménage (renommer et supprimer un tunnel, supprimer une application ou un service
 token), options d'origine d'un nom d'hôte, et `scripts/cloudflare_recette.py` pour la recette sur un vrai compte.
 
-**État au 2026-10-06 : les cinq points sont réalisés** (section « Non publié » du CHANGELOG), avec leurs routes
+**État au 2026-10-06 : les cinq points sont réalisés** (section 2.3.0 du CHANGELOG), avec leurs routes
 dans le faux serveur (`tests/fakes/fake_cfapi.py`), leurs tests d'API, de `cfadmin` et d'interface, et leurs
 traductions. Les appels d'API nouveaux (`…/refresh`, `…/rotate`, `…/connections`, politiques, groupes, création de
 tunnel et `…/token`) sont vérifiés contre le faux serveur, et **en lecture** sur un vrai compte (`python
@@ -77,9 +76,8 @@ Code n'a pas le droit d'écrire sur le compte réel.
 **Recette en écriture du 2026-10-06 (lancée par le propriétaire)** : toutes les fonctions réussissent sur le vrai
 compte (création, renommage et suppression de tunnel, service et options d'origine, politiques réutilisables
 créées, modifiées, retirées et remises, token autorisé, prolongé, secret changé). Seul le nettoyage a échoué :
-Cloudflare refuse de supprimer un token cité par une politique (code 12139). Corrigé le même jour ; reste à
-relancer `python scripts/cloudflare_recette.py --ecriture`, qui commence par supprimer les restes de la première
-recette (le token `cma-essai` et la politique `CMA - cma-essai`).
+Cloudflare refuse de supprimer un token cité par une politique (code 12139). Corrigé le même jour ; le
+nettoyage du 2026-10-07 (`--nettoyer`) ne trouve plus aucun reste. **Publiée en 2.3.0 le 2026-10-07.**
 
 Ordre de réalisation suivi : de ce qui évite une panne silencieuse à ce qui ajoute une possibilité.
 
