@@ -38,7 +38,7 @@ from cma.ui.dialogs.prompts import key_type_label
 from cma.ui.icons import app_icon
 from cma.ui.state import remember_header
 from cma.ui.views.common import confirm
-from cma.ui.widgets import button, copy_to_clipboard, label, primary_button, title
+from cma.ui.widgets import button, clear_items, copy_to_clipboard, label, primary_button, title
 
 
 def _dialog(parent: QWidget | None, window_title: str) -> tuple[QDialog, QVBoxLayout]:
@@ -255,7 +255,7 @@ class KnownHostsDialog(QDialog):
 
     def _load(self) -> None:
         entries = self.file.entries()
-        self.table.setRowCount(len(entries))
+        clear_items(self.table, len(entries))
         for index, entry in enumerate(entries):
             for column, value in enumerate(
                 (entry.pattern, key_type_label(entry.algorithm), entry.fingerprint)
@@ -452,7 +452,7 @@ class KeysDialog(QDialog):
 
     def _load(self, select: Path | None = None) -> None:
         self.keys = list_keys(self.ctx.paths.keys_dir)
-        self.table.setRowCount(len(self.keys))
+        clear_items(self.table, len(self.keys))
         for index, key in enumerate(self.keys):
             values = [
                 key.name,

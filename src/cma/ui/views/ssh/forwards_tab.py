@@ -32,6 +32,7 @@ from cma.ui.views.common import confirm
 from cma.ui.widgets import (
     add_shortcut,
     button,
+    clear_items,
     label,
     primary_button,
 )
@@ -117,7 +118,7 @@ class ForwardsTab(QWidget):
         profile = self.panel.profile
         forwards = profile.saved_forwards if profile else []
         selected = self._selected_id()
-        self.table.setRowCount(len(forwards))
+        clear_items(self.table, len(forwards))
         tokens = current_tokens()
         if profile is not None:
             self.scope.setText(tr("Actions appliquées aux redirections de {name}.").format(name=profile.name))

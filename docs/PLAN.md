@@ -39,7 +39,8 @@ anciens plans, qui ont tous été appliqués. L'historique des étapes est dans 
 | Soumission winget | Propriétaire | `wingetcreate submit` avec les manifestes de la dernière release (`winget-manifests-X.Y.Z.zip`). |
 | Signature du code | Propriétaire | Exécutables et installeur non signés : SmartScreen avertit au premier lancement. SignPath Foundation (gratuit pour l'open source) est la piste retenue ; `packaging/sign.ps1` et la CI sont prêts à recevoir un certificat. |
 | Mises à jour Dependabot | Développement | Toutes fusionnées (2026-10-02 et 2026-10-05). Une mise à jour d'action qui touche `release.yml` déclenche désormais une release à blanc. |
-| Instabilité ponctuelle des tests | Résolu (à surveiller) | Le SIGABRT intermittent du job « Tests (ubuntu-latest) » (2026-10-02, 2026-10-07) est une double libération de `QTreeWidgetItem` par PySide après `QTreeWidget.clear()` (pile C : `free(): invalid pointer` dans `Shiboken::Object::destroy`). Reproduit dans un conteneur Linux, corrigé le 2026-10-07 par `clear_tree` (`ui/widgets.py`). Le gel local du 2026-10-01 n'a pas été revu depuis. |
+| Instabilité ponctuelle des tests | Résolu (à surveiller) | Le SIGABRT intermittent du job « Tests (ubuntu-latest) » (2026-10-02, 2026-10-07) est une double libération de `QTreeWidgetItem` par PySide après `QTreeWidget.clear()` (pile C : `free(): invalid pointer` dans `Shiboken::Object::destroy`). Reproduit dans un conteneur Linux, corrigé le 2026-10-07 par `clear_items` (`ui/widgets.py`), étendu le même jour aux tableaux et aux listes
+après un nouvel abandon sur le tableau des service tokens. Le gel local du 2026-10-01 n'a pas été revu depuis. |
 
 ## Plan d'amélioration
 

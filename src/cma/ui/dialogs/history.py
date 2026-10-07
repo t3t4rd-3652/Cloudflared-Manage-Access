@@ -29,7 +29,7 @@ from cma.ui.format import human_bytes, human_duration, short_datetime
 from cma.ui.icons import app_icon
 from cma.ui.theme import current_tokens, status_colors
 from cma.ui.views.common import confirm
-from cma.ui.widgets import button, label, title
+from cma.ui.widgets import button, clear_items, label, title
 
 Key = tuple[str, str | None]
 KEY_ROLE = 256
@@ -148,7 +148,7 @@ class HistoryDialog(QDialog):
         current = selected or self.selected_key()
         self.stats = self.history.summary(self.period.currentData())
         tokens = current_tokens()
-        self.summary.setRowCount(0)
+        clear_items(self.summary)
         for stats in self.stats:
             row = self.summary.rowCount()
             self.summary.insertRow(row)
@@ -186,7 +186,7 @@ class HistoryDialog(QDialog):
 
     def _show_sessions(self) -> None:
         key = self.selected_key()
-        self.sessions.setRowCount(0)
+        clear_items(self.sessions)
         if key is None:
             return
         records = self.history.records(key[0], since=self.period.currentData())

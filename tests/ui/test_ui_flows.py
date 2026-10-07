@@ -219,3 +219,37 @@ def test_groups_delete_key_and_access_token_status(qtbot, gui, monkeypatch):
     assert shortcut is not None and shortcut.key() == QKeySequence(QKeySequence.StandardKey.Delete)
     shortcut.activated.emit()
     assert [p.name for p in ctx.config().cloudflare_profiles] == ["B"]
+
+
+def test_clear_items_empties_trees_tables_and_lists(qtbot):
+    import gc
+
+    from PySide6.QtWidgets import QListWidget, QTableWidget, QTableWidgetItem, QTreeWidget, QTreeWidgetItem
+
+    from cma.ui.widgets import clear_items
+
+    tree, table, items = QTreeWidget(), QTableWidget(0, 2), QListWidget()
+    for widget in (tree, table, items):
+        qtbot.addWidget(widget)
+    for _ in range(3):
+        parent = QTreeWidgetItem(["tunnel"])
+        parent.addChild(QTreeWidgetItem(["nom d'hôte"]))
+        tree.addTopLevelItem(parent)
+        table.insertRow(table.rowCount())
+        for column in range(2):
+            table.setItem(table.rowCount() - 1, column, QTableWidgetItem("case"))
+        items.addItem("élément")
+    # Garder des enveloppes Python vivantes : c'est le cas qui libérait deux fois sous Linux.
+    kept = [tree.topLevelItem(0), table.item(1, 1), items.item(2)]
+    clear_items(tree)
+    clear_items(table, keep_rows=2)
+    clear_items(items)
+    assert tree.topLevelItemCount() == 0 and items.count() == 0
+    assert table.rowCount() == 2 and table.item(0, 0) is None
+    assert [item.text(0) if isinstance(item, QTreeWidgetItem) else item.text() for item in kept] == [
+        "tunnel",
+        "case",
+        "élément",
+    ]
+    del kept
+    gc.collect()

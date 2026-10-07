@@ -96,7 +96,7 @@ from cma.ui.widgets import (
     SecretField,
     add_shortcut,
     button,
-    clear_tree,
+    clear_items,
     copy_to_clipboard,
     hline,
     label,
@@ -629,11 +629,11 @@ class CloudView(QWidget):
         # (abandon de Qt sous Linux). Les actions sont recalculées à la fin.
         self.tree.clearSelection()
         with QSignalBlocker(self.tree):
-            clear_tree(self.tree)
+            clear_items(self.tree)
         for table in (self.apps, self.remote_tokens):
             table.clearSelection()
             with QSignalBlocker(table):
-                table.setRowCount(0)
+                clear_items(table)
         self._show_summary()
         if overview is None:
             self._update_tunnel_actions()

@@ -41,8 +41,9 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
   `~/Library/Application Support`, secrets dans le trousseau macOS.
 
 ### Corrigé
-- Plantage possible en vidant une liste en arbre (profils, tunnels, espaces de travail) : double libération
-  d'éléments par PySide, constatée sous Linux. Les éléments sont désormais détachés avant d'être libérés.
+- Plantage possible en vidant une liste, un arbre ou un tableau (profils, tunnels, applications, service tokens,
+  politiques, fichiers SFTP, historique, palette) : double libération d'éléments par PySide, constatée sous
+  Linux. Les éléments sont désormais repris par Python avant d'être libérés.
 - « Autoriser un service token » et « Publier un service » : Cloudflare refuse désormais une politique propre à
   une application nouvellement créée. CMA réutilise la politique du compte qui autorise exactement ce token, ou
   la crée, puis l'attache à l'application.

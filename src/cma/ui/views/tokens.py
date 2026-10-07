@@ -34,6 +34,7 @@ from cma.ui.widgets import (
     SecretField,
     add_shortcut,
     button,
+    clear_items,
     label,
     primary_button,
     set_role,
@@ -164,7 +165,7 @@ class TokenEditor(QWidget):
         set_role(self.expiry, role)
         self.secret.set_subject(token.name)
         self.vault_text.setText(self._vault_description())
-        self.users.clear()
+        clear_items(self.users)
         for profile in self.ctx.config().profiles_using_token(token.id):
             self.users.addItem(profile.name)
             self.users.item(self.users.count() - 1).setData(256, profile.id)

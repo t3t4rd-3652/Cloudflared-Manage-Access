@@ -28,7 +28,7 @@ from cma.i18n import tr
 from cma.ui.context import GuiContext
 from cma.ui.icons import app_icon
 from cma.ui.views.common import confirm
-from cma.ui.widgets import button, clear_tree, label, primary_button, title
+from cma.ui.widgets import button, clear_items, label, primary_button, title
 
 ITEM_ROLE = Qt.ItemDataRole.UserRole
 
@@ -160,7 +160,7 @@ class WorkspacesDialog(QDialog):
     def _reload(self, select: str | None = None) -> None:
         current = select or (self.list.currentItem().data(ITEM_ROLE) if self.list.currentItem() else None)
         self.list.blockSignals(True)
-        self.list.clear()
+        clear_items(self.list)
         for workspace in sorted(self.ctx.config().workspaces, key=lambda w: w.name.lower()):
             item = QListWidgetItem(f"{workspace.name} ({len(workspace.items)})")
             item.setData(ITEM_ROLE, workspace.id)
@@ -185,7 +185,7 @@ class WorkspacesDialog(QDialog):
         for widget in (self.name, self.tree, self.launch_button, self.delete_button):
             widget.setEnabled(workspace is not None)
         self._loading = True
-        clear_tree(self.tree)
+        clear_items(self.tree)
         self.name.setText(workspace.name if workspace else "")
         if workspace is not None:
             self._fill_tree(workspace)

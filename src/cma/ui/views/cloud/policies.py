@@ -36,7 +36,7 @@ from cma.i18n import tr
 from cma.ui.icons import app_icon
 from cma.ui.views.cloud.helpers import data_table, dialog_buttons
 from cma.ui.views.common import confirm
-from cma.ui.widgets import button, label, primary_button, title
+from cma.ui.widgets import button, clear_items, label, primary_button, title
 
 # Appelé avec la politique visée et la fonction qui reçoit la liste relue après l'opération.
 PolicyAction = Callable[[AccessPolicy, Callable[[list[AccessPolicy]], None]], None]
@@ -279,7 +279,7 @@ class _PolicyTable(QDialog):
 
     def set_policies(self, policies: list[AccessPolicy]) -> None:
         self.policies = list(policies)
-        self.table.setRowCount(0)
+        clear_items(self.table)
         for policy in self.policies:
             row = self.table.rowCount()
             self.table.insertRow(row)

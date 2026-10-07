@@ -16,8 +16,10 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
     QPushButton,
     QSizePolicy,
+    QTableWidget,
     QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
@@ -135,23 +137,35 @@ def tool_button(
     return widget
 
 
-def clear_tree(tree: QTreeWidget) -> None:
-    """Vide un QTreeWidget en détachant chaque élément : Python, seul propriétaire, le libère une fois.
+def clear_items(widget: QTreeWidget | QTableWidget | QListWidget, keep_rows: int = 0) -> None:
+    """Vide un arbre, un tableau ou une liste en reprenant chaque élément : Python, seul propriétaire, le libère une
+    fois. Pour un tableau, `keep_rows` lignes vides restent (prêtes pour `setItem`).
 
-    `QTreeWidget.clear()` fait détruire les éléments par Qt. QTreeWidgetItem n'étant pas un QObject, PySide ne le
-    voit pas : une enveloppe Python peut ensuite libérer le même élément une seconde fois (« free(): invalid
-    pointer » et abandon sous Linux, constatés en CI ; corruption silencieuse ailleurs). Les signaux de sélection
-    émis pendant le détachement restent à bloquer par l'appelant s'il le faut.
+    `clear()`, `setRowCount()` ou un `setItem` sur une case occupée font détruire les éléments par Qt. Les
+    éléments (QTreeWidgetItem, QTableWidgetItem, QListWidgetItem) n'étant pas des QObject, PySide ne le voit pas :
+    une enveloppe Python peut ensuite libérer le même élément une seconde fois (« free(): invalid pointer » et
+    abandon sous Linux, constatés en CI ; corruption silencieuse ailleurs). Les signaux de sélection émis pendant
+    la reprise restent à bloquer par l'appelant s'il le faut.
     """
+    if isinstance(widget, QTreeWidget):
 
-    def detach(item: QTreeWidgetItem) -> None:
-        for child in item.takeChildren():
-            detach(child)
+        def detach(item: QTreeWidgetItem) -> None:
+            for child in item.takeChildren():
+                detach(child)
 
-    while tree.topLevelItemCount():
-        item = tree.takeTopLevelItem(0)
-        if item is not None:
-            detach(item)
+        while widget.topLevelItemCount():
+            item = widget.takeTopLevelItem(0)
+            if item is not None:
+                detach(item)
+    elif isinstance(widget, QTableWidget):
+        for row in range(widget.rowCount()):
+            for column in range(widget.columnCount()):
+                widget.takeItem(row, column)
+        widget.setRowCount(0)
+        widget.setRowCount(keep_rows)
+    else:
+        while widget.count():
+            widget.takeItem(0)
 
 
 def copy_to_clipboard(text: str) -> None:

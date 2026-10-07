@@ -16,7 +16,7 @@ from PySide6.QtWidgets import QDialog, QLineEdit, QListWidget, QListWidgetItem, 
 
 from cma.i18n import tr
 from cma.ui.icons import app_icon, token_icon
-from cma.ui.widgets import label
+from cma.ui.widgets import clear_items, label
 
 MAX_RESULTS = 60
 ENTRY_ROLE = Qt.ItemDataRole.UserRole
@@ -90,7 +90,7 @@ class CommandPalette(QDialog):
         return super().eventFilter(watched, event)
 
     def _filter(self, query: str) -> None:
-        self.results.clear()
+        clear_items(self.results)
         shown = 0
         section = None
         for entry in self.entries:

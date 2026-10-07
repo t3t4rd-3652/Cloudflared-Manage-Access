@@ -31,7 +31,7 @@ from cma.i18n import tr
 from cma.ui.format import human_bytes, short_datetime
 from cma.ui.icons import token_icon
 from cma.ui.views.common import confirm
-from cma.ui.widgets import button, label, primary_button
+from cma.ui.widgets import button, clear_items, label, primary_button
 
 if TYPE_CHECKING:
     from cma.ui.views.ssh.view import SshProfilePanel
@@ -149,7 +149,7 @@ class FilesTab(QWidget):
         """Nouveau profil affiché : rien n'est lu tant que l'utilisateur ne parcourt pas."""
         self.directory = None
         self.entries = []
-        self.table.setRowCount(0)
+        clear_items(self.table)
         self.path.clear()
         self.error.hide()
         self.status.setText(tr("« Parcourir » ouvre votre dossier personnel sur le serveur."))
@@ -224,7 +224,7 @@ class FilesTab(QWidget):
             self.open_directory(posixpath.dirname(self.directory.rstrip("/")) or "/")
 
     def _fill(self) -> None:
-        self.table.setRowCount(0)
+        clear_items(self.table)
         for entry in self.entries:
             row = self.table.rowCount()
             self.table.insertRow(row)
