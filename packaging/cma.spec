@@ -5,15 +5,28 @@
 # et bibliothèques Qt remplaçables (LGPL). Deux exécutables partagent le même dossier _internal :
 #   CloudflaredManageAccess.exe  interface graphique (sans console)
 #   cma.exe                      ligne de commande (console)
+#   macOS : les deux mêmes exécutables, dans « Cloudflared Manage Access.app » (Contents/MacOS).
+import re
 import sys
 from pathlib import Path
 
 WINDOWS = sys.platform == "win32"
+MACOS = sys.platform == "darwin"
 ROOT = Path(SPECPATH).resolve().parent  # noqa: F821 (variable fournie par PyInstaller)
 SRC = ROOT / "src"
-# Icône et ressource de version n'existent que dans les exécutables Windows.
-ICON = str(ROOT / "packaging" / "cma.ico") if WINDOWS else None
+VERSION = re.search(r'__version__ = "([^"]+)"', (SRC / "cma" / "__init__.py").read_text(encoding="utf-8"))[1]
+# Icône : .ico dans les exécutables Windows, .icns (produite par build.py) dans l'application macOS.
+if WINDOWS:
+    ICON = str(ROOT / "packaging" / "cma.ico")
+elif MACOS and (ROOT / "build" / "cma.icns").exists():
+    ICON = str(ROOT / "build" / "cma.icns")
+else:
+    ICON = None
 VERSION_FILE = str(ROOT / "build" / "version_info.txt") if WINDOWS else None
+KEYRING_BACKEND = {
+    "win32": "keyring.backends.Windows",
+    "darwin": "keyring.backends.macOS",
+}.get(sys.platform, "keyring.backends.SecretService")
 
 datas = [
     (str(SRC / "cma" / "resources" / "icons"), "cma/resources/icons"),
@@ -59,7 +72,7 @@ excludes = [
 ]
 
 hiddenimports = [
-    "keyring.backends.Windows" if WINDOWS else "keyring.backends.SecretService",
+    KEYRING_BACKEND,
     "cma.i18n_en",
 ]
 
@@ -139,7 +152,7 @@ cli_exe = EXE(  # noqa: F821
     upx=False,
 )
 
-COLLECT(  # noqa: F821
+collected = COLLECT(  # noqa: F821
     gui_exe,
     gui.binaries,
     gui.datas,
@@ -149,3 +162,21 @@ COLLECT(  # noqa: F821
     upx=False,
     name="CloudflaredManageAccess",
 )
+
+if MACOS:
+    BUNDLE(  # noqa: F821
+        collected,
+        name="Cloudflared Manage Access.app",
+        icon=ICON,
+        bundle_identifier="io.github.t3t4rd-3652.cloudflared-manage-access",
+        version=VERSION,
+        info_plist={
+            "CFBundleName": "Cloudflared Manage Access",
+            "CFBundleDisplayName": "Cloudflared Manage Access",
+            "CFBundleShortVersionString": VERSION,
+            "CFBundleVersion": VERSION,
+            "NSHighResolutionCapable": True,
+            "LSMinimumSystemVersion": "13.0",
+            "NSHumanReadableCopyright": "Cloudflared Manage Access",
+        },
+    )

@@ -11,6 +11,7 @@ Résultat dans dist/ :
     CloudflaredManageAccess-<version>-setup.exe       installeur (si Inno Setup est installé)
     CloudflaredManageAccess-<version>-linux-x86_64.tar.gz   version portable Linux (dossier data/ inclus)
     CloudflaredManageAccess-<version>-x86_64.AppImage       AppImage Linux (si appimagetool est disponible)
+    CloudflaredManageAccess-<version>-macos-<arch>.zip      application macOS non signée (zip fait par ditto)
     SHA256SUMS.txt
 
 Sous Linux, appimagetool est cherché dans le PATH ou dans la variable APPIMAGETOOL.
@@ -21,6 +22,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -167,6 +169,33 @@ def appimage(ver: str) -> Path | None:
     return target
 
 
+MACOS_APP = DIST / "Cloudflared Manage Access.app"
+
+
+def macos_icon() -> Path:
+    """Icône .icns de l'application macOS : PNG de 16 à 1024 px rendus depuis le SVG, assemblés par iconutil."""
+    iconset = BUILD / "cma.iconset"
+    shutil.rmtree(iconset, ignore_errors=True)
+    iconset.mkdir(parents=True)
+    for size in (16, 32, 128, 256, 512):
+        render_icon(iconset / f"icon_{size}x{size}.png", size)
+        render_icon(iconset / f"icon_{size}x{size}@2x.png", size * 2)
+    target = BUILD / "cma.icns"
+    subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(target)], check=True)
+    return target
+
+
+def macos_zip(ver: str) -> Path:
+    """Zip de l'application par ditto : il garde liens symboliques, droits et attributs du paquet .app."""
+    arch = "arm64" if platform.machine() in ("arm64", "aarch64") else "x86_64"
+    target = DIST / f"CloudflaredManageAccess-{ver}-macos-{arch}.zip"
+    target.unlink(missing_ok=True)
+    subprocess.run(
+        ["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(MACOS_APP), str(target)], check=True
+    )
+    return target
+
+
 def find_iscc() -> Path | None:
     for candidate in (
         shutil.which("iscc"),
@@ -213,12 +242,16 @@ def main() -> int:
     ver = version()
     if args.stage in ("all", "app"):
         write_version_info(ver)
+        if sys.platform == "darwin":
+            macos_icon()
         run_pyinstaller()
     if args.stage in ("all", "package"):
         if sys.platform == "win32":
             portable_zip(ver)
             if not args.no_installer:
                 installer(ver)
+        elif sys.platform == "darwin":
+            macos_zip(ver)
         else:
             linux_tarball(ver)
             appimage(ver)
@@ -231,6 +264,7 @@ def main() -> int:
                 DIST / f"CloudflaredManageAccess-{ver}-sbom.cdx.json",
                 DIST / f"CloudflaredManageAccess-{ver}-linux-x86_64.tar.gz",
                 DIST / f"CloudflaredManageAccess-{ver}-x86_64.AppImage",
+                *sorted(DIST.glob(f"CloudflaredManageAccess-{ver}-macos-*.zip")),
             )
             if f.exists()
         ]

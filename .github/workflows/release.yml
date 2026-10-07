@@ -129,9 +129,31 @@ jobs:
             dist/CloudflaredManageAccess-*-x86_64.AppImage
           if-no-files-found: error
 
+  macos:
+    name: Build macOS
+    # Application non signée (pas de compte Apple Developer) : Gatekeeper demande « clic droit › Ouvrir ».
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --locked
+      - name: Build de l'application (.app)
+        run: uv run python packaging/build.py --stage app
+      - name: Zip de l'application
+        run: uv run python packaging/build.py --stage package
+      - name: Vérification rapide
+        run: |
+          QT_QPA_PLATFORM=offscreen "dist/Cloudflared Manage Access.app/Contents/MacOS/cma" --version
+          plutil -p "dist/Cloudflared Manage Access.app/Contents/Info.plist" | grep CFBundleShortVersionString
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos
+          path: dist/CloudflaredManageAccess-*-macos-*.zip
+          if-no-files-found: error
+
   publish:
     name: Publication
-    needs: [windows, linux]
+    needs: [windows, linux, macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -139,7 +161,7 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-          pattern: "{windows,linux}"
+          pattern: "{windows,linux,macos}"
       - name: Empreintes SHA-256 (fins de ligne LF, pour sha256sum -c)
         run: cd dist && sha256sum CloudflaredManageAccess-* > SHA256SUMS.txt && cat SHA256SUMS.txt
       - name: Notes de version tirées du CHANGELOG
@@ -155,6 +177,7 @@ jobs:
             echo "| \`CloudflaredManageAccess-${version}-portable.zip\` | Windows : version portable ; tout reste dans \`data/\`, secrets compris (coffre chiffré) |"
             echo "| \`CloudflaredManageAccess-${version}-x86_64.AppImage\` | Linux : application en un seul fichier |"
             echo "| \`CloudflaredManageAccess-${version}-linux-x86_64.tar.gz\` | Linux : version portable, avec son dossier \`data/\` |"
+            echo "| \`CloudflaredManageAccess-${version}-macos-arm64.zip\` | macOS (Apple Silicon) : application non signée ; au premier lancement, clic droit › Ouvrir |"
             echo "| \`SHA256SUMS.txt\` | Empreintes à vérifier avec \`Get-FileHash\` ou \`sha256sum -c\` |"
             echo
             echo "Avec Scoop : \`scoop bucket add cma https://github.com/${GITHUB_REPOSITORY}\` puis \`scoop install cma/cloudflared-manage-access\`."
