@@ -361,6 +361,11 @@ async def test_forward_relays_data_and_counts_bytes(paths, store, secrets, bus, 
 
     await manager.stop(info.id)
     assert manager.session(info.id) is None
+    # L'historique a suivi la redirection jusqu'à son arrêt, octets compris.
+    [record] = manager.history.records(profile.id)
+    assert (record.kind, record.forward_id, record.end_state) == ("ssh_forward", forward.id, "stopped")
+    assert record.bytes_up == len(payload) and record.listening_seconds > 0
+    assert paths.history_file.exists()
     await manager.shutdown()
 
 
@@ -420,3 +425,59 @@ async def test_missing_user_is_reported(paths, store, secrets, bus):
         await manager.ssh_connect(profile.id)
     with pytest.raises(SshError):
         await manager.ssh.open(profile)
+
+
+async def test_sftp_browse_transfer_and_tidy(paths, store, secrets, bus, ssh_server, tmp_path):
+    home = ssh_server["home"]
+    (home / "docs" / "sous").mkdir(parents=True)
+    (home / "docs" / "a.txt").write_text("alpha", encoding="utf-8")
+    (home / "docs" / "sous" / "b.txt").write_text("bravo", encoding="utf-8")
+    (home / "z.log").write_text("x" * 1000, encoding="utf-8")
+    profile = add_profile(store, ssh_server["port"])
+    manager = make_manager(paths, store, secrets, bus, ScriptedPrompter(passwords=[PASSWORD]))
+
+    root, entries = await manager.sftp_list(profile.id)
+    assert [(e.name, e.is_dir) for e in entries] == [("docs", True), ("z.log", False)]
+    log_entry = entries[1]
+    assert log_entry.size == 1000 and log_entry.permissions.startswith("-") and log_entry.modified is not None
+    docs, inside = await manager.sftp_list(profile.id, entries[0].path)
+    assert docs.endswith("docs") and [e.name for e in inside] == ["sous", "a.txt"]
+
+    # Téléchargement récursif, avec la progression.
+    seen: list[tuple[str, int, int]] = []
+    local = tmp_path / "local"
+    created = await manager.sftp_download(profile.id, [entries[0].path], local, lambda *p: seen.append(p))
+    assert created == [local / "docs"]
+    assert (local / "docs" / "sous" / "b.txt").read_text(encoding="utf-8") == "bravo"
+    assert any(name == "a.txt" and copied == total == 5 for name, copied, total in seen)
+
+    # Envoi d'un fichier et d'un dossier ; ce qui existe déjà est signalé avant.
+    outgoing = tmp_path / "envoi"
+    (outgoing / "lot").mkdir(parents=True)
+    (outgoing / "lot" / "c.txt").write_text("charlie", encoding="utf-8")
+    (outgoing / "a.txt").write_text("nouveau", encoding="utf-8")
+    assert await manager.sftp_existing(profile.id, docs, ["a.txt", "lot"]) == ["a.txt"]
+    await manager.sftp_upload(profile.id, [outgoing / "a.txt", outgoing / "lot"], docs)
+    assert (home / "docs" / "a.txt").read_text(encoding="utf-8") == "nouveau"
+    assert (home / "docs" / "lot" / "c.txt").read_text(encoding="utf-8") == "charlie"
+
+    # Ranger : dossier, renommage, suppressions ; les noms invalides sont refusés.
+    made = await manager.sftp_mkdir(profile.id, docs, "  archives ")
+    assert made.endswith("docs/archives") and (home / "docs" / "archives").is_dir()
+    for bad in ("", "..", "a/b"):
+        with pytest.raises(ManagerError, match="Nom invalide"):
+            await manager.sftp_mkdir(profile.id, docs, bad)
+    renamed = await manager.sftp_rename(profile.id, f"{docs}/a.txt", "alpha.txt")
+    assert renamed.endswith("docs/alpha.txt") and (home / "docs" / "alpha.txt").exists()
+    with pytest.raises(ManagerError, match="existe déjà"):
+        await manager.sftp_rename(profile.id, renamed, "lot")
+    _, inside = await manager.sftp_list(profile.id, docs)
+    by_name = {e.name: e for e in inside}
+    await manager.sftp_remove(profile.id, by_name["alpha.txt"])
+    await manager.sftp_remove(profile.id, by_name["sous"])  # dossier avec son contenu
+    assert sorted(p.name for p in (home / "docs").iterdir()) == ["archives", "lot"]
+
+    with pytest.raises(ManagerError, match="impossible"):
+        await manager.sftp_list(profile.id, "/inexistant")
+    with pytest.raises(ManagerError, match="introuvable"):
+        await manager.sftp_list("inconnu")

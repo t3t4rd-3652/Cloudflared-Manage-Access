@@ -36,6 +36,7 @@ from cma.i18n import tr
 from cma.ui.actions import QuickAction, quick_actions, run_action
 from cma.ui.context import GuiContext
 from cma.ui.dialogs.diagnose import open_diagnosis
+from cma.ui.dialogs.history import show_history
 from cma.ui.dialogs.workspaces import WorkspacesDialog, launch_favorites, launch_workspace
 from cma.ui.format import human_bytes, since
 from cma.ui.icons import set_glyph, set_icon
@@ -220,6 +221,10 @@ class SessionRow(QFrame):
         self.diagnose_action = self.more_menu.addAction(tr("Diagnostiquer…"), self._diagnose)
         self.more_menu.addSeparator()
         self.more_menu.addAction(tr("Voir le journal"), lambda: self._open_logs(self.info.id))
+        self.more_menu.addAction(
+            tr("Historique de cet accès"),
+            lambda: show_history(self.window(), self.ctx, (self.info.profile_id, self.info.forward_id)),
+        )
         self.more_menu.addAction(tr("Redémarrer"), self._restart)
         self.more_menu.addAction(tr("Arrêter"), self._stop)
         self.more_button.setMenu(self.more_menu)

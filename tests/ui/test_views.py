@@ -587,3 +587,84 @@ def test_interface_lock_with_an_encrypted_vault(qtbot, gui, tmp_path, monkeypatc
     assert window.locked
     window.unlock()
     assert "Verrouiller CMA" in [e.text for e in window.palette_entries()]
+
+
+def test_ssh_files_tab(qtbot, ssh_gui, threaded_ssh_server, monkeypatch, tmp_path):
+    import cma.ui.views.ssh.files_tab as files_module
+
+    home = threaded_ssh_server["home"]
+    (home / "docs").mkdir()
+    (home / "docs" / "a.txt").write_text("alpha", encoding="utf-8")
+    (home / "notes.txt").write_text("n", encoding="utf-8")
+    ctx, window = ssh_gui
+    window.show_view("ssh")
+    view = window.ssh
+    view.new_profile()
+    settings = view.panel.settings_tab
+    settings.name.setText("Serveur fichiers")
+    settings.host.setText("127.0.0.1")
+    settings.port.setText(str(threaded_ssh_server["port"]))
+    settings.user.setText("admin")
+    settings.name.textEdited.emit("x")
+    assert settings.save()
+    view.panel.show_tab("files")
+    files = view.panel.files_tab
+    assert view.panel.tabs.currentWidget() is files
+    assert not files.download_button.isEnabled() and not files.upload_button.isEnabled()
+
+    def names() -> list[str]:
+        return [files.table.item(r, 0).text() for r in range(files.table.rowCount())]
+
+    files.browse_button.click()
+    qtbot.waitUntil(lambda: names() == ["docs", "notes.txt"], timeout=15000)
+    assert files.path.text() == files.directory and files.upload_button.isEnabled()
+
+    files._activate(0)  # double-clic sur un dossier : on y entre
+    qtbot.waitUntil(lambda: names() == ["a.txt"], timeout=10000)
+    files.go_up()
+    qtbot.waitUntil(lambda: names() == ["docs", "notes.txt"], timeout=10000)
+
+    # Téléchargement d'un fichier et d'un dossier ; ce qui existe déjà localement est confirmé.
+    target = tmp_path / "telechargements"
+    target.mkdir()
+    (target / "notes.txt").write_text("ancien", encoding="utf-8")
+    monkeypatch.setattr(files_module, "ask_directory", lambda *_a: target)
+    monkeypatch.setattr(files_module, "confirm", lambda *_a: False)
+    files.table.selectAll()
+    assert files.download_button.isEnabled() and not files.rename_button.isEnabled()
+    files.download_selected()  # remplacement refusé : rien n'est fait
+    assert (target / "notes.txt").read_text(encoding="utf-8") == "ancien"
+    monkeypatch.setattr(files_module, "confirm", lambda *_a: True)
+    files.download_selected()
+    qtbot.waitUntil(lambda: (target / "docs" / "a.txt").exists(), timeout=10000)
+    qtbot.waitUntil(lambda: files.browse_button.isEnabled(), timeout=10000)
+    assert (target / "notes.txt").read_text(encoding="utf-8") == "n"
+
+    # Envoi, nouveau dossier, renommage, suppression.
+    outgoing = tmp_path / "envoi.txt"
+    outgoing.write_text("envoyé", encoding="utf-8")
+    monkeypatch.setattr(files_module, "ask_files", lambda *_a: [outgoing])
+    files.upload_files()
+    qtbot.waitUntil(lambda: "envoi.txt" in names(), timeout=10000)
+    assert (home / "envoi.txt").read_text(encoding="utf-8") == "envoyé"
+    monkeypatch.setattr(files_module, "ask_name", lambda *_a: "rangement")
+    files.make_directory()
+    qtbot.waitUntil(lambda: "rangement" in names(), timeout=10000)
+    files.table.clearSelection()
+    files.table.selectRow(names().index("envoi.txt"))
+    monkeypatch.setattr(files_module, "ask_name", lambda *_a: "renomme.txt")
+    files.rename_selected()
+    qtbot.waitUntil(lambda: "renomme.txt" in names(), timeout=10000)
+    files.table.clearSelection()
+    files.table.selectRow(names().index("rangement"))
+    files.delete_selected()
+    qtbot.waitUntil(lambda: "rangement" not in names(), timeout=10000)
+    assert not (home / "rangement").exists()
+
+    # Erreur lisible, et progression affichée.
+    files.open_directory("/inexistant")
+    qtbot.waitUntil(lambda: not files.error.isHidden(), timeout=10000)
+    files._on_progress("gros.iso", 1024, 4096)
+    assert "gros.iso" in files.status.text()
+    view.new_profile()  # autre profil : l'onglet repart de zéro
+    assert files.table.rowCount() == 0 and files.directory is None

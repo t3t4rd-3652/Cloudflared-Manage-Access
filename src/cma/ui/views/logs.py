@@ -44,6 +44,7 @@ from cma.core.events import LogLine
 from cma.core.sessions import SessionInfo
 from cma.i18n import tr
 from cma.ui.context import GuiContext
+from cma.ui.dialogs.history import show_history
 from cma.ui.state import remember_header
 from cma.ui.theme import current_tokens
 from cma.ui.widgets import (
@@ -330,6 +331,10 @@ class LogsView(QWidget):
         for widget in (self.copy_button, self.export_button, clear, folder):
             actions.addWidget(widget)
         actions.addStretch()
+        history = button(tr("Historique des sessions…"), "history")
+        history.setToolTip(tr("Disponibilité, reconnexions et erreurs de chaque accès"))
+        history.clicked.connect(lambda: show_history(self, ctx))
+        actions.addWidget(history)
         layout.addLayout(actions)
 
         for widget in (self.source, self.level):

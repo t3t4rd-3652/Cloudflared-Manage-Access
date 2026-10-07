@@ -31,6 +31,7 @@ from cma.i18n import tr
 from cma.ui.a11y import apply_accessible_names
 from cma.ui.context import GuiContext
 from cma.ui.dialogs.diagnose import open_diagnosis
+from cma.ui.dialogs.history import show_history
 from cma.ui.dialogs.palette import CommandPalette, PaletteEntry
 from cma.ui.dialogs.workspaces import launch_workspace
 from cma.ui.format import expiry_alert
@@ -390,6 +391,12 @@ class MainWindow(QMainWindow):
                 tr("Gérer les espaces de travail…"),
                 dashboard.manage_workspaces,
                 icon="layout-dashboard",
+            ),
+            PaletteEntry(
+                section,
+                tr("Historique des sessions…"),
+                lambda: show_history(self, self.ctx),
+                icon="history",
             ),
         ]
         if self.can_lock():

@@ -13,9 +13,10 @@ import socket
 import subprocess
 import sys
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from cma.core.cfadmin import CloudflareAdmin
 from cma.core.cloudflared.binary import detect as detect_cloudflared
@@ -30,22 +31,26 @@ from cma.core.cloudflared.command import (
 from cma.core.cloudflared.session import CloudflaredSession
 from cma.core.config_store import ConfigStore
 from cma.core.events import EventBus, Notification, SessionRemoved
+from cma.core.history import SessionHistory
 from cma.core.models import AuthMode, CloudflareProfile, LaunchItem, SavedForward, SshAuthMode, SshProfile
 from cma.core.netutil import find_free_port
 from cma.core.probe import ProbeResult, probe_kind, probe_service
 from cma.core.prompts import Prompter
 from cma.core.secrets import SecretStore
 from cma.core.sessions import Session, SessionInfo, SessionKind, SessionState, connect_host
+from cma.core.ssh import sftp
 from cma.core.ssh.connection import SshConnectionManager
 from cma.core.ssh.discovery import DiscoveryResult, discover
 from cma.core.ssh.errors import SshError
 from cma.core.ssh.forward import SshForwardSession
 from cma.core.ssh.keys import DeployResult, deploy_public_key, public_key_line, resolve_key_path
+from cma.core.ssh.sftp import RemoteEntry
 from cma.i18n import tr
 from cma.paths import AppPaths
 from cma.platform.winjob import ProcessJob
 
 log = logging.getLogger(__name__)
+T = TypeVar("T")
 
 BRIDGE_TIMEOUT = 30.0
 
@@ -92,6 +97,9 @@ class SessionManager:
         self.cloudflare = CloudflareAdmin(
             store, secrets, lambda preferred, avoid: self.suggest_local_port(preferred, avoid=avoid)
         )
+        # Historique des sessions : alimenté par le bus, rangé dans le dossier de données.
+        self.history = SessionHistory(paths.history_file)
+        bus.subscribe(self.history.handle)
 
     # --- Consultation ------------------------------------------------------------------
 
@@ -503,6 +511,48 @@ class SessionManager:
                 self.bus.publish(Notification("error", profile.name, str(exc)))
         return started
 
+    # --- Fichiers (SFTP) ---------------------------------------------------------------------------
+
+    async def _sftp(self, profile_id: str, operation: Callable[[Any], Awaitable[T]]) -> T:
+        """Exécute une opération SFTP sur la connexion SSH du profil, avec des erreurs lisibles."""
+        profile = self._ssh_profile(profile_id)
+        try:
+            conn = await self.ssh.get(profile)
+            return await operation(conn)
+        except (SshError, ValueError, FileExistsError) as exc:
+            raise ManagerError(str(exc)) from exc
+        except Exception as exc:
+            raise ManagerError(
+                tr("Opération sur les fichiers impossible : {error}").format(error=exc)
+            ) from exc
+
+    async def sftp_list(self, profile_id: str, path: str | None = None) -> tuple[str, list[RemoteEntry]]:
+        return await self._sftp(profile_id, lambda conn: sftp.listing(conn, path))
+
+    async def sftp_download(
+        self, profile_id: str, remote_paths: list[str], local_dir: Path, progress: sftp.Progress | None = None
+    ) -> list[Path]:
+        return await self._sftp(
+            profile_id, lambda conn: sftp.download(conn, remote_paths, local_dir, progress)
+        )
+
+    async def sftp_upload(
+        self, profile_id: str, local_paths: list[Path], remote_dir: str, progress: sftp.Progress | None = None
+    ) -> list[str]:
+        return await self._sftp(profile_id, lambda conn: sftp.upload(conn, local_paths, remote_dir, progress))
+
+    async def sftp_existing(self, profile_id: str, remote_dir: str, names: list[str]) -> list[str]:
+        return await self._sftp(profile_id, lambda conn: sftp.existing(conn, remote_dir, names))
+
+    async def sftp_mkdir(self, profile_id: str, remote_dir: str, name: str) -> str:
+        return await self._sftp(profile_id, lambda conn: sftp.make_dir(conn, remote_dir, name))
+
+    async def sftp_rename(self, profile_id: str, path: str, new_name: str) -> str:
+        return await self._sftp(profile_id, lambda conn: sftp.rename(conn, path, new_name))
+
+    async def sftp_remove(self, profile_id: str, entry: RemoteEntry) -> None:
+        await self._sftp(profile_id, lambda conn: sftp.remove(conn, entry))
+
     async def deploy_key(self, profile_id: str, key_path: str) -> DeployResult:
         """Envoie la clé publique sur le serveur, via une connexion ponctuelle par mot de passe."""
         profile = self.store.snapshot().ssh_profile(profile_id)
@@ -574,6 +624,7 @@ class SessionManager:
     async def shutdown(self) -> None:
         await self.stop_all()
         await self.ssh.close_all()
+        self.history.close_all()
         if self.job is not None:
             self.job.close()
 

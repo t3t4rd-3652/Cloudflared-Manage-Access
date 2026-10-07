@@ -34,6 +34,7 @@ from cma.ui.dialogs.transfer import run_export, run_import
 from cma.ui.icons import set_icon
 from cma.ui.theme import current_tokens
 from cma.ui.views.common import Action, ListEntry, ProfileList, ask_unsaved, confirm
+from cma.ui.views.ssh.files_tab import FilesTab
 from cma.ui.views.ssh.forwards_tab import ForwardsTab
 from cma.ui.views.ssh.ports_tab import PortsTab
 from cma.ui.views.ssh.settings_tab import SettingsTab
@@ -48,7 +49,7 @@ from cma.ui.widgets import (
     title,
 )
 
-TABS = ("ports", "forwards", "config")
+TABS = ("ports", "forwards", "files", "config")
 
 
 class SshProfilePanel(QWidget):
@@ -86,14 +87,16 @@ class SshProfilePanel(QWidget):
         self.tabs.setProperty("role", "plain")
         self.ports_tab = PortsTab(self)
         self.forwards_tab = ForwardsTab(self)
+        self.files_tab = FilesTab(self)
         self.settings_tab = SettingsTab(self)
         self.tabs.addTab(self.ports_tab, tr("Ports distants"))
         self.tabs.addTab(self.forwards_tab, tr("Redirections"))
+        self.tabs.addTab(self.files_tab, tr("Fichiers"))
         self.tabs.addTab(self.settings_tab, tr("Configuration"))
         layout.addWidget(self.tabs, 1)
 
     def show_tab(self, key: str) -> None:
-        """Affiche un onglet : « ports », « forwards » ou « config »."""
+        """Affiche un onglet : « ports », « forwards », « files » ou « config »."""
         self.tabs.setCurrentIndex(TABS.index(key) if key in TABS else 0)
 
     def load(self, profile: SshProfile) -> None:
@@ -115,6 +118,7 @@ class SshProfilePanel(QWidget):
         self.forwards_tab.reload()
         self.settings_tab.load(profile)
         if changed:
+            self.files_tab.reset(profile)
             self.show_tab("ports")
         self.update_connection_state()
 

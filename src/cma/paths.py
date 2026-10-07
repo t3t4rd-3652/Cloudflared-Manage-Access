@@ -71,6 +71,10 @@ class AppPaths:
         return self.data_dir / "cache"
 
     @property
+    def history_file(self) -> Path:
+        return self.data_dir / "history.json"
+
+    @property
     def lock_file(self) -> Path:
         return self.data_dir / "cma.lock"
 

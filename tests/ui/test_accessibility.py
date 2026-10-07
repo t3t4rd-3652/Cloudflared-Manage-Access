@@ -40,6 +40,7 @@ def test_dialogs_have_no_unnamed_control(qtbot, gui, tmp_path):
     from cma.core.cfapi import AccessApp, Account, Connector, EdgeConnection, IngressRule, Tunnel, Zone
     from cma.core.policies import AccessGroup, AccessPolicy, PolicyRule
     from cma.core.transfer import build_export, plan_import
+    from cma.ui.dialogs.history import HistoryDialog
     from cma.ui.views import cloud
     from cma.ui.views.cloud.policies import (
         AccountPoliciesDialog,
@@ -92,6 +93,7 @@ def test_dialogs_have_no_unnamed_control(qtbot, gui, tmp_path):
             window, [AccessPolicy("p1", "Équipe", "allow", reusable=True, app_count=2)], [], {}
         ),
         CreateTunnelDialog(window, ["bureau"]),
+        HistoryDialog(window, ctx),
         NewTunnelDialog(window, NewTunnel(tunnel, "jeton-de-connecteur-assez-long")),
         cloud.ConnectorsDialog(
             window,
