@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QToolButton,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -131,6 +133,25 @@ def tool_button(
     if callback is not None:
         widget.clicked.connect(callback)
     return widget
+
+
+def clear_tree(tree: QTreeWidget) -> None:
+    """Vide un QTreeWidget en détachant chaque élément : Python, seul propriétaire, le libère une fois.
+
+    `QTreeWidget.clear()` fait détruire les éléments par Qt. QTreeWidgetItem n'étant pas un QObject, PySide ne le
+    voit pas : une enveloppe Python peut ensuite libérer le même élément une seconde fois (« free(): invalid
+    pointer » et abandon sous Linux, constatés en CI ; corruption silencieuse ailleurs). Les signaux de sélection
+    émis pendant le détachement restent à bloquer par l'appelant s'il le faut.
+    """
+
+    def detach(item: QTreeWidgetItem) -> None:
+        for child in item.takeChildren():
+            detach(child)
+
+    while tree.topLevelItemCount():
+        item = tree.takeTopLevelItem(0)
+        if item is not None:
+            detach(item)
 
 
 def copy_to_clipboard(text: str) -> None:

@@ -12,6 +12,7 @@ from datetime import datetime
 
 from PySide6.QtCore import (
     QPoint,
+    QSignalBlocker,
     Qt,
     QUrl,
     Signal,
@@ -95,6 +96,7 @@ from cma.ui.widgets import (
     SecretField,
     add_shortcut,
     button,
+    clear_tree,
     copy_to_clipboard,
     hline,
     label,
@@ -622,9 +624,16 @@ class CloudView(QWidget):
 
     def _fill(self, overview: Overview | None) -> None:
         self.overview = overview
-        self.tree.clear()
-        self.apps.setRowCount(0)
-        self.remote_tokens.setRowCount(0)
+        # Vider d'abord les sélections (leurs éléments existent encore), puis reconstruire sans signaux :
+        # un `itemSelectionChanged` émis pendant `clear()` ferait relire un élément en cours de destruction
+        # (abandon de Qt sous Linux). Les actions sont recalculées à la fin.
+        self.tree.clearSelection()
+        with QSignalBlocker(self.tree):
+            clear_tree(self.tree)
+        for table in (self.apps, self.remote_tokens):
+            table.clearSelection()
+            with QSignalBlocker(table):
+                table.setRowCount(0)
         self._show_summary()
         if overview is None:
             self._update_tunnel_actions()

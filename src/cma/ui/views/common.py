@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 from cma.i18n import tr
 from cma.ui.icons import dot_icon, token_icon
 from cma.ui.theme import current_tokens
-from cma.ui.widgets import primary_button, tool_button
+from cma.ui.widgets import clear_tree, primary_button, tool_button
 
 ID_ROLE = Qt.ItemDataRole.UserRole
 GROUP_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -149,7 +149,7 @@ class ProfileList(QWidget):
     def _rebuild(self) -> None:
         current = self.current_id()
         self._suppress = True
-        self.tree.clear()
+        clear_tree(self.tree)
         needle = self.search.text().strip().lower()
         entries = [e for e in self._entries if self._matches(e, needle)]
         entries.sort(key=lambda e: (not e.favorite, e.name.lower()))

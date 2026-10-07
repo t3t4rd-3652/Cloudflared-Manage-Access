@@ -119,6 +119,11 @@ Qt et PySide :
 - Pas de filtre d'événements Python installé sur la `QApplication` : PySide y passe des enveloppes au type
   incomplet, d'où des `AttributeError` intermittentes. Préférer un signal (`focusWindowChanged`) ou un minuteur.
 - Ne jamais reconstruire un `QTreeWidget` pendant le signal `itemChanged` d'un de ses éléments : violation d'accès.
+- Ne jamais vider un `QTreeWidget` par `clear()` : utiliser `clear_tree` (`ui/widgets.py`), qui détache chaque
+  élément. `QTreeWidgetItem` n'est pas un `QObject` : PySide ne voit pas sa destruction par Qt et peut le libérer
+  une seconde fois. C'était le SIGABRT intermittent du job Linux (`free(): invalid pointer` dans
+  `Shiboken::Object::destroy`), reproduit dans un conteneur en relançant la vue Cloudflare en boucle avec
+  `pytest --no-qt-log -s` (Python 3.14 affiche alors la pile C).
 - `monkeypatch.setattr(QMenu, "exec", …)` n'intercepte pas l'appel : le menu modal bloque le test. Séparer la
   construction du menu de son `exec`.
 - Un widget d'une vue non affichée a `isVisible() == False` : afficher la vue avant de tester la visibilité.
