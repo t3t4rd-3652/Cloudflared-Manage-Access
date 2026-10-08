@@ -1,6 +1,6 @@
 # Plan du projet
 
-État au 2026-10-08, version **2.4.0** (vues de configuration redessinées) ; P4 réalisé, non publié. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+État au 2026-10-08, version **2.5.0** (P4 : surveillance des tunnels, Paramètres en sections). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -155,7 +155,7 @@ Ordre de réalisation suivi : de ce qui évite une panne silencieuse à ce qui a
 
 ### P4 — Surveillance, cohérence et outillage (2.5)
 
-**État au 2026-10-08 : les quatre points sont réalisés** (section « Non publié » du CHANGELOG). Restent : la
+**État au 2026-10-08 : les quatre points sont réalisés**, publiés en 2.5.0. Restent : la
 stabilisation du job de tests macOS (non bloquant tant qu'il n'a pas réussi plusieurs fois), et la vérification
 par signature, qui ne servira vraiment qu'avec le certificat.
 

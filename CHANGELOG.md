@@ -2,7 +2,7 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
-## [Non publié]
+## [2.5.0] - 2026-10-08
 
 ### Ajouté
 - **Surveillance des tunnels** : avec un jeton d'API, CMA relève l'état des tunnels du compte toutes les
