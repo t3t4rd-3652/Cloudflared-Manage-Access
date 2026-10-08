@@ -83,3 +83,35 @@ def test_settings_toggle_the_watch(qtbot, gui):
     assert ctx.config().settings.watch_tunnels is False
     checkbox.setChecked(True)
     assert ctx.config().settings.watch_tunnels is True
+
+
+def test_troubled_tunnels_stay_visible_in_navigation_and_tray(qtbot, gui, monkeypatch):
+    from cma.ui.tray import Tray
+
+    ctx, window = gui
+    window.banners.show_message = lambda *_a, **_k: None  # type: ignore[method-assign]
+    admin = ctx.manager.cloudflare
+    readings = [[Tunnel("t1", "bureau", "down")], [Tunnel("t1", "bureau", "degraded")]]
+
+    async def tunnel_states() -> list[Tunnel]:
+        return readings.pop(0)
+
+    monkeypatch.setattr(admin, "has_token", lambda: True)
+    monkeypatch.setattr(admin, "tunnel_states", tunnel_states)
+    ctx.update_config(lambda c: setattr(c.settings, "cloudflare_account_id", "acc1"))
+    tray = Tray(ctx, window)
+    item = window._nav_items["cloud"]
+
+    window.check_tunnels()
+    qtbot.waitUntil(lambda: item.text().endswith("· 1 !"), timeout=5000)
+    assert item.toolTip() == "Tunnel « bureau » hors ligne"
+    assert tray.global_state()[1] == "error"
+    assert tray.icon.toolTip() == "CMA : 0 session en cours · Tunnel « bureau » hors ligne"
+
+    window.check_tunnels()
+    qtbot.waitUntil(lambda: tray.global_state()[1] == "warn", timeout=5000)
+
+    # Surveillance coupée : l'ancien relevé disparaît de partout.
+    ctx.update_config(lambda c: setattr(c.settings, "watch_tunnels", False))
+    assert window.check_tunnels() is False
+    assert not item.text().endswith("!") and tray.global_state() == (None, None)

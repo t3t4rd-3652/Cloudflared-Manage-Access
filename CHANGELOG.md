@@ -2,6 +2,18 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Ajouté
+- **Tunnels en panne visibles en permanence** : « Cloudflare · 1 ! » dans la navigation tant qu'un tunnel du
+  compte est dégradé ou hors ligne, et l'icône de la zone de notification prend l'état le plus grave entre
+  sessions et tunnels (info-bulle « Tunnel « labo » hors ligne »).
+- **`cma tunnels`** : état des tunnels du compte en ligne de commande (`--json` possible), avec le code de
+  retour 2 si un tunnel est dégradé ou hors ligne, pour un script ou une supervision.
+
+### Modifié
+- Les tests sous macOS bloquent désormais la CI, comme ceux de Windows et Linux.
+
 ## [2.5.0] - 2026-10-08
 
 ### Ajouté

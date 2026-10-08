@@ -32,7 +32,9 @@ async def echo_server():
     return server, server.sockets[0].getsockname()[1]
 
 
-async def wait_listening(manager, info, timeout=10.0):
+async def wait_listening(manager, info, timeout=45.0):
+    # Rendu dès que l'état est atteint ; 45 s parce que, sous la charge des tests en parallèle (xdist), la
+    # poignée de main SSH (échange de clés) dépasse parfois 10 s.
     for _ in range(int(timeout / 0.05)):
         session = manager.session(info.id)
         if session.state == SessionState.LISTENING:
@@ -139,7 +141,9 @@ async def test_remote_forward_refused_by_the_server(paths, store, secrets, bus, 
     profile = add_profile(store, ssh_server["port"], saved_forwards=[forward])
     manager = make_manager(paths, store, secrets, bus, ScriptedPrompter(passwords=[PASSWORD]))
     info = await manager.start_forward(profile.id, forward)
-    for _ in range(200):
+    for _ in range(
+        900
+    ):  # 45 s : sous la charge des tests en parallèle, la poignée de main SSH peut être lente
         session = manager.session(info.id)
         if session.state == SessionState.ERROR:
             break

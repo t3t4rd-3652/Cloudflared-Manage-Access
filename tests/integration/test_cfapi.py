@@ -504,3 +504,30 @@ async def test_admin_publish_reports_each_step_and_partial_failures(cf, admin, s
     ]
     assert not result.complete and "introuvable" in result.steps[2].detail
     assert result.profile is not None  # le nom d'hôte publié n'est pas défait par l'échec du token
+
+
+async def test_cli_tunnels_reports_the_account_state(cf, admin, paths, secrets, capsys):
+    """`cma tunnels` : liste lisible ou JSON, code 2 si un tunnel est en panne, 1 sans jeton."""
+    import asyncio
+    import json
+
+    from cma.cli import show_tunnels
+
+    def run(**kwargs) -> int:
+        return show_tunnels(paths, secrets=secrets, base_url=cf.base_url, **kwargs)
+
+    # Sans jeton : erreur claire, code 1 (asyncio.run exige un autre thread que la boucle des tests).
+    assert await asyncio.to_thread(run, as_json=False) == 1
+    assert "Aucun jeton d'API Cloudflare" in capsys.readouterr().err
+    await admin.connect(TOKEN)
+    assert await asyncio.to_thread(run, as_json=False) == 2  # « labo » est hors ligne dans le faux compte
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].split() == ["En", "ligne", "bureau"] and lines[1].startswith("! Hors ligne")
+    assert await asyncio.to_thread(run, as_json=True) == 2
+    rows = json.loads(capsys.readouterr().out)
+    assert [(r["name"], r["status"], r["label"]) for r in rows] == [
+        ("bureau", "healthy", "En ligne"),
+        ("labo", "down", "Hors ligne"),
+    ]
+    cf.state.tunnels[1]["status"] = "healthy"
+    assert await asyncio.to_thread(run, as_json=False) == 0

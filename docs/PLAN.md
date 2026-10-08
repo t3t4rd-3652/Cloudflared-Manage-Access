@@ -179,6 +179,21 @@ Ordre : de ce qui évite une panne silencieuse au confort de développement.
    sous macOS en CI (job d'abord non bloquant, le temps de le stabiliser : aucun Mac pour reproduire en local) ;
    logique des vues longues extraite là où on touche ; chiffres de ce document tenus à jour.
 
+### P5 — État des tunnels partout, CLI et CI (2.6)
+
+**État au 2026-10-08 : les trois points sont réalisés** (section « Non publié » du CHANGELOG). Le job macOS a
+réussi sur `9d309cb` puis `a09a08a` : il bloque désormais la CI.
+
+1. **Tunnels en panne visibles en permanence.** Une notification passe ; l'état doit rester.
+   - Le dernier relevé de la surveillance est gardé (`TunnelWatch.troubled`, tunnels dégradés ou hors ligne).
+   - Barre de navigation : « Cloudflare · 1 ! » tant qu'un tunnel est en panne (comme « Sessions · 2 ! »).
+   - Zone de notification : l'icône prend l'état le plus grave entre sessions et tunnels, et l'info-bulle ajoute
+     « 1 tunnel hors ligne ».
+2. **`cma tunnels`** : état des tunnels du compte depuis la ligne de commande (jeton du coffre, compte choisi),
+   `--json`, code de retour 2 si un tunnel est dégradé ou hors ligne : utilisable dans un script ou une
+   supervision, sans ouvrir l'interface.
+3. **CI** : job de tests macOS bloquant, une fois réussi sur deux commits de suite.
+
 ### Dette technique à surveiller
 
 - La couverture du cœur est juste au-dessus du seuil : chaque nouveau module de `cma.core` arrive avec ses tests.

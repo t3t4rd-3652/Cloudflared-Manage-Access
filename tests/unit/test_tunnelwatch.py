@@ -56,3 +56,19 @@ def test_forget_starts_over_and_unknown_states_are_harmless():
     watch.forget()
     assert summary(watch.update(tunnels(labo="down"))) == [("labo", None, "error")]
     assert severity("état-futur") == 0
+
+
+def test_troubled_keeps_the_last_reading_worst_first():
+    from cma.core.tunnelwatch import troubled_summary
+
+    watch = TunnelWatch()
+    assert watch.troubled == [] and troubled_summary([]) == ""
+    watch.update(tunnels(bureau="degraded", labo="down", nas="healthy", essai="inactive"))
+    assert [t.name for t in watch.troubled] == ["labo", "bureau"]
+    assert troubled_summary(watch.troubled) == "2 tunnels en panne"
+    watch.update(tunnels(bureau="healthy", labo="down"))
+    assert troubled_summary(watch.troubled) == "Tunnel « labo » hors ligne"
+    watch.update(tunnels(bureau="degraded", labo="healthy"))
+    assert troubled_summary(watch.troubled) == "Tunnel « bureau » dégradé"
+    watch.forget()
+    assert watch.troubled == []

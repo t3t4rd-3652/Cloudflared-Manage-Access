@@ -9,9 +9,11 @@ from __future__ import annotations
 from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
+from cma.core.cfapi import Tunnel
 from cma.core.events import SshConnectionChanged
 from cma.core.models import CloudflareProfile, SshProfile
 from cma.core.sessions import SessionInfo, SessionState
+from cma.core.tunnelwatch import troubled_summary
 from cma.i18n import tr
 from cma.ui.context import GuiContext
 from cma.ui.dialogs.workspaces import launch_favorites, launch_workspace
@@ -28,6 +30,7 @@ class Tray(QObject):
         self.window = window
         self.sessions: dict[str, SessionInfo] = {}
         self.ssh_states: dict[str, SshConnectionChanged] = {}
+        self.troubled: list[Tunnel] = []
         self.icon = QSystemTrayIcon(app_icon_with_status(None), self)
         self.icon.setToolTip(tr("CMA : {summary}").format(summary=sessions_summary([])))
         self.menu = QMenu()
@@ -37,6 +40,7 @@ class Tray(QObject):
         ctx.bridge.session_removed.connect(self._on_removed)
         ctx.bridge.ssh_state.connect(self._on_ssh_state)
         ctx.bridge.config_changed.connect(self._rebuild_menu)
+        window.tunnels_troubled.connect(self._on_tunnels)
         self._rebuild_menu()
 
     def show(self) -> None:
@@ -71,13 +75,19 @@ class Tray(QObject):
         self.ssh_states[event.profile_id] = event
         self._rebuild_menu()
 
+    def _on_tunnels(self, troubled: list[Tunnel]) -> None:
+        self.troubled = list(troubled)
+        self._refresh_state()
+
     def global_state(self) -> tuple[str | None, str | None]:
-        """(couleur, symbole) de l'icône : erreur, puis vigilance, puis tout va bien, sinon neutre."""
+        """(couleur, symbole) de l'icône : erreur, puis vigilance, puis tout va bien, sinon neutre. Un tunnel du
+        compte hors ligne compte comme une erreur, un tunnel dégradé comme une vigilance."""
         # La barre des tâches ne suit pas le thème de CMA : teintes du thème clair, lisibles sur les deux fonds.
         states = {s.state for s in self.sessions.values()}
-        if SessionState.ERROR in states:
+        tunnels = {t.status for t in self.troubled}
+        if SessionState.ERROR in states or "down" in tunnels:
             return LIGHT.danger, "error"
-        if states & {SessionState.DEGRADED, SessionState.RECONNECTING}:
+        if states & {SessionState.DEGRADED, SessionState.RECONNECTING} or "degraded" in tunnels:
             return LIGHT.warning, "warn"
         if states & {SessionState.LISTENING, SessionState.STARTING}:
             return LIGHT.success, "ok"
@@ -87,6 +97,9 @@ class Tray(QObject):
         color, symbol = self.global_state()
         self.icon.setIcon(app_icon_with_status(color, symbol))
         summary = sessions_summary(list(self.sessions.values()))
+        tunnels = troubled_summary(self.troubled)
+        if tunnels:
+            summary = f"{summary} · {tunnels}"
         self.icon.setToolTip(tr("CMA : {summary}").format(summary=summary))
         self._rebuild_menu()
 

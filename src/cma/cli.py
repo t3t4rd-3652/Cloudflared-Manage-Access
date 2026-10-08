@@ -55,6 +55,10 @@ def build_parser() -> argparse.ArgumentParser:
     disconnect.add_argument("profile", nargs="?")
     disconnect.add_argument("--group", help=tr("fermer les connexions de ce groupe"))
     disconnect.add_argument("--all", action="store_true", help=tr("fermer toutes les connexions"))
+    tunnels = sub.add_parser(
+        "tunnels", help=tr("état des tunnels du compte Cloudflare (code 2 si l'un est en panne)")
+    )
+    tunnels.add_argument("--json", action="store_true")
     sub.add_parser("doctor", help=tr("créer un rapport de diagnostic"))
     sub.add_parser("quit", help=tr("fermer l'application en cours (et toutes ses sessions)"))
     return parser
@@ -127,6 +131,43 @@ def portable_secret_store(paths: AppPaths) -> SecretStore | None:
         return MemorySecretStore(reason=tr("coffre portable non déverrouillé"))
 
 
+def show_tunnels(
+    paths: AppPaths, *, as_json: bool, secrets: SecretStore | None = None, base_url: str | None = None
+) -> int:
+    """État des tunnels du compte choisi dans CMA, avec le jeton d'API du coffre.
+
+    Code de retour : 0 si tout va bien, 2 si un tunnel est dégradé ou hors ligne, 1 si la lecture échoue. Une
+    supervision (tâche planifiée, script) peut s'en servir sans ouvrir l'interface.
+    """
+    from cma.core.cfadmin import CloudflareAdmin
+    from cma.core.cfapi import API_BASE, CloudflareApiError
+    from cma.core.config_store import ConfigStore
+    from cma.core.secrets import open_secret_store
+    from cma.core.tunnelwatch import severity, status_label
+
+    store = ConfigStore(paths)
+    store.load()
+    vault = secrets or portable_secret_store(paths) or open_secret_store()
+    admin = CloudflareAdmin(store, vault, lambda _port, _taken: None, base_url=base_url or API_BASE)
+    try:
+        tunnels = asyncio.run(admin.tunnel_states())
+    except (CloudflareApiError, OSError) as exc:
+        print(tr("Erreur : {error}").format(error=exc), file=sys.stderr)
+        return 1
+    if as_json:
+        rows = [
+            {"id": t.id, "name": t.name, "status": t.status, "label": status_label(t.status)} for t in tunnels
+        ]
+        print(json.dumps(rows, indent=2, ensure_ascii=False))
+    elif not tunnels:
+        print(tr("Aucun tunnel disponible dans ce compte."))
+    else:
+        for tunnel in tunnels:
+            mark = "!" if severity(tunnel.status) else " "
+            print(f"{mark} {status_label(tunnel.status):<12} {tunnel.name}")
+    return 2 if any(severity(t.status) for t in tunnels) else 0
+
+
 async def _foreground_connect(args: argparse.Namespace) -> int:
     from cma.context import create_context
     from cma.logging_setup import setup_logging
@@ -192,6 +233,9 @@ def run(args: argparse.Namespace) -> int:
             for p in profiles:
                 print(f"{p['type']:<11} {p['name']:<30} {p['target']:<40} {p['local']}")
         return 0
+
+    if command == "tunnels":
+        return show_tunnels(paths, as_json=args.json)
 
     if command == "doctor":
         from cma.core.config_store import ConfigStore

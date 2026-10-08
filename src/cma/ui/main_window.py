@@ -29,7 +29,7 @@ from cma.core.events import Notification
 from cma.core.expiry import TokenExpiry, expiring_tokens
 from cma.core.secrets import EncryptedFileSecretStore
 from cma.core.sessions import SessionInfo, SessionKind, SessionState
-from cma.core.tunnelwatch import TunnelChange, TunnelWatch
+from cma.core.tunnelwatch import TunnelChange, TunnelWatch, troubled_summary
 from cma.i18n import tr
 from cma.ui.a11y import apply_accessible_names
 from cma.ui.context import GuiContext
@@ -90,6 +90,8 @@ TUNNEL_WATCH_MS = 5 * 60 * 1000  # relevé de l'état des tunnels du compte
 
 class MainWindow(QMainWindow):
     quit_requested = Signal()
+    # Tunnels dégradés ou hors ligne au dernier relevé de la surveillance (liste vide : tout va bien).
+    tunnels_troubled = Signal(list)
 
     def __init__(self, ctx: GuiContext) -> None:
         super().__init__()
@@ -499,6 +501,10 @@ class MainWindow(QMainWindow):
         admin = self.ctx.manager.cloudflare
         account = settings.cloudflare_account_id
         if self._tunnel_check_running or not settings.watch_tunnels or not account or not admin.has_token():
+            if self.tunnel_watch.troubled and not self._tunnel_check_running:
+                # Surveillance coupée ou jeton oublié : un ancien relevé ne doit pas rester affiché.
+                self.tunnel_watch.forget()
+                self._show_troubled_tunnels()
             return False
         if account != self._watched_account:
             self.tunnel_watch.forget()
@@ -509,6 +515,7 @@ class MainWindow(QMainWindow):
             self._tunnel_check_running = False
             if self.ctx.config().settings.cloudflare_account_id == account:
                 self.report_tunnel_changes(self.tunnel_watch.update(tunnels))
+                self._show_troubled_tunnels()
 
         def failed(error: BaseException) -> None:
             # Réseau coupé, jeton révoqué… : pas d'alerte toutes les 5 minutes, la vue Cloudflare le dira.
@@ -517,6 +524,16 @@ class MainWindow(QMainWindow):
 
         self.ctx.run(admin.tunnel_states(), done, failed)
         return True
+
+    def _show_troubled_tunnels(self) -> None:
+        """« Cloudflare · 1 ! » dans la navigation tant qu'un tunnel est en panne ; la zone de notification suit."""
+        troubled = self.tunnel_watch.troubled
+        item = self._nav_items.get("cloud")
+        if item is not None:
+            base = str(item.data(Qt.ItemDataRole.UserRole + 1)[0])
+            item.setText(f"{base} · {len(troubled)} !" if troubled else base)
+            item.setToolTip(troubled_summary(troubled) or base)
+        self.tunnels_troubled.emit(troubled)
 
     def report_tunnel_changes(self, changes: list[TunnelChange]) -> None:
         for change in changes:

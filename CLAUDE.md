@@ -65,7 +65,7 @@ Depuis Windows, l'environnement est `.venv` (uv n'est pas forcément dans le PAT
    /NORESTART`), puis lancer le nouvel installeur avec les mêmes options. Les données (`%APPDATA%\CloudflaredManager`)
    ne sont pas touchées. Ne jamais fermer ou réinstaller une copie en service sans l'accord de l'utilisateur.
 
-La CI (`ci.yml`) tourne à chaque push : lint et typage, tests Windows et Linux avec couverture, vrai
+La CI (`ci.yml`) tourne à chaque push : lint et typage, tests Windows, Linux et macOS avec couverture, vrai
 cloudflared (Windows et Linux), audit pip-audit, scripts serveur (shellcheck, bats sous Debian, Ubuntu, Alpine),
 temps de démarrage (fenêtre prête en moins de 6 s), captures à 100, 125 et 150 % comparées au dernier main.
 Les journaux des jobs ne sont lisibles qu'aux administrateurs ; l'API publique donne l'état des jobs et des étapes,
@@ -170,6 +170,9 @@ Tests et CI :
 - Comparer des chemins par leurs parties, pas par leur texte : le séparateur diffère sous Linux.
 - `pre-commit run --all-files` ne voit que les fichiers suivis : passer `--files` pour les nouveaux.
 - Ne jamais lancer `ruff --unsafe-fixes` : SIM118 a cassé `QStyleFactory.keys()`.
+- En parallèle (`-n auto`), la machine est chargée : une poignée de main SSH vers le serveur de test peut dépasser
+  10 s. Les attentes d'état des tests (`wait_state`, `wait_listening`) vont jusqu'à 45 s et rendent la main dès que
+  l'état est atteint ; ne pas les raccourcir.
 
 Réseau et bibliothèques :
 

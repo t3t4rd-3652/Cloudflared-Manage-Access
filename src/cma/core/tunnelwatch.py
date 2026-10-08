@@ -20,6 +20,16 @@ def severity(status: str) -> int:
     return SEVERITY.get(status, 0)
 
 
+def status_label(status: str) -> str:
+    """Libellé d'un état de tunnel donné par l'API (« En ligne », « Dégradé »…)."""
+    return {
+        "healthy": tr("En ligne"),
+        "degraded": tr("Dégradé"),
+        "down": tr("Hors ligne"),
+        "inactive": tr("Inactif"),
+    }.get(status, status)
+
+
 @dataclass(frozen=True)
 class TunnelChange:
     tunnel: Tunnel
@@ -53,6 +63,13 @@ class TunnelWatch:
 
     def __init__(self) -> None:
         self._last: dict[str, str] = {}
+        self._tunnels: list[Tunnel] = []
+
+    @property
+    def troubled(self) -> list[Tunnel]:
+        """Tunnels dégradés ou hors ligne au dernier relevé, du plus grave au moins grave."""
+        bad = [t for t in self._tunnels if severity(t.status) > 0]
+        return sorted(bad, key=lambda t: (-severity(t.status), t.name.lower()))
 
     def update(self, tunnels: list[Tunnel]) -> list[TunnelChange]:
         changes: list[TunnelChange] = []
@@ -63,8 +80,22 @@ class TunnelWatch:
             if now > before or (tunnel.status == "healthy" and before > 0):
                 changes.append(TunnelChange(tunnel, previous))
         self._last = {t.id: t.status for t in tunnels}
+        self._tunnels = list(tunnels)
         return changes
 
     def forget(self) -> None:
         """Changement de compte ou de jeton : les relevés précédents ne valent plus rien."""
         self._last.clear()
+        self._tunnels = []
+
+
+def troubled_summary(tunnels: list[Tunnel]) -> str:
+    """« 1 tunnel hors ligne », « 2 tunnels en panne »… ; vide si tout va bien."""
+    if not tunnels:
+        return ""
+    if len(tunnels) == 1:
+        tunnel = tunnels[0]
+        if tunnel.status == "down":
+            return tr("Tunnel « {name} » hors ligne").format(name=tunnel.name)
+        return tr("Tunnel « {name} » dégradé").format(name=tunnel.name)
+    return tr("{n} tunnels en panne").format(n=len(tunnels))

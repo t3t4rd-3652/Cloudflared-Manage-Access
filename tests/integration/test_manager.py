@@ -68,7 +68,9 @@ def free_port():
     return port
 
 
-async def wait_state(manager, session_id, states, timeout=10.0):
+async def wait_state(manager, session_id, states, timeout=45.0):
+    # Rendu dès que l'état est atteint ; 45 s parce que, sous la charge des tests en parallèle (xdist), la
+    # poignée de main SSH (échange de clés) dépasse parfois 10 s.
     for _ in range(int(timeout / 0.05)):
         session = manager.session(session_id)
         if session is not None and session.state in states:

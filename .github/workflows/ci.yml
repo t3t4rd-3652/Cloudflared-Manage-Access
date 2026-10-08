@@ -26,8 +26,6 @@ jobs:
     name: Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
-    # macOS : job récent, non bloquant le temps de le stabiliser (aucun Mac pour reproduire en local).
-    continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
       matrix:
@@ -36,13 +34,10 @@ jobs:
           # sa pile dans un processus de travail ; en série, PYTHONFAULTHANDLER l'écrit dans le journal.
           - os: windows-latest
             workers: auto
-            experimental: false
           - os: ubuntu-latest
             workers: "0"
-            experimental: false
           - os: macos-latest
             workers: auto
-            experimental: true
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
