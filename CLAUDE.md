@@ -13,7 +13,7 @@ applications protégées par Cloudflare Access (`cloudflared access tcp`) et des
 Elle sait aussi administrer un compte Cloudflare (tunnels, noms d'hôte publiés, applications Access,
 service tokens) avec un jeton d'API.
 
-- Version courante : voir `src/cma/__init__.py` (2.3.0 au 2026-10-07). Historique utilisateur : `CHANGELOG.md`.
+- Version courante : voir `src/cma/__init__.py` (2.4.0 au 2026-10-08). Historique utilisateur : `CHANGELOG.md`.
 - Architecture, threads, cycle de vie des sessions : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - Sécurité et modèle de menace : [docs/SECURITE.md](docs/SECURITE.md). Scripts serveur : [docs/SERVEUR.md](docs/SERVEUR.md).
 - Conventions de code : [CONTRIBUTING.md](CONTRIBUTING.md) (identifiants en anglais, textes et commentaires en
@@ -84,6 +84,7 @@ Les journaux des jobs ne sont lisibles qu'aux administrateurs ; l'API publique d
 | 2026-10-05 | Dependabot entièrement fusionné (`upload-artifact` v7, `download-artifact` v8). Délai par test en local, journal des tests en artefact. Compte Cloudflare déduit des zones sans « Account Settings : Read ». |
 | 2026-10-06 | Release à blanc (`release.yml` sans tag), vues `cloud` et `ssh` découpées en paquets. Release **2.2.0**. Puis 2.3 réalisée (non publiée) : échéance et renouvellement des service tokens, état des connecteurs, modification d'un nom d'hôte publié, politiques Access, création de tunnel. |
 | 2026-10-07 | P3 terminée : historique des sessions, SFTP, macOS, AppImage mise à jour en un clic, allemand et espagnol. Abandon intermittent du job Linux corrigé (`clear_items`). Recette en écriture sur un vrai compte réussie. Release **2.3.0**. |
+| 2026-10-08 | Accès Cloudflare, Service tokens et Serveurs SSH redessinés dans le style de la vue Cloudflare (listes en cartes, en-tête d'objet, formulaires en sections). Release **2.4.0**. |
 
 Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff-filter=D --name-only`).
 

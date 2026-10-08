@@ -1,6 +1,6 @@
 # Plan du projet
 
-État au 2026-10-07, version **2.3.0** (recette en écriture réussie sur un vrai compte). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+État au 2026-10-08, version **2.4.0** (vues de configuration redessinées). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
