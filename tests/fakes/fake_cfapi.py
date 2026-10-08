@@ -62,15 +62,18 @@ class FakeCloudflare:
                 "ip_address": "203.0.113.5",
             },
             {
+                # Forme relevée sur un vrai compte : un service token est journalisé par son Client ID,
+                # avec la connexion « nonidentity ».
                 "created_at": "2026-10-08T09:10:00Z",
-                "user_email": "",
+                "user_email": "robot.access",
                 "app_domain": "grafana.exemple.fr",
+                "app_name": "Grafana",
                 "app_uid": "uid-grafana",
                 "action": "login",
                 "allowed": False,
                 "country": "US",
                 "ip_address": "198.51.100.7",
-                "connection": "service_token",
+                "connection": "nonidentity",
             },
         ]
     )

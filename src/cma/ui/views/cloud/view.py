@@ -1108,11 +1108,13 @@ class CloudView(QWidget):
         """Dernières connexions du compte ; filtrées d'emblée sur l'application choisie, s'il y en a une."""
         selected = self._selected_app()
         apps = list(self.overview.apps) if self.overview is not None else []
+        # Cloudflare journalise un service token par son Client ID : on le nomme d'après les tokens du compte.
+        names = {t.client_id: t.name for t in self.overview.tokens} if self.overview is not None else {}
         self.status.setText(tr("Lecture du journal des accès…"))
 
         def done(requests: list[AccessRequest]) -> None:
             self._show_summary()
-            show_access_log(self, requests, apps, selected)
+            show_access_log(self, requests, apps, selected, names)
 
         self.ctx.run(self.admin.access_requests(), done, self._error)
 

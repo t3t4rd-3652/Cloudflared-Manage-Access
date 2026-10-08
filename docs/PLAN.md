@@ -199,8 +199,10 @@ réussi sur `9d309cb` puis `a09a08a` : il bloque désormais la CI.
 
 **État au 2026-10-08 : les six points sont réalisés** (section « Non publié » du CHANGELOG). La recette en lecture
 passe sur le vrai compte (règles des 4 tunnels, réglages des 9 applications `self_hosted`, journal des accès refusé
-comme prévu). Reste au propriétaire : `--ecriture` (règles, ordre, règle finale, réglages d'application) et, pour
-le journal, ajouter « Access: Audit Logs : Read » au jeton.
+comme prévu). Recette en écriture lancée par le propriétaire le 2026-10-08 : tout fonctionne (règle /api, ordre,
+règle finale, réglages d'application, nettoyage complet). Journal des accès vérifié ensuite en lecture, une fois la
+permission « Access: Audit Logs : Read » ajoutée au jeton : un service token y est journalisé par son Client ID
+(`connection` « nonidentity ») et CMA l'affiche sous son nom.
 
 Lu sur le vrai compte le 2026-10-08 (lecture seule) : 10 applications (9 `self_hosted`, 1 `warp`), durées de session
 `0s`, `15m` et `24h`, 2 applications avec des fournisseurs d'identité choisis alors que la liste des fournisseurs

@@ -137,7 +137,8 @@ class AccessRequest:
     """Une connexion à une application Access, telle que Cloudflare la journalise."""
 
     created_at: str
-    user: str  # adresse de l'utilisateur ; vide pour un service token ou un accès sans identité
+    # Adresse de l'utilisateur ; pour un service token (`connection` « nonidentity »), son Client ID.
+    user: str
     app_domain: str
     app_uid: str
     allowed: bool
@@ -145,6 +146,7 @@ class AccessRequest:
     country: str = ""
     ip: str = ""
     connection: str = ""
+    app_name: str = ""
 
 
 AUDIT_PERMISSION = "Access: Audit Logs : Read"
@@ -692,6 +694,7 @@ class CloudflareApi:
                 country=str(row.get("country") or ""),
                 ip=str(row.get("ip_address") or ""),
                 connection=str(row.get("connection") or ""),
+                app_name=str(row.get("app_name") or ""),
             )
             for row in rows
         ]

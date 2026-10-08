@@ -737,7 +737,7 @@ def test_access_log(qtbot, gui, cf, monkeypatch):
     monkeypatch.setattr(
         cloud_module,
         "show_access_log",
-        lambda _p, requests, _apps, selected: opened.append((len(requests), selected)),
+        lambda _p, requests, _apps, selected, _names: opened.append((len(requests), selected)),
     )
     view.open_access_log()
     qtbot.waitUntil(lambda: bool(opened), timeout=10000)
@@ -754,21 +754,37 @@ def test_access_log(qtbot, gui, cf, monkeypatch):
     requests = [
         AccessRequest("2026-10-08T09:12:00Z", "alice@exemple.fr", "ssh.exemple.fr", "uid-ssh", True, "login"),
         AccessRequest(
-            "2026-10-08T09:10:00Z", "", "grafana.exemple.fr", "", False, "login", connection="service_token"
+            "2026-10-08T09:10:00Z",
+            "robot.access",
+            "grafana.exemple.fr",
+            "",
+            False,
+            "login",
+            connection="nonidentity",
+            app_name="Grafana",
         ),
     ]
     apps = [
         AccessApp("a1", "SSH", "ssh.exemple.fr", "self_hosted", uid="uid-ssh"),
         AccessApp("a2", "Grafana", "grafana.exemple.fr/", "self_hosted"),
     ]
-    dialog = AccessLogDialog(None, requests, apps)
+    dialog = AccessLogDialog(None, requests, apps, token_names={"robot.access": "Robot"})
     qtbot.addWidget(dialog)
     assert dialog.table.rowCount() == 2 and dialog.summary.text() == "2 connexions · 1 refusée"
     dialog.app_filter.setCurrentIndex(dialog.app_filter.findData(apps[1]))
     assert [r.app_domain for r in dialog.shown()] == ["grafana.exemple.fr"]
-    assert dialog.table.item(0, 1).text() == "Service token" and dialog.table.item(0, 3).text() == "Refusé"
+    assert dialog.table.item(0, 1).text() == "Service token « Robot »"
+    assert (
+        dialog.table.item(0, 2).text() == "Grafana"
+        and dialog.table.item(0, 2).toolTip() == "grafana.exemple.fr"
+    )
+    assert dialog.table.item(0, 3).text() == "Refusé"
     focused = AccessLogDialog(None, requests, apps, apps[0])
     qtbot.addWidget(focused)
     assert [r.user for r in focused.shown()] == ["alice@exemple.fr"]
     assert request_time("pas une date") == "pas une date" and request_time("") == "—"
     assert request_user(AccessRequest("", "", "", "", True, "")) == "—"
+    assert (
+        request_user(AccessRequest("", "x.access", "", "", True, "", connection="nonidentity")) == "x.access"
+    )
+    assert request_user(AccessRequest("", "", "", "", True, "", connection="nonidentity")) == "Service token"

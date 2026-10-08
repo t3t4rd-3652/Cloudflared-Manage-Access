@@ -1168,6 +1168,7 @@ CATALOG: dict[str, str] = {
     "Service token créé et enregistré dans CMA.": "Service-Token erstellt und in CMA gespeichert.",
     "Service token introuvable.": "Service-Token nicht gefunden.",
     "service token non autorisé": "Service-Token nicht zugelassen",
+    "Service token « {name} »": "Service-Token „{name}“",
     "Service token « {name} » supprimé.": "Service-Token „{name}“ gelöscht.",
     "Service tokens": "Service-Tokens",
     "Service tokens ({n})": "Service-Tokens ({n})",

@@ -640,9 +640,10 @@ async def test_access_requests_log(cf, api, admin):
     rows = api.access_requests("acc1", limit=10)
     assert [(r.user, r.app_domain, r.allowed, r.country) for r in rows] == [
         ("alice@exemple.fr", "ssh.exemple.fr", True, "FR"),
-        ("", "grafana.exemple.fr", False, "US"),
+        ("robot.access", "grafana.exemple.fr", False, "US"),
     ]
-    assert rows[1].connection == "service_token" and rows[0].ip == "203.0.113.5"
+    assert rows[1].connection == "nonidentity" and rows[1].app_name == "Grafana"
+    assert rows[0].ip == "203.0.113.5"
     assert len(api.access_requests("acc1", limit=1)) == 1
     # Sans la permission, le message dit laquelle ajouter.
     cf.state.audit_allowed = False

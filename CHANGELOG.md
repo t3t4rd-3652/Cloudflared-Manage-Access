@@ -11,8 +11,8 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
 - **Réglages d'une application Access** (« Réglages… ») : nom, durée de session (de « expire aussitôt » à 1 mois),
   visibilité dans le lanceur, redirection directe vers le fournisseur d'identité.
 - **Journal des accès** (« Journal des accès… ») : dernières connexions aux applications (utilisateur ou service
-  token, autorisé ou refusé, pays, IP), filtrables par application. Demande la permission « Access: Audit Logs :
-  Read » sur le jeton, que CMA nomme s'il manque.
+  token désigné par son nom, autorisé ou refusé, pays, IP), filtrables par application. Demande la permission
+  « Access: Audit Logs : Read » sur le jeton, que CMA nomme s'il manque.
 - **Surveillance même CMA fermé** (Windows, Paramètres › Général › Cloudflare) : une tâche planifiée lance
   `cma tunnels --notify` toutes les 15 minutes et affiche une notification Windows si un tunnel tombe. Retirée à
   la désinstallation.

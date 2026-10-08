@@ -24,11 +24,15 @@ def request_time(value: str) -> str:
         return value or "—"
 
 
-def request_user(request: AccessRequest) -> str:
-    """L'utilisateur, ou « Service token » pour une connexion sans identité faite avec un token."""
+def request_user(request: AccessRequest, token_names: dict[str, str] | None = None) -> str:
+    """L'utilisateur ; pour un service token (Cloudflare met son Client ID à la place de l'adresse), son nom."""
+    name = (token_names or {}).get(request.user)
+    if name:
+        return tr("Service token « {name} »").format(name=name)
     if request.user:
         return request.user
-    return tr("Service token") if "service" in request.connection.lower() else "—"
+    connection = request.connection.lower()
+    return tr("Service token") if "service" in connection or "nonidentity" in connection else "—"
 
 
 def matches(request: AccessRequest, app: AccessApp | None) -> bool:
@@ -47,8 +51,10 @@ class AccessLogDialog(QDialog):
         requests: list[AccessRequest],
         apps: list[AccessApp],
         selected: AccessApp | None = None,
+        token_names: dict[str, str] | None = None,
     ) -> None:
         super().__init__(parent)
+        self.token_names = token_names or {}
         self.setWindowTitle(tr("Journal des accès"))
         self.setWindowIcon(app_icon())
         self.resize(900, 520)
@@ -105,15 +111,15 @@ class AccessLogDialog(QDialog):
             result = tr("Autorisé") if request.allowed else tr("Refusé")
             values = (
                 request_time(request.created_at),
-                request_user(request),
-                request.app_domain or "—",
+                request_user(request, self.token_names),
+                request.app_name or request.app_domain or "—",
                 result,
                 request.country or "—",
                 request.ip or "—",
             )
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
-                item.setToolTip(value)
+                item.setToolTip(request.app_domain if column == 2 and request.app_domain else value)
                 if column == 3:
                     tone = "success" if request.allowed else "danger"
                     item.setForeground(QBrush(QColor(status_colors(tone, tokens)[0])))
@@ -126,7 +132,11 @@ class AccessLogDialog(QDialog):
 
 
 def show_access_log(
-    parent: QWidget, requests: list[AccessRequest], apps: list[AccessApp], selected: AccessApp | None
+    parent: QWidget,
+    requests: list[AccessRequest],
+    apps: list[AccessApp],
+    selected: AccessApp | None,
+    token_names: dict[str, str] | None = None,
 ) -> None:
     """Fonction de module : les tests la remplacent pour ne pas ouvrir de boîte modale."""
-    AccessLogDialog(parent, requests, apps, selected).exec()
+    AccessLogDialog(parent, requests, apps, selected, token_names).exec()
