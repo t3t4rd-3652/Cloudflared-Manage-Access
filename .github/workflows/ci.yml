@@ -26,10 +26,23 @@ jobs:
     name: Tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    # macOS : job récent, non bloquant le temps de le stabiliser (aucun Mac pour reproduire en local).
+    continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        include:
+          # Tests en parallèle (pytest-xdist), sauf sous Linux : un plantage natif de Qt (SIGABRT) y perdrait
+          # sa pile dans un processus de travail ; en série, PYTHONFAULTHANDLER l'écrit dans le journal.
+          - os: windows-latest
+            workers: auto
+            experimental: false
+          - os: ubuntu-latest
+            workers: "0"
+            experimental: false
+          - os: macos-latest
+            workers: auto
+            experimental: true
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
@@ -49,7 +62,7 @@ jobs:
         env:
           PYTHONFAULTHANDLER: "1"
         run: >
-          uv run pytest -v -m "not real_cloudflared and not network"
+          uv run pytest -v -n ${{ matrix.workers }} -m "not real_cloudflared and not network"
           -W ignore::pytest.PytestUnraisableExceptionWarning
           --cov=cma --cov-report=term --cov-report=xml --cov-fail-under=80
           2>&1 | tee pytest-${{ matrix.os }}.log

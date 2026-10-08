@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QProgressBar,
-    QScrollArea,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
@@ -62,7 +61,8 @@ from cma.platform import autostart
 from cma.ui.context import GuiContext
 from cma.ui.dialogs.misc import KeysDialog, KnownHostsDialog, confirm_delete_v1
 from cma.ui.dialogs.transfer import run_export, run_import
-from cma.ui.widgets import add_shortcut, button, label, primary_button, title
+from cma.ui.views.common import FormCard, card_page, page_header, side_by_side
+from cma.ui.widgets import add_shortcut, button, label, primary_button
 
 
 class SettingsView(QWidget):
@@ -79,14 +79,15 @@ class SettingsView(QWidget):
         self._cma_update: UpdateInfo | None = None
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 20, 24, 16)
-        outer.addWidget(title(tr("Paramètres")))
+        outer.setSpacing(4)
+        page_header(outer, tr("Paramètres"), tr("Les préférences sont enregistrées automatiquement."))
         # Cinq pages courtes plutôt qu'une longue page (§4.8) ; préférences enregistrées à la volée.
         self.tabs = QTabWidget()
         self.tabs.setProperty("role", "plain")
         self.tabs.setDocumentMode(True)
         outer.addWidget(self.tabs, 1)
         pages = (
-            ("general", tr("Général"), (self._build_appearance, self._build_behaviour)),
+            ("general", tr("Général"), (self._build_appearance, self._build_behaviour, self._build_watch)),
             ("cloudflared", tr("cloudflared"), (self._build_cloudflared,)),
             ("ssh", tr("SSH"), (self._build_ssh,)),
             ("data", tr("Données"), (self._build_data,)),
@@ -94,20 +95,10 @@ class SettingsView(QWidget):
         )
         self.pages: dict[str, QWidget] = {}
         for key, name, builders in pages:
-            scroll = QScrollArea()
-            scroll.setObjectName("PageScroll")
-            scroll.setWidgetResizable(True)
-            body = QWidget()
-            body.setMaximumWidth(736)
-            self.body = QVBoxLayout(body)
-            self.body.setContentsMargins(0, 16, 16, 16)
-            self.body.setSpacing(8)
+            scroll, self.body = card_page()
             for build in builders:
                 build()
-            if key == "general":
-                self.body.addWidget(label(tr("Les préférences sont enregistrées automatiquement."), "muted"))
             self.body.addStretch()
-            scroll.setWidget(body)
             self.tabs.addTab(scroll, name)
             self.pages[key] = scroll
         add_shortcut(self, QKeySequence.StandardKey.Save, self._autosave_hint)
@@ -119,13 +110,11 @@ class SettingsView(QWidget):
 
     # --- Sections -----------------------------------------------------------------------------
 
-    def _section(self, text: str) -> QFormLayout:
-        self.body.addWidget(title(text, "SectionTitle"))
-        form = QFormLayout()
-        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        self.body.addLayout(form)
-        return form
+    def _section(self, text: str, description: str = "") -> QFormLayout:
+        """Section en carte, comme les vues de configuration ; renvoie sa grille de champs."""
+        card = FormCard(text, description)
+        self.body.addWidget(card)
+        return card.form
 
     def show_page(self, key: str) -> None:
         page = self.pages.get(key)
@@ -199,14 +188,14 @@ class SettingsView(QWidget):
         ):
             self.theme.addItem(text, value)
         self.theme.currentIndexChanged.connect(self._theme_changed)
-        form.addRow(tr("Thème"), self.theme)
         self.language = QComboBox()
         for code, name in SUPPORTED_LANGUAGES.items():
             self.language.addItem(name, code)
         self.language.currentIndexChanged.connect(self._language_changed)
-        form.addRow(tr("Langue"), self.language)
+        form.addRow(side_by_side((tr("Thème"), self.theme, 1), (tr("Langue"), self.language, 1)))
 
     def _build_behaviour(self) -> None:
+        startup = self._section(tr("Démarrage"))
         form = self._section(tr("Comportement"))
         self.close_to_tray = QCheckBox(tr("Fermer la fenêtre la réduit dans la zone de notification"))
         self.start_minimized = QCheckBox(tr("Démarrer réduit"))
@@ -215,17 +204,17 @@ class SettingsView(QWidget):
         self.notifications = QCheckBox(tr("Notifications Windows"))
         self.confirm_exit = QCheckBox(tr("Demander confirmation si des sessions sont ouvertes"))
         self.check_updates = QCheckBox(tr("Vérifier les nouvelles versions au démarrage"))
-        for widget, key in (
-            (self.close_to_tray, "close_to_tray"),
-            (self.start_minimized, "start_minimized"),
-            (self.notifications, "notifications"),
-            (self.confirm_exit, "confirm_exit"),
-            (self.check_updates, "check_updates"),
+        self.start_with_system.toggled.connect(self._autostart_changed)
+        startup.addRow(self.start_with_system)
+        for widget, key, target in (
+            (self.start_minimized, "start_minimized", startup),
+            (self.check_updates, "check_updates", startup),
+            (self.close_to_tray, "close_to_tray", form),
+            (self.confirm_exit, "confirm_exit", form),
+            (self.notifications, "notifications", form),
         ):
             widget.toggled.connect(lambda checked, k=key: self._set(k, checked))
-            form.addRow(widget)
-        self.start_with_system.toggled.connect(self._autostart_changed)
-        form.addRow(self.start_with_system)
+            target.addRow(widget)
         ports = QHBoxLayout()
         self.port_min = QSpinBox()
         self.port_min.setAccessibleName(tr("Premier port automatique"))
@@ -240,6 +229,18 @@ class SettingsView(QWidget):
         ports.addWidget(self.port_max)
         ports.addStretch()
         form.addRow(tr("Ports automatiques"), ports)
+
+    def _build_watch(self) -> None:
+        form = self._section(
+            tr("Cloudflare"),
+            tr(
+                "Relevé toutes les 5 minutes avec le jeton d'API de la vue Cloudflare : une notification quand "
+                "un tunnel est dégradé ou hors ligne, puis quand il revient."
+            ),
+        )
+        self.watch_tunnels = QCheckBox(tr("Surveiller les tunnels du compte et prévenir s'ils tombent"))
+        self.watch_tunnels.toggled.connect(lambda checked: self._set("watch_tunnels", checked))
+        form.addRow(self.watch_tunnels)
 
     def _build_ssh(self) -> None:
         form = self._section(tr("SSH"))
@@ -381,6 +382,7 @@ class SettingsView(QWidget):
         self.notifications.setChecked(settings.notifications)
         self.confirm_exit.setChecked(settings.confirm_exit)
         self.check_updates.setChecked(settings.check_updates)
+        self.watch_tunnels.setChecked(settings.watch_tunnels)
         self.start_with_system.setChecked(autostart.supported() and autostart.is_enabled())
         self.port_min.setValue(settings.auto_port_min)
         self.port_max.setValue(settings.auto_port_max)

@@ -53,8 +53,21 @@ def test_download_and_prepare_portable(served, tmp_path):  # noqa: F811
     info = UpdateInfo("2.0.0", "9.9.9", "https://github.com/x", (asset,))
     assert info.portable_zip == asset
     archive = updates.download_portable(info, tmp_path / "dl")
-    app = updates.prepare_portable(archive, tmp_path / "staging")
+    checked: list[str] = []
+
+    def accept(path: Path) -> tuple[bool, str]:
+        checked.append(path.name)
+        return True, "NotSigned"
+
+    app = updates.prepare_portable(archive, tmp_path / "staging", verify_signature=accept)
     assert (app / "CloudflaredManageAccess.exe").read_bytes() == b"MZ"
+    assert checked == ["CloudflaredManageAccess.exe"]
+    # Signature refusée : rien ne reste de la version décompressée.
+    with pytest.raises(DownloadError, match="Signature de la version portable invalide : HashMismatch"):
+        updates.prepare_portable(
+            archive, tmp_path / "refus", verify_signature=lambda _p: (False, "HashMismatch")
+        )
+    assert not (tmp_path / "refus").exists()
 
     with pytest.raises(DownloadError, match="portable"):
         updates.download_portable(UpdateInfo("2.0.0", "9.9.9", None, ()), tmp_path / "dl")

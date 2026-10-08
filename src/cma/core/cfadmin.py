@@ -216,6 +216,11 @@ class CloudflareAdmin:
 
         return await asyncio.to_thread(run)
 
+    async def tunnel_states(self) -> list[Tunnel]:
+        """Tunnels du compte choisi avec leur état, en une seule requête (relevé de la surveillance)."""
+        api = self.api()
+        return await asyncio.to_thread(api.list_tunnels, self.account_id())
+
     async def connectors(self, tunnel: Tunnel) -> list[Connector]:
         api = self.api()
         return await asyncio.to_thread(api.tunnel_connectors, self.account_id(), tunnel.id)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 
@@ -23,10 +24,12 @@ from PySide6.QtWidgets import (
 )
 
 from cma import APP_NAME, __version__
+from cma.core.cfapi import Tunnel
 from cma.core.events import Notification
 from cma.core.expiry import TokenExpiry, expiring_tokens
 from cma.core.secrets import EncryptedFileSecretStore
 from cma.core.sessions import SessionInfo, SessionKind, SessionState
+from cma.core.tunnelwatch import TunnelChange, TunnelWatch
 from cma.i18n import tr
 from cma.ui.a11y import apply_accessible_names
 from cma.ui.context import GuiContext
@@ -78,6 +81,11 @@ def explain_tray(parent: QWidget, text: str) -> None:
     box.setText(text)
     box.addButton(tr("Compris"), QMessageBox.ButtonRole.AcceptRole)
     box.exec()
+
+
+log = logging.getLogger(__name__)
+
+TUNNEL_WATCH_MS = 5 * 60 * 1000  # relevé de l'état des tunnels du compte
 
 
 class MainWindow(QMainWindow):
@@ -207,6 +215,15 @@ class MainWindow(QMainWindow):
         self._expiry_timer.timeout.connect(self.check_token_expiry)
         self._expiry_timer.start()
         QTimer.singleShot(5_000, self.check_token_expiry)
+        # Tunnels du compte Cloudflare : relevé peu après l'affichage, puis toutes les 5 minutes.
+        self.tunnel_watch = TunnelWatch()
+        self._watched_account: str | None = None
+        self._tunnel_check_running = False
+        self._tunnel_timer = QTimer(self)
+        self._tunnel_timer.setInterval(TUNNEL_WATCH_MS)
+        self._tunnel_timer.timeout.connect(self.check_tunnels)
+        self._tunnel_timer.start()
+        QTimer.singleShot(20_000, self.check_tunnels)
         ctx.theme.changed.connect(self._refresh_nav_icons)
 
         status = self.statusBar()
@@ -475,6 +492,48 @@ class MainWindow(QMainWindow):
                 action=(tr("Renouveler"), self.open_cloud_tokens),
             )
         return fresh
+
+    def check_tunnels(self) -> bool:
+        """Relève l'état des tunnels (une requête) ; renvoie False quand la surveillance n'a rien à faire."""
+        settings = self.ctx.config().settings
+        admin = self.ctx.manager.cloudflare
+        account = settings.cloudflare_account_id
+        if self._tunnel_check_running or not settings.watch_tunnels or not account or not admin.has_token():
+            return False
+        if account != self._watched_account:
+            self.tunnel_watch.forget()
+            self._watched_account = account
+        self._tunnel_check_running = True
+
+        def done(tunnels: list[Tunnel]) -> None:
+            self._tunnel_check_running = False
+            if self.ctx.config().settings.cloudflare_account_id == account:
+                self.report_tunnel_changes(self.tunnel_watch.update(tunnels))
+
+        def failed(error: BaseException) -> None:
+            # Réseau coupé, jeton révoqué… : pas d'alerte toutes les 5 minutes, la vue Cloudflare le dira.
+            self._tunnel_check_running = False
+            log.info("Surveillance des tunnels : relevé impossible (%s)", error)
+
+        self.ctx.run(admin.tunnel_states(), done, failed)
+        return True
+
+    def report_tunnel_changes(self, changes: list[TunnelChange]) -> None:
+        for change in changes:
+            action = (
+                None
+                if change.recovered
+                else (tr("Diagnostiquer…"), lambda t=change.tunnel: self.open_tunnel(t, diagnose=True))
+            )
+            self.notify(change.level, change.message(), action=action)
+
+    def open_tunnel(self, tunnel: Tunnel, *, diagnose: bool = False) -> None:
+        """Vue Cloudflare, onglet Tunnels, relue ; avec `diagnose`, l'état des connecteurs du tunnel s'ouvre."""
+        self.show_view("cloud")
+        self.cloud.tabs.setCurrentIndex(0)
+        self.cloud.refresh()
+        if diagnose:
+            self.cloud.check_connectors(tunnel)
 
     def open_cloud_tokens(self) -> None:
         """Onglet « Service tokens » de la vue Cloudflare, où se prolonge un token."""

@@ -2,6 +2,22 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Ajouté
+- **Surveillance des tunnels** : avec un jeton d'API, CMA relève l'état des tunnels du compte toutes les
+  5 minutes et prévient (fenêtre et zone de notification) quand un tunnel est dégradé ou hors ligne, avec
+  « Diagnostiquer… » vers l'état de ses connecteurs, puis quand il revient en ligne. Réglage dans
+  Paramètres › Général › Cloudflare (activé par défaut).
+
+### Modifié
+- **Paramètres en sections**, comme les vues de configuration (Apparence, Démarrage, Comportement,
+  Cloudflare…), thème et langue côte à côte.
+- **Mises à jour vérifiées par signature** : une copie de CMA signée n'accepte qu'une mise à jour signée par le
+  même éditeur (en plus de l'empreinte SHA-256). La version portable vérifie désormais aussi la signature de
+  son exécutable. Sans effet tant que CMA n'est pas signé.
+- Tests en parallèle (environ 45 s au lieu de 3 min 30) et tests sous macOS en CI.
+
 ## [2.4.0] - 2026-10-08
 
 ### Modifié

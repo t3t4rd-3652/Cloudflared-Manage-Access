@@ -137,3 +137,43 @@ def test_signature_check_accepts_unsigned_files(tmp_path):
         assert ok is (status == "NotSigned")
     else:
         assert ok
+
+
+def test_signature_policy():
+    from cma.core.updates import UNSIGNED, Signature, signature_policy
+
+    ours = Signature("Valid", "CN=Cloudflared Manage Access, O=SignPath Foundation")
+    other = Signature("Valid", "CN=Quelqu'un d'autre")
+    # Copie non signée (aujourd'hui) : non signé ou validement signé, rien d'autre.
+    assert signature_policy(UNSIGNED, UNSIGNED) == (True, "NotSigned")
+    assert signature_policy(UNSIGNED, ours)[0] is True
+    assert signature_policy(UNSIGNED, Signature("HashMismatch", ours.subject)) == (False, "HashMismatch")
+    # Copie signée : seulement le même éditeur, validement.
+    assert signature_policy(ours, ours) == (True, ours.subject)
+    ok, detail = signature_policy(ours, UNSIGNED)
+    assert not ok and "la mise à jour ne l'est pas (NotSigned)" in detail
+    ok, detail = signature_policy(ours, other)
+    assert not ok and "autre éditeur" in detail and "Quelqu'un" in detail
+    assert signature_policy(ours, Signature("HashMismatch", ours.subject))[0] is False
+
+
+def test_signature_is_acceptable_compares_with_the_running_copy(monkeypatch, tmp_path):
+    from cma.core.updates import Signature
+
+    monkeypatch.setattr(updates.sys, "platform", "win32")
+    signed = Signature("Valid", "CN=CMA")
+    files = {"app.exe": signed, "update.exe": Signature("NotSigned")}
+
+    def reader(path: Path) -> Signature:
+        return files[path.name]
+
+    monkeypatch.setattr(updates.sys, "executable", str(tmp_path / "app.exe"))
+    monkeypatch.setattr(updates, "is_frozen", lambda: True)
+    ok, _detail = updates.signature_is_acceptable(tmp_path / "update.exe", reader=reader)
+    assert ok is False
+    files["update.exe"] = signed
+    assert updates.signature_is_acceptable(tmp_path / "update.exe", reader=reader) == (True, "CN=CMA")
+    # Depuis les sources (non figé), la copie en service compte comme non signée.
+    monkeypatch.setattr(updates, "is_frozen", lambda: False)
+    files["update.exe"] = Signature("NotSigned")
+    assert updates.signature_is_acceptable(tmp_path / "update.exe", reader=reader) == (True, "NotSigned")

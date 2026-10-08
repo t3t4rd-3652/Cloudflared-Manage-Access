@@ -405,6 +405,11 @@ async def test_tunnel_connectors(api, admin):
     assert not any(c.pending_reconnect for c in healthy.connections)
     await admin.connect(TOKEN)
     assert await admin.connectors(Tunnel("t2", "labo", "down")) == []
+    # Relevé de la surveillance : une seule lecture, les tunnels du compte choisi avec leur état.
+    assert [(t.name, t.status) for t in await admin.tunnel_states()] == [
+        ("bureau", "healthy"),
+        ("labo", "down"),
+    ]
 
 
 async def test_admin_tracks_expiry_extends_and_rotates_tokens(cf, admin, store, secrets):

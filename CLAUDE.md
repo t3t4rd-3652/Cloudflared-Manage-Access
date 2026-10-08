@@ -27,11 +27,13 @@ Depuis Windows, l'environnement est `.venv` (uv n'est pas forcément dans le PAT
 .venv/Scripts/ruff.exe format . && .venv/Scripts/ruff.exe check .
 .venv/Scripts/pyright.exe
 .venv/Scripts/pyright.exe --pythonplatform Linux       # la CI type aussi pour Linux
-.venv/Scripts/python.exe -m pytest --cov=cma -p no:cacheprovider
+.venv/Scripts/python.exe -m pytest -n auto --cov=cma -p no:cacheprovider
 .venv/Scripts/coverage.exe report --include="src/cma/core/*"   # seuil CI : 90 % (global : 80 %)
 ```
 
-- La suite complète dure environ 3 minutes. Pour un changement localisé, lancer d'abord le fichier de test concerné.
+- La suite complète dure environ 45 s en parallèle (`-n auto`, pytest-xdist), 3 min 30 en série. Pour un
+  changement localisé, lancer d'abord le fichier de test concerné. Un test qui plante Python (Qt natif) se
+  diagnostique en série : un processus de travail de xdist perd la pile écrite par le faulthandler.
 - La lancer en arrière-plan avec `-v` et une sortie dans un fichier. Le délai de 180 s par test est dans
   `pyproject.toml` (local et CI) : un gel échoue avec la pile de chaque thread au lieu de bloquer sans rien dire.
 - En CI, quand le job de tests échoue, son journal complet (avec `PYTHONFAULTHANDLER`) est publié en artefact
@@ -118,6 +120,11 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   par le propriétaire.
 - **Secrets de la 2.3** : « Changer le secret » (`…/rotate`) révoque l'ancien secret chez Cloudflare, d'où la
   confirmation ; le jeton d'un connecteur de tunnel passe par `register_secret` et n'est jamais conservé.
+- **Surveillance des tunnels** (`cma.core.tunnelwatch`, relevé dans `MainWindow.check_tunnels`) : seuls
+  « degraded » et « down » alertent, le retour n'est annoncé que vers « healthy » (hors ligne → inactif est un
+  tunnel arrêté pour de bon). Un relevé en échec est seulement journalisé, jamais notifié toutes les 5 minutes.
+- **Signature des mises à jour** (`updates.signature_policy`) : une copie signée n'accepte qu'une mise à jour
+  signée par le même éditeur ; tant que CMA n'est pas signé, non signé reste accepté (l'empreinte suffit).
 - **Boîtes modales et tests** : chaque boîte ouverte par la vue Cloudflare passe par une fonction de module
   (`ask_*`, `show_*`) que les tests remplacent ; `exec()` bloquerait le test jusqu'au délai de 180 s.
 

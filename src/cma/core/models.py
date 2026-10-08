@@ -411,6 +411,8 @@ class Settings(Model):
     tray_hint_shown: bool = False
     # Coffre chiffré (version portable ou sans trousseau) : verrouillage de l'interface après inactivité.
     lock_after_minutes: int = Field(default=0, ge=0, le=1440)
+    # Relevé périodique de l'état des tunnels du compte Cloudflare (avec un jeton d'API), alerte s'ils tombent.
+    watch_tunnels: bool = True
     cloudflare_account_id: str | None = None
 
     @field_validator("language", mode="before")

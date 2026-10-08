@@ -6,7 +6,8 @@ leur propre outil ou à la page de la release.
 
 L'installeur téléchargé est vérifié par son empreinte SHA-256 : celle publiée par GitHub pour le fichier
 (champ `digest`) ou, à défaut, celle du fichier SHA256SUMS.txt joint à la release. Sans empreinte,
-l'installation est refusée. S'il est signé, sa signature Authenticode doit être valide.
+l'installation est refusée. Signature Authenticode : voir `signature_policy` (une copie en service signée
+n'accepte qu'une mise à jour signée par le même éditeur ; une copie non signée accepte une mise à jour non signée).
 """
 
 from __future__ import annotations
@@ -268,8 +269,14 @@ def download_portable(
     return download_asset(info, asset, dest_dir, progress=progress, cancel=cancel, timeout=timeout)
 
 
-def prepare_portable(archive: Path, staging: Path) -> Path:
-    """Décompresse la nouvelle version dans `staging` et renvoie son dossier programme, vérifié."""
+def prepare_portable(
+    archive: Path,
+    staging: Path,
+    *,
+    verify_signature: Callable[[Path], tuple[bool, str]] | None = None,
+) -> Path:
+    """Décompresse la nouvelle version dans `staging` et renvoie son dossier programme, vérifié (contenu attendu,
+    puis signature de l'exécutable selon la même règle que l'installeur)."""
     shutil.rmtree(staging, ignore_errors=True)
     staging.mkdir(parents=True)
     with zipfile.ZipFile(archive) as bundle:
@@ -281,6 +288,10 @@ def prepare_portable(archive: Path, staging: Path) -> Path:
     app = staging / "CloudflaredManageAccess"
     if not (app / "CloudflaredManageAccess.exe").is_file() or not (app / "_internal").is_dir():
         raise DownloadError(tr("Archive portable incomplète : mise à jour annulée."))
+    ok, detail = (verify_signature or signature_is_acceptable)(app / "CloudflaredManageAccess.exe")
+    if not ok:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise DownloadError(tr("Signature de la version portable invalide : {detail}").format(detail=detail))
     return app
 
 
@@ -386,11 +397,27 @@ def relaunch_after_exit(app: Path, *, wait_pid: int | None = None) -> None:
     subprocess.Popen(["/bin/sh", "-c", APPIMAGE_RELAUNCH], env=env, close_fds=True, start_new_session=True)
 
 
-def signature_is_acceptable(path: Path) -> tuple[bool, str]:
-    """Un installeur non signé est accepté (l'empreinte suffit) ; un installeur signé doit l'être correctement."""
+@dataclass(frozen=True)
+class Signature:
+    """Signature Authenticode d'un fichier : état (« Valid », « NotSigned », « HashMismatch »…) et sujet du
+    certificat du signataire (vide sans signature)."""
+
+    status: str
+    subject: str = ""
+
+
+UNSIGNED = Signature("NotSigned")
+
+
+def read_signature(path: Path) -> Signature:
+    """Windows : lit la signature par Get-AuthenticodeSignature (le chemin passe par l'environnement)."""
     if sys.platform != "win32":
-        return True, ""
-    script = "(Get-AuthenticodeSignature -LiteralPath $env:CMA_VERIFY_PATH).Status.ToString()"
+        return Signature("NotSupported")
+    script = (
+        "$s = Get-AuthenticodeSignature -LiteralPath $env:CMA_VERIFY_PATH; "
+        "Write-Output $s.Status.ToString(); "
+        "if ($s.SignerCertificate) { Write-Output $s.SignerCertificate.Subject }"
+    )
     try:
         result = subprocess.run(
             ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
@@ -401,9 +428,44 @@ def signature_is_acceptable(path: Path) -> tuple[bool, str]:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        return False, str(exc)
-    status = result.stdout.strip()
-    return status in ("Valid", "NotSigned"), status
+        return Signature(f"Error: {exc}")
+    lines = result.stdout.strip().splitlines()
+    return Signature(lines[0].strip() if lines else "", lines[1].strip() if len(lines) > 1 else "")
+
+
+def signature_policy(current: Signature, update: Signature) -> tuple[bool, str]:
+    """Règle de confiance d'une mise à jour, en plus de l'empreinte SHA-256.
+
+    - Copie en service signée : la mise à jour doit l'être aussi, validement, et par le même éditeur. Un fichier
+      non signé ou signé par un autre ne remplace jamais une copie signée.
+    - Copie non signée (cas actuel, en attendant le certificat) : une mise à jour non signée est acceptée, une
+      mise à jour signée doit l'être validement.
+    """
+    if current.status == "Valid":
+        if update.status != "Valid":
+            return False, tr(
+                "la version en service est signée, la mise à jour ne l'est pas ({status})"
+            ).format(status=update.status or "?")
+        if update.subject != current.subject:
+            return False, tr("mise à jour signée par un autre éditeur ({subject})").format(
+                subject=update.subject
+            )
+        return True, update.subject
+    return update.status in ("Valid", "NotSigned"), update.status
+
+
+def signature_is_acceptable(
+    path: Path,
+    *,
+    current: Signature | None = None,
+    reader: Callable[[Path], Signature] = read_signature,
+) -> tuple[bool, str]:
+    """Applique `signature_policy` au fichier téléchargé, face à la copie en service (l'exécutable figé)."""
+    if sys.platform != "win32":
+        return True, ""
+    if current is None:
+        current = reader(Path(sys.executable)) if is_frozen() else UNSIGNED
+    return signature_policy(current, reader(path))
 
 
 def installer_command(installer: Path, *, relaunch: bool = True) -> list[str]:

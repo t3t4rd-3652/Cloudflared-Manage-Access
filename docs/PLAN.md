@@ -1,6 +1,6 @@
 # Plan du projet
 
-État au 2026-10-08, version **2.4.0** (vues de configuration redessinées). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+État au 2026-10-08, version **2.4.0** (vues de configuration redessinées) ; P4 réalisé, non publié. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -13,7 +13,7 @@ anciens plans, qui ont tous été appliqués. L'historique des étapes est dans 
 | Accès Cloudflare (`cloudflared access tcp`) | Complet : profils, groupes, favoris, service tokens partagés, proxy, en-têtes, reconnexion, état réel de l'écoute, test du service, diagnostic guidé. |
 | Redirections SSH | Complet : locales, SOCKS 5, inverses, rebond ProxyJump, passage par un profil Cloudflare, découverte des ports (Linux et Windows), clés d'hôte vérifiées. |
 | Administration Cloudflare | Lecture du compte (tunnels, noms d'hôte, applications Access, service tokens), publication d'un service de bout en bout, retrait d'un nom d'hôte, création de tokens, import en profils. |
-| Quotidien | Palette Ctrl+K, espaces de travail, zone de notification, CLI `cma`, démarrage avec le système, verrouillage. |
+| Quotidien | Palette Ctrl+K, espaces de travail, zone de notification, CLI `cma`, démarrage avec le système, verrouillage, surveillance des tunnels du compte. |
 | Secrets | Coffre du système, ou coffre chiffré en mode portable (phrase de passe mémorisable par DPAPI). Rien en clair dans la configuration, les arguments ou les journaux. |
 | Interface | Thèmes clair et sombre aux contrastes vérifiés, accessibilité contrôlée par test, français, anglais, allemand et espagnol. |
 
@@ -27,10 +27,12 @@ anciens plans, qui ont tous été appliqués. L'historique des étapes est dans 
 
 ### Qualité
 
-- Environ 320 tests (unitaires, intégration avec un faux cloudflared et un serveur SSH en mémoire, interface
-  pytest-qt). Couverture : 91 % sur `cma.core` (seuil 90 %), 87 % au total (seuil 80 %).
-- CI à chaque push : lint, typage Windows et Linux, tests sur les deux systèmes, vrai cloudflared, audit des
-  dépendances, scripts serveur sur trois distributions, temps de démarrage, captures à trois échelles.
+- Environ 390 tests (unitaires, intégration avec un faux cloudflared et un serveur SSH en mémoire, interface
+  pytest-qt). Couverture : 92 % sur `cma.core` (seuil 90 %), 88 % au total (seuil 80 %). Environ 45 s en
+  parallèle (`pytest -n auto`), 3 min 30 en série.
+- CI à chaque push : lint, typage Windows et Linux, tests sous Windows et Linux (et macOS, non bloquant), vrai
+  cloudflared, audit des dépendances, scripts serveur sur trois distributions, temps de démarrage, captures à
+  trois échelles.
 
 ### Ce qui reste en suspens
 
@@ -151,10 +153,36 @@ Ordre de réalisation suivi : de ce qui évite une panne silencieuse à ce qui a
    boîtes standard de Qt traduites, saisie des politiques comprise dans toutes les langues. Une relecture par des
    personnes de langue allemande et espagnole reste souhaitable. Ajouter une langue : voir CONTRIBUTING.md.
 
+### P4 — Surveillance, cohérence et outillage (2.5)
+
+**État au 2026-10-08 : les quatre points sont réalisés** (section « Non publié » du CHANGELOG). Restent : la
+stabilisation du job de tests macOS (non bloquant tant qu'il n'a pas réussi plusieurs fois), et la vérification
+par signature, qui ne servira vraiment qu'avec le certificat.
+
+Ordre : de ce qui évite une panne silencieuse au confort de développement.
+
+1. **Surveiller les tunnels en arrière-plan.** Un tunnel qui tombe ne se voyait qu'en ouvrant la vue Cloudflare.
+   - Cœur : `cma.core.tunnelwatch.TunnelWatch`, fonction pure de comparaison des relevés successifs (testée) :
+     un tunnel qui passe à « Dégradé » ou « Hors ligne » est signalé, puis son rétablissement ; « Inactif »
+     (jamais lancé) ne l'est pas. Un tunnel déjà en panne au premier relevé est signalé une fois.
+   - Lecture : `CloudflareAdmin.tunnel_states()`, une seule requête (liste des tunnels du compte choisi).
+   - Interface : relevé 20 s après l'affichage puis toutes les 5 minutes, seulement avec un jeton et un compte ;
+     notification dans la fenêtre et dans la zone de notification, avec « Voir » vers le tunnel et son
+     diagnostic. Une erreur réseau n'est pas signalée à chaque relevé (journal seulement).
+   - Réglage : `Settings.watch_tunnels` (activé par défaut), dans Paramètres.
+2. **Paramètres en sections.** Même présentation que les vues de configuration (`FormCard`) : Apparence,
+   Comportement, Ports automatiques, Cloudflare (surveillance des tunnels) ; champs liés côte à côte.
+3. **Mise à jour vérifiée par signature.** Si la copie en service est signée (Authenticode), la mise à jour
+   téléchargée doit l'être par le même éditeur, en plus du SHA-256 ; une copie non signée garde la seule
+   vérification SHA-256. Prépare l'arrivée du certificat sans rien casser d'ici là.
+4. **Outillage.** Tests en parallèle (pytest-xdist) si les tests d'interface le supportent ; tests de la suite
+   sous macOS en CI (job d'abord non bloquant, le temps de le stabiliser : aucun Mac pour reproduire en local) ;
+   logique des vues longues extraite là où on touche ; chiffres de ce document tenus à jour.
+
 ### Dette technique à surveiller
 
 - La couverture du cœur est juste au-dessus du seuil : chaque nouveau module de `cma.core` arrive avec ses tests.
 - Les vues les plus longues (`cloud/view.py`, `profiles.py`, `dashboard.py`) mélangent construction des
   widgets et logique ; extraire la logique testable quand on y touche.
-- La suite de tests dure environ 3 minutes en local ; la paralléliser (pytest-xdist) si elle continue de grandir,
-  après avoir vérifié que les tests d'interface le supportent.
+- La suite de tests tourne en parallèle (pytest-xdist) en local, sous Windows et macOS en CI ; Linux reste en
+  série pour garder la pile d'un éventuel plantage natif de Qt.
