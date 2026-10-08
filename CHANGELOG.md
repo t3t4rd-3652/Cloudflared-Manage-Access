@@ -2,7 +2,7 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
-## [Non publié]
+## [2.6.0] - 2026-10-08
 
 ### Ajouté
 - **Tunnels en panne visibles en permanence** : « Cloudflare · 1 ! » dans la navigation tant qu'un tunnel du

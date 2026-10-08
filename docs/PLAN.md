@@ -1,6 +1,7 @@
 # Plan du projet
 
-État au 2026-10-08, version **2.5.0** (P4 : surveillance des tunnels, Paramètres en sections). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+État au 2026-10-08, version **2.6.0** (P5 : état des tunnels partout, `cma tunnels`). Il ne reste que des
+tâches du propriétaire (voir « Ce qui reste en suspens »). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -181,7 +182,7 @@ Ordre : de ce qui évite une panne silencieuse au confort de développement.
 
 ### P5 — État des tunnels partout, CLI et CI (2.6)
 
-**État au 2026-10-08 : les trois points sont réalisés** (section « Non publié » du CHANGELOG). Le job macOS a
+**État au 2026-10-08 : les trois points sont réalisés**, publiés en 2.6.0. Le job macOS a
 réussi sur `9d309cb` puis `a09a08a` : il bloque désormais la CI.
 
 1. **Tunnels en panne visibles en permanence.** Une notification passe ; l'état doit rester.
