@@ -1,6 +1,6 @@
 # Plan du projet
 
-État au 2026-10-08, version **2.6.0** (P5 : état des tunnels partout, `cma tunnels`). Il ne reste que des
+État au 2026-10-08, version **2.7.0** (P6 : administration Cloudflare plus fine). Il ne reste que des
 tâches du propriétaire (voir « Ce qui reste en suspens »). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
@@ -197,7 +197,7 @@ réussi sur `9d309cb` puis `a09a08a` : il bloque désormais la CI.
 
 ### P6 — Administration Cloudflare plus fine (2.7)
 
-**État au 2026-10-08 : les six points sont réalisés** (section « Non publié » du CHANGELOG). La recette en lecture
+**État au 2026-10-08 : les six points sont réalisés**, publiés en 2.7.0. La recette en lecture
 passe sur le vrai compte (règles des 4 tunnels, réglages des 9 applications `self_hosted`, journal des accès refusé
 comme prévu). Recette en écriture lancée par le propriétaire le 2026-10-08 : tout fonctionne (règle /api, ordre,
 règle finale, réglages d'application, nettoyage complet). Journal des accès vérifié ensuite en lecture, une fois la

@@ -42,7 +42,7 @@ sont remplacés et `data/` est conservé.
 Vérifiez le fichier avec `SHA256SUMS.txt` publié à côté :
 
 ```powershell
-Get-FileHash .\CloudflaredManageAccess-2.6.0-setup.exe -Algorithm SHA256
+Get-FileHash .\CloudflaredManageAccess-2.7.0-setup.exe -Algorithm SHA256
 ```
 
 Il faut aussi `cloudflared`. L'application le détecte, ou le télécharge pour vous depuis GitHub en vérifiant son

@@ -2,7 +2,7 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
-## [Non publié]
+## [2.7.0] - 2026-10-08
 
 ### Ajouté
 - **Règles d'ingress complètes** (menu d'un nom d'hôte ou d'un tunnel, vue Cloudflare) : ajouter une règle avec
