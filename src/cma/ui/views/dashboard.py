@@ -40,7 +40,21 @@ from cma.ui.dialogs.history import show_history
 from cma.ui.dialogs.workspaces import WorkspacesDialog, launch_favorites, launch_workspace
 from cma.ui.format import human_bytes, since
 from cma.ui.icons import set_glyph, set_icon
-from cma.ui.theme import ICON_OF_STATE, STATUS_OF_STATE, SYMBOL_OF_STATE
+from cma.ui.states import (  # noqa: F401 (RUNNING, TO_CHECK, sessions_summary : réexportés)
+    MAX_ATTEMPTS,
+    RUNNING,
+    TO_CHECK,
+    cloudflare_favorite,
+    fix_for,
+    group_of,
+    plural,
+    profile_session,
+    row_actions,
+    session_cause,
+    sessions_summary,
+    ssh_favorite,
+)
+from cma.ui.theme import ICON_OF_STATE, STATUS_OF_STATE
 from cma.ui.views.common import SERVICE_ICONS
 from cma.ui.widgets import (
     EmptyState,
@@ -56,51 +70,6 @@ from cma.ui.widgets import (
     title,
     tool_button,
 )
-
-RUNNING = (SessionState.STARTING, SessionState.LISTENING, SessionState.DEGRADED, SessionState.RECONNECTING)
-TO_CHECK = (SessionState.DEGRADED, SessionState.RECONNECTING, SessionState.ERROR)
-MAX_ATTEMPTS = 10
-
-
-def plural(n: int, one: str, many: str) -> str:
-    return (one if n <= 1 else many).format(n=n)
-
-
-def sessions_summary(infos: list[SessionInfo]) -> str:
-    """« 4 sessions en cours · 2 à vérifier » ; sans session en cours mais avec une erreur : « 0 session en cours · 1 erreur »."""
-    running = sum(1 for i in infos if i.state in RUNNING)
-    to_check = sum(1 for i in infos if i.state in TO_CHECK)
-    errors = sum(1 for i in infos if i.state == SessionState.ERROR)
-    text = plural(running, tr("{n} session en cours"), tr("{n} sessions en cours"))
-    if running == 0 and errors:
-        return text + " · " + plural(errors, tr("{n} erreur"), tr("{n} erreurs"))
-    if to_check:
-        text += " · " + tr("{n} à vérifier").format(n=to_check)
-    return text
-
-
-def group_of(info: SessionInfo) -> str:
-    if info.state in TO_CHECK:
-        return "check"
-    if info.state == SessionState.STOPPED:
-        return "done"
-    return "listening"
-
-
-def fix_for(info: SessionInfo) -> tuple[str, str] | None:
-    """Action corrective proposée près de la cause : (libellé, section de l'éditeur à ouvrir)."""
-    if info.kind == SessionKind.SSH_FORWARD:
-        return (tr("Modifier la configuration"), "config") if info.state == SessionState.ERROR else None
-    message = info.message.lower()
-    if "réservé" in message:
-        return tr("Choisir un port libre"), "connection"
-    if "port" in message and ("utilisé" in message or "déjà" in message):
-        return tr("Modifier le port"), "connection"
-    if "proxy" in message:
-        return tr("Modifier le proxy"), "advanced"
-    if any(word in message for word in ("access", "token", "authentif", "refus")):
-        return tr("Modifier l'authentification"), "auth"
-    return None
 
 
 class SessionRow(QFrame):
@@ -313,32 +282,25 @@ class SessionRow(QFrame):
 
     def _update_cause(self) -> None:
         info = self.info
-        text = info.message
-        if info.state == SessionState.ERROR and not text:
-            text = tr("Connexion interrompue après {n} tentatives.").format(n=MAX_ATTEMPTS)
-        if info.state == SessionState.DEGRADED and not text:
-            text = tr("La connexion distante a échoué. Consultez le journal pour identifier la cause.")
-        show = bool(text) and info.state in (*TO_CHECK, SessionState.STOPPED)
-        self.message.setText(text)
-        self.message.setProperty("role", "error" if info.state == SessionState.ERROR else "warning")
+        cause = session_cause(info)
+        self.message.setText(cause[0] if cause else "")
+        self.message.setProperty("role", cause[1] if cause else "warning")
         repolish(self.message)
         fix = fix_for(info) if info.state in (SessionState.DEGRADED, SessionState.ERROR) else None
         self.fix_button.setVisible(fix is not None)
         if fix is not None:
             self.fix_button.setText(fix[0])
             self._fix_section = fix[1]
-        self.cause_host.setVisible(show or fix is not None)
+        self.cause_host.setVisible(cause is not None or fix is not None)
 
     def _update_actions(self) -> None:
-        state = self.info.state
-        incident = state in (SessionState.DEGRADED, SessionState.RECONNECTING)
-        ended = state in (SessionState.ERROR, SessionState.STOPPED)
-        self.logs_button.setVisible(incident or state == SessionState.ERROR)
-        self.restart_button.setVisible(state == SessionState.DEGRADED or ended)
-        self.restart_button.setText(tr("Relancer") if ended else tr("Redémarrer"))
-        self.stop_button.setVisible(incident or state == SessionState.STARTING)
-        self.remove_button.setVisible(ended)
-        self.more_button.setVisible(state == SessionState.LISTENING)
+        actions = row_actions(self.info.state)
+        self.logs_button.setVisible(actions.logs)
+        self.restart_button.setVisible(actions.restart)
+        self.restart_button.setText(actions.restart_label)
+        self.stop_button.setVisible(actions.stop)
+        self.remove_button.setVisible(actions.remove)
+        self.more_button.setVisible(actions.more)
 
     def _setup_open_button(self) -> None:
         state = self.info.state
@@ -473,27 +435,12 @@ class FavoriteTile(QFrame):
         """(libellé, actif ?, teinte, symbole) : session Cloudflare, ou liaison SSH du serveur."""
         view = self.view
         if isinstance(self.profile, CloudflareProfile):
-            info = view.profile_session(self.profile.id)
-            if info is None:
-                return tr("Arrêté"), False, "neutral", "■"
-            return (
-                info.state.label,
-                info.state in RUNNING,
-                STATUS_OF_STATE[info.state],
-                SYMBOL_OF_STATE[info.state],
-            )
-        state = view.ssh_states.get(self.profile.id)
-        forwards = [r.info for r in view.cards.values() if r.info.profile_id == self.profile.id]
-        running = any(i.state in RUNNING for i in forwards)
-        if state is not None and state.state == "connected":
-            return tr("Connecté"), True, "success", "✓"
-        if state is not None and state.state == "connecting":
-            return tr("Connexion…"), True, "info", "↻"
-        if running:
-            return tr("En cours"), True, "success", "✓"
-        if state is not None and state.state == "error":
-            return tr("Erreur"), False, "danger", "×"
-        return tr("Déconnecté"), False, "neutral", "■"
+            state = cloudflare_favorite(view.profile_session(self.profile.id))
+        else:
+            link = view.ssh_states.get(self.profile.id)
+            forwards = [r.info for r in view.cards.values() if r.info.profile_id == self.profile.id]
+            state = ssh_favorite(link.state if link is not None else None, forwards)
+        return state.label, state.active, state.tone, state.symbol
 
     def refresh(self) -> None:
         text, active, status, symbol = self.state_text()
@@ -659,9 +606,7 @@ class DashboardView(QWidget):
             self._on_session(info)
 
     def profile_session(self, profile_id: str) -> SessionInfo | None:
-        matches = [r.info for r in self.cards.values() if r.info.profile_id == profile_id]
-        running = [i for i in matches if i.state in RUNNING]
-        return (running or matches or [None])[0]
+        return profile_session([r.info for r in self.cards.values()], profile_id)
 
     def _on_session(self, info: SessionInfo) -> None:
         row = self.cards.get(info.id)

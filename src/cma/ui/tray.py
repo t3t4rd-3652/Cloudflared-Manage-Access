@@ -19,8 +19,8 @@ from cma.ui.context import GuiContext
 from cma.ui.dialogs.workspaces import launch_favorites, launch_workspace
 from cma.ui.icons import app_icon_with_status, token_icon
 from cma.ui.main_window import MainWindow
+from cma.ui.states import RUNNING, cloudflare_favorite, profile_session, sessions_summary, ssh_favorite
 from cma.ui.theme import LIGHT
-from cma.ui.views.dashboard import RUNNING, sessions_summary
 
 
 class Tray(QObject):
@@ -104,21 +104,15 @@ class Tray(QObject):
         self._rebuild_menu()
 
     def _favorite_state(self, profile: CloudflareProfile | SshProfile) -> tuple[str, bool]:
+        """(libellé, actif ?) d'un favori, comme sur le tableau de bord (`cma.ui.states`)."""
+        infos = list(self.sessions.values())
         if isinstance(profile, CloudflareProfile):
-            infos = [s for s in self.sessions.values() if s.profile_id == profile.id]
-            running = [s for s in infos if s.state in RUNNING]
-            if running:
-                return running[0].state.label, True
-            return (infos[0].state.label if infos else tr("Arrêté")), False
-        state = self.ssh_states.get(profile.id)
-        forwards_running = any(
-            s.profile_id == profile.id and s.state in RUNNING for s in self.sessions.values()
-        )
-        if state is not None and state.state == "connected":
-            return tr("Connecté"), True
-        if forwards_running:
-            return tr("En cours"), True
-        return tr("Déconnecté"), False
+            state = cloudflare_favorite(profile_session(infos, profile.id))
+        else:
+            link = self.ssh_states.get(profile.id)
+            forwards = [s for s in infos if s.profile_id == profile.id]
+            state = ssh_favorite(link.state if link is not None else None, forwards)
+        return state.label, state.active
 
     def _rebuild_menu(self) -> None:
         self.menu.clear()

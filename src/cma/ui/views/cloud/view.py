@@ -89,6 +89,7 @@ from cma.ui.views.cloud.helpers import (
     tunnel_state,
 )
 from cma.ui.views.cloud.policies import AccountPoliciesDialog, PoliciesDialog, show_policies
+from cma.ui.views.cloud.summary import account_stats, protected_hosts
 from cma.ui.views.cloud.tunnel_create import ask_tunnel_name, show_new_tunnel
 from cma.ui.views.common import confirm
 from cma.ui.widgets import (
@@ -584,42 +585,35 @@ class CloudView(QWidget):
             for tile in (self.stat_tunnels, self.stat_hostnames, self.stat_apps, self.stat_tokens):
                 tile.set_values(None)
             return
-        hostnames = sum(len(v.hostnames) for v in overview.tunnels)
+        stats = account_stats(overview, {t.client_id for t in self.ctx.config().tokens})
         self.status.setText(
             " · ".join(
                 (
-                    plural(len(overview.tunnels), tr("{n} tunnel"), tr("{n} tunnels")),
-                    plural(hostnames, tr("{n} nom d'hôte"), tr("{n} noms d'hôte")),
-                    plural(len(overview.apps), tr("{n} application"), tr("{n} applications")),
+                    plural(stats.tunnels, tr("{n} tunnel"), tr("{n} tunnels")),
+                    plural(stats.hostnames, tr("{n} nom d'hôte"), tr("{n} noms d'hôte")),
+                    plural(stats.apps, tr("{n} application"), tr("{n} applications")),
                 )
             )
         )
         self.read_label.setText(last_read(self.read_at))
-        healthy = sum(1 for v in overview.tunnels if v.tunnel.status == "healthy")
-        troubled = len(overview.tunnels) - healthy
-        if not overview.tunnels:
+        if not stats.tunnels:
             self.stat_tunnels.set_values(0)
-        elif troubled:
+        elif stats.troubled:
             self.stat_tunnels.set_values(
-                len(overview.tunnels), tr("{n} à vérifier").format(n=troubled), "warning"
+                stats.tunnels, tr("{n} à vérifier").format(n=stats.troubled), "warning"
             )
         else:
-            self.stat_tunnels.set_values(len(overview.tunnels), tr("tous en ligne"), "success")
+            self.stat_tunnels.set_values(stats.tunnels, tr("tous en ligne"), "success")
         self.stat_hostnames.set_values(
-            hostnames, plural(len(overview.zones), tr("{n} domaine"), tr("{n} domaines"))
+            stats.hostnames, plural(stats.zones, tr("{n} domaine"), tr("{n} domaines"))
         )
-        protected = {a.domain.split("/")[0] for a in overview.apps}
-        published = {r.hostname for v in overview.tunnels for r in v.hostnames}
-        unprotected = len(published - protected)
         self.stat_apps.set_values(
-            len(overview.apps),
-            tr("{n} sans protection").format(n=unprotected) if unprotected else "",
-            "warning" if unprotected else None,
+            stats.apps,
+            tr("{n} sans protection").format(n=stats.unprotected) if stats.unprotected else "",
+            "warning" if stats.unprotected else None,
         )
-        local = {t.client_id for t in self.ctx.config().tokens}
-        in_cma = sum(1 for t in overview.tokens if t.client_id in local)
         self.stat_tokens.set_values(
-            len(overview.tokens), tr("{n} dans CMA").format(n=in_cma) if overview.tokens else ""
+            stats.tokens, tr("{n} dans CMA").format(n=stats.tokens_in_cma) if stats.tokens else ""
         )
 
     def _fill(self, overview: Overview | None) -> None:
@@ -641,7 +635,7 @@ class CloudView(QWidget):
             return
         tokens = current_tokens()
         mono = mono_font(9.5)
-        protected = {a.domain.split("/")[0].lower() for a in overview.apps}
+        protected = protected_hosts(overview.apps)
         imported = {p.hostname.lower() for p in self.ctx.config().cloudflare_profiles if p.hostname}
         for view in sorted(overview.tunnels, key=lambda v: v.tunnel.name.lower()):
             text, _tone, symbol = tunnel_state(view.tunnel.status)
@@ -1147,9 +1141,12 @@ class CloudView(QWidget):
     def protect_hostname(self) -> None:
         hostnames = []
         if self.overview is not None:
-            protected = {a.domain.split("/")[0] for a in self.overview.apps}
+            protected = protected_hosts(self.overview.apps)
             hostnames = [
-                r.hostname for v in self.overview.tunnels for r in v.hostnames if r.hostname not in protected
+                r.hostname
+                for v in self.overview.tunnels
+                for r in v.hostnames
+                if r.hostname.lower() not in protected
             ]
         hostname = ask_protect(self, hostnames)
         hostname = (hostname or "").strip().lower()

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QApplication, QStyleFactory
 
 from cma.core.models import Theme
 from cma.core.sessions import SessionState
+from cma.ui.states import ICON_OF_STATE, STATUS_OF_STATE, SYMBOL_OF_STATE  # noqa: F401 (réexport)
 
 
 @dataclass(frozen=True)
@@ -135,32 +136,7 @@ def current_tokens() -> Tokens:
 
 # --- États de session : libellé, symbole et teinte ------------------------------------------------------
 
-STATUS_OF_STATE: dict[SessionState, str] = {
-    SessionState.STARTING: "neutral",
-    SessionState.LISTENING: "success",
-    SessionState.DEGRADED: "warning",
-    SessionState.RECONNECTING: "info",
-    SessionState.ERROR: "danger",
-    SessionState.STOPPED: "neutral",
-}
-
-SYMBOL_OF_STATE: dict[SessionState, str] = {
-    SessionState.STARTING: "○",
-    SessionState.LISTENING: "✓",
-    SessionState.DEGRADED: "!",
-    SessionState.RECONNECTING: "↻",
-    SessionState.ERROR: "×",
-    SessionState.STOPPED: "■",
-}
-
-ICON_OF_STATE: dict[SessionState, str] = {
-    SessionState.STARTING: "hourglass",
-    SessionState.LISTENING: "circle-check",
-    SessionState.DEGRADED: "alert-triangle",
-    SessionState.RECONNECTING: "refresh",
-    SessionState.ERROR: "circle-x",
-    SessionState.STOPPED: "player-stop",
-}
+# Tables des états de session : définies sans Qt dans cma.ui.states, reprises ici pour les vues.
 
 
 def status_colors(status: str, tokens: Tokens) -> tuple[str, str]:

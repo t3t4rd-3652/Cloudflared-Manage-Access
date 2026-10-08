@@ -40,8 +40,9 @@ from cma.ui.dialogs.workspaces import launch_workspace
 from cma.ui.format import expiry_alert
 from cma.ui.icons import app_icon, set_icon, token_icon
 from cma.ui.lock import IdleWatcher, LockPanel
+from cma.ui.states import RUNNING, TO_CHECK, sessions_summary
 from cma.ui.views.cloud import CloudView
-from cma.ui.views.dashboard import RUNNING, TO_CHECK, DashboardView, sessions_summary
+from cma.ui.views.dashboard import DashboardView
 from cma.ui.views.logs import LogsView
 from cma.ui.views.profiles import CloudflareProfilesView
 from cma.ui.views.settings import SettingsView

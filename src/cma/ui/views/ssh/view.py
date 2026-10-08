@@ -30,6 +30,7 @@ from cma.ui.dialogs.misc import KeysDialog
 from cma.ui.dialogs.redirect import RedirectDialog
 from cma.ui.dialogs.transfer import run_export, run_import
 from cma.ui.icons import set_icon
+from cma.ui.states import ssh_link_state
 from cma.ui.views.common import (
     Action,
     ListEntry,
@@ -126,12 +127,7 @@ class SshProfilePanel(QWidget):
         if self.profile is None:
             return
         state = self.view.ssh_states.get(self.profile.id)
-        labels = {
-            "connected": (tr("Connecté"), "success", "✓"),
-            "connecting": (tr("Connexion…"), "info", "↻"),
-            "error": (tr("Erreur"), "danger", "×"),
-        }
-        text, status, symbol = labels.get(state.state if state else "", (tr("Déconnecté"), "neutral", "■"))
+        text, status, symbol = ssh_link_state(state.state if state else None)
         self.pill.set_status(text, status, symbol)
         self.header.set_tone(None if status == "neutral" else status)
         self.pill.setToolTip(state.message if state and state.message else "")

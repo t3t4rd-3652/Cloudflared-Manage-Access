@@ -123,6 +123,9 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   par le propriétaire.
 - **Secrets de la 2.3** : « Changer le secret » (`…/rotate`) révoque l'ancien secret chez Cloudflare, d'où la
   confirmation ; le jeton d'un connecteur de tunnel passe par `register_secret` et n'est jamais conservé.
+- **États affichés** (`cma.ui.states`) : libellé, teinte, symbole et actions d'une session, d'une liaison SSH ou
+  d'un favori viennent de là (les tables `STATUS_OF_STATE`… y sont, `cma.ui.theme` les réexporte). Ne pas en
+  refaire une copie dans une vue : c'est ce qui avait fait diverger la zone de notification et le tableau de bord.
 - **Surveillance des tunnels** (`cma.core.tunnelwatch`, relevé dans `MainWindow.check_tunnels`) : seuls
   « degraded » et « down » alertent, le retour n'est annoncé que vers « healthy » (hors ligne → inactif est un
   tunnel arrêté pour de bon). Un relevé en échec est seulement journalisé, jamais notifié toutes les 5 minutes.

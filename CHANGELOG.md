@@ -13,6 +13,9 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
 
 ### Modifié
 - Les tests sous macOS bloquent désormais la CI, comme ceux de Windows et Linux.
+- Vue Cloudflare : la tuile « Tunnels » ne compte plus un tunnel inactif (jamais lancé) parmi ceux « à vérifier »,
+  comme la surveillance. Les états (sessions, serveurs, favoris) s'affichent de la même façon dans le tableau de
+  bord, la zone de notification et la vue Serveurs SSH : une seule définition, testée.
 
 ## [2.5.0] - 2026-10-08
 

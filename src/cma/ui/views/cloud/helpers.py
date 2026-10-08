@@ -15,7 +15,9 @@ from PySide6.QtWidgets import (
 )
 
 from cma.core.cfapi import CloudflareApiError
+from cma.core.tunnelwatch import status_label
 from cma.i18n import tr
+from cma.ui.states import plural  # noqa: F401 (réexporté pour la vue)
 
 
 def token_durations() -> list[tuple[str, str]]:
@@ -23,18 +25,14 @@ def token_durations() -> list[tuple[str, str]]:
     return [(tr("1 an"), "8760h"), (tr("2 ans"), "17520h"), (tr("3 ans"), "26280h"), (tr("6 mois"), "4380h")]
 
 
-def plural(n: int, one: str, many: str) -> str:
-    return (one if n <= 1 else many).format(n=n)
-
-
 def tunnel_state(status: str) -> tuple[str, str, str]:
-    """(libellé, ton, symbole) de l'état d'un tunnel donné par l'API."""
-    return {
-        "healthy": (tr("En ligne"), "success", "✓"),
-        "degraded": (tr("Dégradé"), "warning", "!"),
-        "down": (tr("Hors ligne"), "danger", "×"),
-        "inactive": (tr("Inactif"), "neutral", "■"),
-    }.get(status, (status, "neutral", "■"))
+    """(libellé, ton, symbole) de l'état d'un tunnel donné par l'API ; libellé commun avec la surveillance et la CLI."""
+    tone, symbol = {
+        "healthy": ("success", "✓"),
+        "degraded": ("warning", "!"),
+        "down": ("danger", "×"),
+    }.get(status, ("neutral", "■"))
+    return status_label(status), tone, symbol
 
 
 def tunnel_status_label(status: str) -> str:

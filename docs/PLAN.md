@@ -197,7 +197,10 @@ réussi sur `9d309cb` puis `a09a08a` : il bloque désormais la CI.
 ### Dette technique à surveiller
 
 - La couverture du cœur est juste au-dessus du seuil : chaque nouveau module de `cma.core` arrive avec ses tests.
-- Les vues les plus longues (`cloud/view.py`, `profiles.py`, `dashboard.py`) mélangent construction des
-  widgets et logique ; extraire la logique testable quand on y touche.
+- Logique des vues extraite le 2026-10-08 : `cma.ui.states` (états des sessions, de la liaison SSH et des
+  favoris, autrefois recopiés dans le tableau de bord, la zone de notification et la vue SSH) et
+  `ui/views/cloud/summary.py` (chiffres du compte, noms d'hôte protégés), testés sans interface. Ce qui reste
+  dans `cloud/view.py` et `dashboard.py`, ce sont des actions qui ouvrent des boîtes ou lancent des tâches : à
+  découper seulement si une vue grossit encore.
 - La suite de tests tourne en parallèle (pytest-xdist) en local, sous Windows et macOS en CI ; Linux reste en
   série pour garder la pile d'un éventuel plantage natif de Qt.
