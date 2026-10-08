@@ -121,12 +121,23 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   ou crée une politique du compte. Le faux serveur reproduit ce modèle ; ne pas revenir à `/apps/{id}/policies`.
 - **Recette sur un vrai compte** : `scripts/cloudflare_recette.py` (lecture seule par défaut). Le classifieur de
   la session refuse toute écriture sur le compte Cloudflare réel, même jetable : le mode `--ecriture` est lancé
-  par le propriétaire.
+  par le propriétaire. La recette ne crée aucun DNS : une règle de test est posée directement dans la
+  configuration du tunnel de test, jamais par `publish_hostname` (qui crée le CNAME).
 - **Secrets de la 2.3** : « Changer le secret » (`…/rotate`) révoque l'ancien secret chez Cloudflare, d'où la
   confirmation ; le jeton d'un connecteur de tunnel passe par `register_secret` et n'est jamais conservé.
 - **États affichés** (`cma.ui.states`) : libellé, teinte, symbole et actions d'une session, d'une liaison SSH ou
   d'un favori viennent de là (les tables `STATUS_OF_STATE`… y sont, `cma.ui.theme` les réexporte). Ne pas en
   refaire une copie dans une vue : c'est ce qui avait fait diverger la zone de notification et le tableau de bord.
+- **Règles d'ingress** : une règle est identifiée par (nom d'hôte, chemin) (`cfapi._same_rule`). Republier met la
+  règle à jour sur place (position, `originRequest`, `id` gardés) ; retirer ne supprime le CNAME que si plus aucune
+  règle n'utilise le nom d'hôte. La règle finale (sans nom d'hôte) reste toujours la dernière.
+- **Réglages d'application** : même PUT complet que les politiques (application relue), politiques renvoyées en liens
+  `{id, precedence}` ; `self_hosted` seulement ; `allowed_idps` rendu tel quel (liste des fournisseurs souvent illisible).
+- **Journal des accès** : demande « Access: Audit Logs : Read » (`cfapi.AUDIT_PERMISSION`) ; un 403 le dit. Le faux
+  serveur reproduit le refus avec `audit_allowed = False`.
+- **Tâche planifiée** (`cma.platform.schedule`) : lance l'exécutable fenêtré avec `tunnels --notify` (pas de
+  console qui clignote) ; `gui_main` passe cette commande à la CLI. Les tests remplacent `_schtasks` : ne jamais
+  créer de vraie tâche dans un test. Notification système : `cma.platform.notify` (texte par l'environnement).
 - **Surveillance des tunnels** (`cma.core.tunnelwatch`, relevé dans `MainWindow.check_tunnels`) : seuls
   « degraded » et « down » alertent, le retour n'est annoncé que vers « healthy » (hors ligne → inactif est un
   tunnel arrêté pour de bon). Un relevé en échec est seulement journalisé, jamais notifié toutes les 5 minutes.

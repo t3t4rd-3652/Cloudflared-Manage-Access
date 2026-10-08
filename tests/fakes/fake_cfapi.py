@@ -48,6 +48,33 @@ class FakeCloudflare:
         }
     )
     dns: dict[str, list[dict[str, Any]]] = field(default_factory=lambda: {"z1": [], "z2": []})
+    # Journal des accès Access ; `audit_allowed` à False reproduit un jeton sans « Access: Audit Logs : Read ».
+    access_requests: list[dict[str, Any]] = field(
+        default_factory=lambda: [
+            {
+                "created_at": "2026-10-08T09:12:00Z",
+                "user_email": "alice@exemple.fr",
+                "app_domain": "ssh.exemple.fr",
+                "app_uid": "uid-ssh",
+                "action": "login",
+                "allowed": True,
+                "country": "FR",
+                "ip_address": "203.0.113.5",
+            },
+            {
+                "created_at": "2026-10-08T09:10:00Z",
+                "user_email": "",
+                "app_domain": "grafana.exemple.fr",
+                "app_uid": "uid-grafana",
+                "action": "login",
+                "allowed": False,
+                "country": "US",
+                "ip_address": "198.51.100.7",
+                "connection": "service_token",
+            },
+        ]
+    )
+    audit_allowed: bool = True
     # Connecteurs par tunnel : « bureau » a un connecteur sain (4 connexions), « labo » aucun.
     connectors: dict[str, list[dict[str, Any]]] = field(
         default_factory=lambda: {
@@ -256,6 +283,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 state.apps.append(app)
                 return self._send(200, _ok(self._app(app)))
             return self._send(200, _page([self._app(a) for a in state.apps], query))
+        if re.fullmatch(r"/accounts/(\w+)/access/logs/access_requests", path):
+            if not state.audit_allowed:
+                return self._error(403, 10000, "Authentication error")
+            limit = int(query.get("limit", ["50"])[0])
+            return self._send(200, _ok(state.access_requests[:limit]))
         if m := re.fullmatch(r"/accounts/(\w+)/access/apps/(\w+)", path):
             app = next((a for a in state.apps if a["id"] == m.group(2)), None)
             if app is None:

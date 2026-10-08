@@ -531,3 +531,124 @@ async def test_cli_tunnels_reports_the_account_state(cf, admin, paths, secrets, 
     ]
     cf.state.tunnels[1]["status"] = "healthy"
     assert await asyncio.to_thread(run, as_json=False) == 0
+
+
+def test_path_rules_order_and_catch_all(cf, api):
+    """Une règle est (nom d'hôte, chemin) : les chemins d'un même nom d'hôte vivent côte à côte, et le DNS reste tant
+    qu'une règle l'utilise. L'ordre se règle, la règle finale aussi, sans perdre les autres clés d'une règle."""
+    tunnel = Tunnel("t2", "labo", "down")
+    api.publish_hostname("acc1", tunnel, "app.lab.exemple.fr", "http://localhost:3000")
+    api.publish_hostname("acc1", tunnel, "app.lab.exemple.fr", "http://localhost:8080", "/api")
+    cf.state.configs["t2"]["ingress"][0]["id"] = "regle-1"  # clé inconnue de CMA : elle doit survivre
+    # Republier la règle sans chemin la met à jour sur place : /api reste, la position et l'`id` aussi.
+    api.publish_hostname("acc1", tunnel, "app.lab.exemple.fr", "http://localhost:3001")
+    rules, catch_all = api.tunnel_ingress("acc1", "t2")
+    assert [(r.hostname, r.path, r.service) for r in rules] == [
+        ("app.lab.exemple.fr", "", "http://localhost:3001"),
+        ("app.lab.exemple.fr", "/api", "http://localhost:8080"),
+    ]
+    assert catch_all == "http_status:404" and len(cf.state.dns["z2"]) == 1
+    assert cf.state.configs["t2"]["ingress"][0].get("id") == "regle-1"
+
+    # Ordre : /api passe devant (la règle la plus précise d'abord) ; aux bornes, rien ne bouge.
+    assert api.move_rule("acc1", tunnel, "app.lab.exemple.fr", "/api", -1) == 0
+    assert api.move_rule("acc1", tunnel, "app.lab.exemple.fr", "/api", -1) == 0
+    assert [r.path for r in api.tunnel_ingress("acc1", "t2")[0]] == ["/api", ""]
+    assert cf.state.configs["t2"]["ingress"][-1] == {"service": "http_status:404"}
+    with pytest.raises(CloudflareApiError, match="n'est pas publié"):
+        api.move_rule("acc1", tunnel, "app.lab.exemple.fr", "/absent", 1)
+
+    # Règle finale : 503, ou un service ; les règles nommées ne bougent pas.
+    api.set_catch_all("acc1", tunnel, "http_status:503")
+    assert api.tunnel_ingress("acc1", "t2")[1] == "http_status:503"
+    assert len(api.tunnel_ingress("acc1", "t2")[0]) == 2
+
+    # Modifier la règle /api ne touche pas l'autre ; la clé inconnue est gardée.
+    api.update_hostname_service("acc1", tunnel, "app.lab.exemple.fr", "http://localhost:9090", path="/api")
+    services = {r.path: r.service for r in api.tunnel_ingress("acc1", "t2")[0]}
+    assert services == {"": "http://localhost:3001", "/api": "http://localhost:9090"}
+    assert any(r.get("id") == "regle-1" for r in cf.state.configs["t2"]["ingress"])
+
+    # Retirer /api garde le DNS (la règle sans chemin l'utilise) ; retirer la dernière le supprime.
+    api.unpublish_hostname("acc1", tunnel, "app.lab.exemple.fr", "/api")
+    assert len(cf.state.dns["z2"]) == 1
+    api.unpublish_hostname("acc1", tunnel, "app.lab.exemple.fr")
+    assert cf.state.dns["z2"] == [] and api.tunnel_ingress("acc1", "t2") == ([], "http_status:503")
+
+
+async def test_admin_rule_actions(cf, admin):
+    await admin.connect(TOKEN)
+    tunnel = Tunnel("t1", "bureau", "healthy")
+    overview = await admin.overview((await admin.connect())[0])
+    assert overview.tunnels[0].catch_all == "http_status:404"
+    first = overview.tunnels[0].hostnames[0]
+    with pytest.raises(CloudflareApiError, match="chemin"):
+        await admin.add_path_rule(tunnel, first.hostname, "  ", "http://localhost:1")
+    added = await admin.add_path_rule(tunnel, first.hostname, "/admin", "http://localhost:9000")
+    assert (added.hostname, added.path) == (first.hostname, "/admin")
+    assert await admin.move_rule(tunnel, added, -1) >= 0
+    await admin.set_catch_all(tunnel, "http_status:503")
+    await admin.edit_hostname(tunnel, first.hostname, "rdp://localhost:3389", path="/admin")
+    await admin.unpublish(tunnel, first.hostname, "/admin")
+    overview = await admin.overview((await admin.connect())[0])
+    assert overview.tunnels[0].catch_all == "http_status:503"
+    assert all(r.path != "/admin" for r in overview.tunnels[0].hostnames)
+
+
+def test_access_app_settings(cf, api):
+    """Nom, durée de session, lanceur et redirection : un PUT complet qui garde politiques et autres champs."""
+    from cma.core.cfapi import AppSettings
+
+    app = api.create_access_app("acc1", "Base", "db.exemple.fr")
+    policy = api.create_account_policy(
+        "acc1", AccessPolicy("", "Robots", "non_identity", (PolicyRule("any_valid_service_token"),))
+    )
+    api.attach_policy("acc1", app.id, policy.id)
+    stored = next(a for a in cf.state.apps if a["id"] == app.id)
+    stored["allowed_idps"] = ["idp-1"]
+    stored["tags"] = ["prod"]
+    current = api.app_settings("acc1", app.id)
+    assert (current.name, current.session_duration, current.allowed_idps) == ("Base", "24h", ("idp-1",))
+
+    saved = api.update_app_settings(
+        "acc1",
+        app.id,
+        AppSettings("Base de prod", "15m", app_launcher_visible=False, auto_redirect_to_identity=True),
+    )
+    assert (
+        saved.name,
+        saved.session_duration,
+        saved.app_launcher_visible,
+        saved.auto_redirect_to_identity,
+    ) == (
+        "Base de prod",
+        "15m",
+        False,
+        True,
+    )
+    # Ce que CMA ne règle pas est rendu tel quel : fournisseurs d'identité, étiquettes, politiques.
+    assert saved.allowed_idps == ("idp-1",) and stored["tags"] == ["prod"]
+    assert api.app_policy_ids("acc1", app.id) == [policy.id]
+    assert next(a for a in api.list_access_apps("acc1") if a.id == app.id).policy_count == 1
+
+    cf.state.apps.append({"id": "w1", "name": "WARP", "domain": "", "type": "warp", "policies": []})
+    with pytest.raises(CloudflareApiError, match="self-hosted"):
+        api.update_app_settings("acc1", "w1", saved)
+
+
+async def test_access_requests_log(cf, api, admin):
+    rows = api.access_requests("acc1", limit=10)
+    assert [(r.user, r.app_domain, r.allowed, r.country) for r in rows] == [
+        ("alice@exemple.fr", "ssh.exemple.fr", True, "FR"),
+        ("", "grafana.exemple.fr", False, "US"),
+    ]
+    assert rows[1].connection == "service_token" and rows[0].ip == "203.0.113.5"
+    assert len(api.access_requests("acc1", limit=1)) == 1
+    # Sans la permission, le message dit laquelle ajouter.
+    cf.state.audit_allowed = False
+    with pytest.raises(CloudflareApiError, match="Access: Audit Logs : Read") as refused:
+        api.access_requests("acc1")
+    assert refused.value.status == 403
+    cf.state.audit_allowed = True
+    await admin.connect(TOKEN)
+    assert len(await admin.access_requests()) == 2

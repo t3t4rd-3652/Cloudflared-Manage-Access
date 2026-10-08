@@ -195,6 +195,45 @@ réussi sur `9d309cb` puis `a09a08a` : il bloque désormais la CI.
    supervision, sans ouvrir l'interface.
 3. **CI** : job de tests macOS bloquant, une fois réussi sur deux commits de suite.
 
+### P6 — Administration Cloudflare plus fine (2.7)
+
+**État au 2026-10-08 : les six points sont réalisés** (section « Non publié » du CHANGELOG). La recette en lecture
+passe sur le vrai compte (règles des 4 tunnels, réglages des 9 applications `self_hosted`, journal des accès refusé
+comme prévu). Reste au propriétaire : `--ecriture` (règles, ordre, règle finale, réglages d'application) et, pour
+le journal, ajouter « Access: Audit Logs : Read » au jeton.
+
+Lu sur le vrai compte le 2026-10-08 (lecture seule) : 10 applications (9 `self_hosted`, 1 `warp`), durées de session
+`0s`, `15m` et `24h`, 2 applications avec des fournisseurs d'identité choisis alors que la liste des fournisseurs
+revient vide (permission absente) ; règles d'ingress sans chemin, règle finale `http_status:404`, certaines règles
+avec un champ `id` ; journal des accès refusé (403) faute de la permission « Access: Audit Logs Read ».
+
+1. **Applications Access et service tokens en cartes**, comme les tunnels : pastilles « Non protégé »
+   (application sans politique), « Expire bientôt » / « Expiré », « Dans CMA ». Le tableau reste le modèle de
+   données et de sélection (tests, menus), seul le rendu change.
+2. **Règles d'ingress complètes.**
+   - Une règle est identifiée par (nom d'hôte, chemin) ; publier, modifier ou retirer ne touche plus les autres
+     règles du même nom d'hôte (aujourd'hui, publier `app.exemple.fr` retirerait une règle `app.exemple.fr/api`).
+   - Ajouter une règle avec un chemin sur un nom d'hôte déjà publié (pas de nouveau DNS) ; retirer une règle ne
+     supprime le CNAME que si plus aucune règle n'utilise ce nom d'hôte.
+   - Ordre : monter, descendre (cloudflared applique la première règle qui correspond).
+   - Règle finale du tunnel : réponse 404, 503, ou un service.
+   - Toutes les autres clés d'une règle (`id`, `originRequest`…) sont conservées.
+3. **Réglages d'une application Access** (`self_hosted` seulement) : nom, durée de session (de « expire
+   aussitôt » à 1 mois), visibilité dans le lanceur, redirection automatique vers le fournisseur d'identité. Les
+   fournisseurs choisis sont conservés tels quels (non modifiables tant que la liste n'est pas lisible).
+4. **Journal des accès** (`/access/logs/access_requests`) : dernières connexions (date, utilisateur ou service
+   token, application, autorisé ou refusé, pays), filtrables par application. Un 403 explique la permission
+   « Access: Audit Logs Read » à ajouter au jeton.
+5. **Surveillance quand CMA est fermé** (Windows) : dans Paramètres, une tâche planifiée qui lance
+   `cma tunnels --notify` toutes les 15 minutes ; `--notify` affiche une notification Windows quand un tunnel
+   est en panne (rien si tout va bien, rien si CMA est ouvert : il surveille déjà).
+6. **Dette** : les actions de l'onglet Service tokens sortent de `cloud/view.py` dans leur propre module. Le
+   parcours « publier → protéger → autoriser un token → importer en profil » est déjà couvert de bout en bout
+   (`test_admin_publish_protects_and_creates_the_profile`, `test_cloud_view_full_flow`) : rien à ajouter.
+
+Recette : `scripts/cloudflare_recette.py --ecriture` étendu aux règles avec chemin, à l'ordre, à la règle finale et
+aux réglages d'application, sur les ressources jetables de la recette ; lancé par le propriétaire.
+
 ### Dette technique à surveiller
 
 - La couverture du cœur est juste au-dessus du seuil : chaque nouveau module de `cma.core` arrive avec ses tests.

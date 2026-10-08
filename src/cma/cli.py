@@ -13,7 +13,7 @@ import json
 import sys
 from typing import Any
 
-from cma import __version__
+from cma import APP_NAME, __version__
 from cma.core.commands import execute, profile_summaries
 from cma.core.events import Event, LogLine, Notification, SessionChanged
 from cma.core.instance import send_command
@@ -59,6 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
         "tunnels", help=tr("état des tunnels du compte Cloudflare (code 2 si l'un est en panne)")
     )
     tunnels.add_argument("--json", action="store_true")
+    tunnels.add_argument(
+        "--notify",
+        action="store_true",
+        help=tr("notification du système si un tunnel est en panne et que CMA n'est pas ouvert"),
+    )
     sub.add_parser("doctor", help=tr("créer un rapport de diagnostic"))
     sub.add_parser("quit", help=tr("fermer l'application en cours (et toutes ses sessions)"))
     return parser
@@ -118,6 +123,15 @@ def portable_secret_store(paths: AppPaths) -> SecretStore | None:
 
     if not paths.encrypted_secrets_file.exists():
         return MemorySecretStore(reason=tr("coffre portable pas encore créé : lancez l'interface une fois"))
+    from cma.core import dpapi
+
+    remembered = dpapi.remembered_passphrase(paths.data_dir)
+    if remembered:
+        # Phrase de passe mémorisée sur ce poste (DPAPI) : aucune question, utile à la tâche planifiée.
+        try:
+            return EncryptedFileSecretStore(paths.encrypted_secrets_file, remembered)
+        except WrongPassphraseError:
+            pass
     try:
         passphrase = getpass.getpass(tr("Phrase de passe du coffre portable : "))
     except (EOFError, KeyboardInterrupt):
@@ -132,18 +146,26 @@ def portable_secret_store(paths: AppPaths) -> SecretStore | None:
 
 
 def show_tunnels(
-    paths: AppPaths, *, as_json: bool, secrets: SecretStore | None = None, base_url: str | None = None
+    paths: AppPaths,
+    *,
+    as_json: bool,
+    secrets: SecretStore | None = None,
+    base_url: str | None = None,
+    notify: bool = False,
 ) -> int:
     """État des tunnels du compte choisi dans CMA, avec le jeton d'API du coffre.
 
     Code de retour : 0 si tout va bien, 2 si un tunnel est dégradé ou hors ligne, 1 si la lecture échoue. Une
     supervision (tâche planifiée, script) peut s'en servir sans ouvrir l'interface.
+
+    `notify` (tâche planifiée) : notification du système si un tunnel est en panne, seulement quand CMA n'est pas
+    ouvert (sinon il surveille déjà et prévient lui-même). Une lecture en échec ne notifie rien.
     """
     from cma.core.cfadmin import CloudflareAdmin
     from cma.core.cfapi import API_BASE, CloudflareApiError
     from cma.core.config_store import ConfigStore
     from cma.core.secrets import open_secret_store
-    from cma.core.tunnelwatch import severity, status_label
+    from cma.core.tunnelwatch import severity, status_label, troubled_summary
 
     store = ConfigStore(paths)
     store.load()
@@ -165,7 +187,14 @@ def show_tunnels(
         for tunnel in tunnels:
             mark = "!" if severity(tunnel.status) else " "
             print(f"{mark} {status_label(tunnel.status):<12} {tunnel.name}")
-    return 2 if any(severity(t.status) for t in tunnels) else 0
+    troubled = [t for t in tunnels if severity(t.status)]
+    if notify and troubled and send_command(paths, {"cmd": "status"}, timeout=5) is None:
+        from cma.platform.notify import system_notification
+
+        system_notification(
+            APP_NAME, troubled_summary(troubled) + " — " + tr("ouvrez CMA pour le diagnostic.")
+        )
+    return 2 if troubled else 0
 
 
 async def _foreground_connect(args: argparse.Namespace) -> int:
@@ -235,7 +264,7 @@ def run(args: argparse.Namespace) -> int:
         return 0
 
     if command == "tunnels":
-        return show_tunnels(paths, as_json=args.json)
+        return show_tunnels(paths, as_json=args.json, notify=args.notify)
 
     if command == "doctor":
         from cma.core.config_store import ConfigStore

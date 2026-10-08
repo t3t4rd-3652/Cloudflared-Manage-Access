@@ -22,6 +22,11 @@ def gui_main() -> int:
     from cma.ui.app import run_gui
 
     args, _unknown = build_parser().parse_known_args(sys.argv[1:])
+    if args.command == "tunnels":
+        # Tâche planifiée « surveillance quand CMA est fermé » : vérification silencieuse, sans console ni fenêtre.
+        from cma.cli import run
+
+        return run(args)
     return run_gui(args)
 
 

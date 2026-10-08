@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import platform
+import subprocess
 import sys
 import threading
 from pathlib import Path
 from typing import Any
 
 from PySide6 import __version__ as pyside_version
-from PySide6.QtCore import QUrl, Signal
+from PySide6.QtCore import QSignalBlocker, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -57,7 +58,7 @@ from cma.core.updates import (
     update_mode,
 )
 from cma.i18n import SUPPORTED_LANGUAGES, tr
-from cma.platform import autostart
+from cma.platform import autostart, schedule
 from cma.ui.context import GuiContext
 from cma.ui.dialogs.misc import KeysDialog, KnownHostsDialog, confirm_delete_v1
 from cma.ui.dialogs.transfer import run_export, run_import
@@ -241,6 +242,15 @@ class SettingsView(QWidget):
         self.watch_tunnels = QCheckBox(tr("Surveiller les tunnels du compte et prévenir s'ils tombent"))
         self.watch_tunnels.toggled.connect(lambda checked: self._set("watch_tunnels", checked))
         form.addRow(self.watch_tunnels)
+        # Quand CMA est fermé : tâche planifiée Windows (`tunnels --notify` toutes les 15 minutes). Son état est lu
+        # une fois ici, pas à chaque changement de configuration (schtasks est lent à lancer).
+        self.watch_closed = QCheckBox(
+            tr("Surveiller aussi quand CMA est fermé (tâche planifiée, toutes les 15 minutes)")
+        )
+        self.watch_closed.setVisible(schedule.supported())
+        self.watch_closed.setChecked(schedule.is_enabled())
+        self.watch_closed.toggled.connect(self._watch_closed_changed)
+        form.addRow(self.watch_closed)
 
     def _build_ssh(self) -> None:
         form = self._section(tr("SSH"))
@@ -430,6 +440,21 @@ class SettingsView(QWidget):
             return
         self._set("language", self.language.currentData())
         self.ctx.notify("info", tr("La langue sera appliquée au prochain démarrage de l'application."))
+
+    def _watch_closed_changed(self, checked: bool) -> None:
+        try:
+            schedule.set_enabled(checked)
+        except (OSError, subprocess.SubprocessError) as exc:
+            self.ctx.notify("error", tr("Tâche planifiée impossible : {error}").format(error=exc))
+            with QSignalBlocker(self.watch_closed):
+                self.watch_closed.setChecked(not checked)
+            return
+        self.ctx.notify(
+            "success",
+            tr("Surveillance des tunnels planifiée, même CMA fermé.")
+            if checked
+            else tr("Tâche planifiée de surveillance retirée."),
+        )
 
     def _autostart_changed(self, checked: bool) -> None:
         if self._loading:

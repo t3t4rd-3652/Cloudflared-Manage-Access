@@ -16,7 +16,9 @@ from cma.core.cfapi import (
     API_BASE,
     TOKEN_SECRET_KEY,
     AccessApp,
+    AccessRequest,
     Account,
+    AppSettings,
     CloudflareApi,
     CloudflareApiError,
     Connector,
@@ -54,7 +56,8 @@ _SCHEME_TYPES = {
 @dataclass(frozen=True)
 class TunnelView:
     tunnel: Tunnel
-    hostnames: list[IngressRule]
+    hostnames: list[IngressRule]  # règles nommées, dans l'ordre où cloudflared les essaie
+    catch_all: str = "http_status:404"  # service de la règle finale
 
 
 @dataclass(frozen=True)
@@ -189,7 +192,7 @@ class CloudflareAdmin:
 
         def load() -> Overview:
             tunnels = [
-                TunnelView(t, api.tunnel_hostnames(account.id, t.id)) for t in api.list_tunnels(account.id)
+                TunnelView(t, *api.tunnel_ingress(account.id, t.id)) for t in api.list_tunnels(account.id)
             ]
             return Overview(
                 account=account,
@@ -466,6 +469,18 @@ class CloudflareAdmin:
 
         return await asyncio.to_thread(run)
 
+    async def access_requests(self, limit: int = 200) -> list[AccessRequest]:
+        api = self.api()
+        return await asyncio.to_thread(api.access_requests, self.account_id(), limit)
+
+    async def app_settings(self, app: AccessApp) -> AppSettings:
+        api = self.api()
+        return await asyncio.to_thread(api.app_settings, self.account_id(), app.id)
+
+    async def save_app_settings(self, app: AccessApp, settings: AppSettings) -> AppSettings:
+        api = self.api()
+        return await asyncio.to_thread(api.update_app_settings, self.account_id(), app.id, settings)
+
     async def delete_app(self, app: AccessApp) -> None:
         api = self.api()
         await asyncio.to_thread(api.delete_access_app, self.account_id(), app.id)
@@ -559,17 +574,23 @@ class CloudflareAdmin:
         return PublishResult(rule, app, profile, tuple(steps))
 
     async def edit_hostname(
-        self, tunnel: Tunnel, hostname: str, service: str, origin: dict[str, Any] | None = None
+        self,
+        tunnel: Tunnel,
+        hostname: str,
+        service: str,
+        origin: dict[str, Any] | None = None,
+        path: str = "",
     ) -> IngressRule:
-        """Change le service publié pour `hostname` et, si `origin` est donné, ses options d'origine. Le profil
-        CMA lié suit si le type de service change (ssh:// → rdp://…) ; son port local est gardé."""
+        """Change le service publié pour `hostname` (+ `path`) et, si `origin` est donné, ses options d'origine. Pour
+        la règle sans chemin, le profil CMA lié suit si le type de service change (ssh:// → rdp://…) ; son port local
+        est gardé."""
         api = self.api()
         rule = await asyncio.to_thread(
-            api.update_hostname_service, self.account_id(), tunnel, hostname, service, origin
+            api.update_hostname_service, self.account_id(), tunnel, hostname, service, origin, path
         )
         scheme, _port = guess_service_from_ingress(service)
         kind = _SCHEME_TYPES.get(scheme)
-        if kind is not None:
+        if kind is not None and not path:
 
             def apply(config: Config) -> None:
                 for profile in config.cloudflare_profiles:
@@ -583,6 +604,26 @@ class CloudflareAdmin:
                 self.store.update(apply)
         return rule
 
-    async def unpublish(self, tunnel: Tunnel, hostname: str) -> None:
+    async def unpublish(self, tunnel: Tunnel, hostname: str, path: str = "") -> None:
         api = self.api()
-        await asyncio.to_thread(api.unpublish_hostname, self.account_id(), tunnel, hostname)
+        await asyncio.to_thread(api.unpublish_hostname, self.account_id(), tunnel, hostname, path)
+
+    async def add_path_rule(self, tunnel: Tunnel, hostname: str, path: str, service: str) -> IngressRule:
+        """Règle avec chemin (`/api` → autre service) sur un nom d'hôte : même DNS, même protection Access."""
+        path = path.strip()
+        if not path:
+            raise CloudflareApiError(tr("Indiquez un chemin, par exemple /api."))
+        api = self.api()
+        return await asyncio.to_thread(
+            api.publish_hostname, self.account_id(), tunnel, hostname, service, path
+        )
+
+    async def move_rule(self, tunnel: Tunnel, rule: IngressRule, offset: int) -> int:
+        api = self.api()
+        return await asyncio.to_thread(
+            api.move_rule, self.account_id(), tunnel, rule.hostname, rule.path, offset
+        )
+
+    async def set_catch_all(self, tunnel: Tunnel, service: str) -> None:
+        api = self.api()
+        await asyncio.to_thread(api.set_catch_all, self.account_id(), tunnel, service)

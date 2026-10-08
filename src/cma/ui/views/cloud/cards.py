@@ -1,9 +1,13 @@
-"""Rendu de la vue Cloudflare : tuiles de chiffres clés et tunnels dessinés en cartes.
+"""Rendu de la vue Cloudflare : tuiles de chiffres clés, tunnels, applications Access et service tokens dessinés
+en cartes.
 
-Le `QTreeWidget` reste le modèle de données et de sélection ; seul le délégué change le rendu.
+Le `QTreeWidget` (tunnels) et les `QTableWidget` (applications, tokens) restent le modèle de données et de
+sélection ; seul le délégué change le rendu.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 from PySide6.QtCore import (
     QModelIndex,
@@ -32,15 +36,16 @@ from PySide6.QtWidgets import (
     QStyle,
     QStyledItemDelegate,
     QStyleOptionViewItem,
+    QTableWidget,
     QTreeWidget,
     QVBoxLayout,
 )
 
-from cma.core.cfapi import IngressRule, Tunnel
+from cma.core.cfapi import AccessApp, IngressRule, RemoteServiceToken, Tunnel
 from cma.i18n import tr
 from cma.ui.icons import icon, set_glyph
 from cma.ui.theme import current_tokens, mono_font, status_colors
-from cma.ui.views.cloud.helpers import tunnel_state
+from cma.ui.views.cloud.helpers import app_type_label, expiry_label, expiry_status, plural, tunnel_state
 from cma.ui.widgets import label
 
 TUNNEL_ROLE = 256
@@ -342,3 +347,164 @@ class TunnelDelegate(QStyledItemDelegate):
 
 
 # --- Vue ----------------------------------------------------------------------------------------------------
+
+
+# --- Applications Access et service tokens : une carte par ligne d'un tableau ---------------------------------
+
+CARD_ROLE = 261
+ROW_CARD_HEIGHT = 64
+
+
+@dataclass(frozen=True)
+class RowCard:
+    """Contenu d'une carte : pictogramme teinté, titre, ligne technique (police fixe) et pastilles à droite."""
+
+    icon: str
+    tone: str | None  # teinte du pictogramme ; None : couleur d'accent
+    title: str
+    subtitle: str
+    badges: tuple[tuple[str, str, str], ...] = ()  # (texte, icône, teinte)
+
+
+class CardTable(QTableWidget):
+    """Tableau présenté en cartes. Les colonnes restent le modèle (lecture, tests, lecteurs d'écran) ; seule la
+    première est affichée, et son délégué dessine toute la carte d'après le `RowCard` rangé dans `CARD_ROLE`."""
+
+    def __init__(self, headers: list[str], name: str) -> None:
+        super().__init__(0, len(headers))
+        self.setObjectName("CardTable")
+        self.setAccessibleName(name)
+        self.setHorizontalHeaderLabels(headers)
+        self.horizontalHeader().hide()
+        self.verticalHeader().hide()
+        self.verticalHeader().setDefaultSectionSize(ROW_CARD_HEIGHT + CARD_PADDING)
+        self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.setShowGrid(False)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setMouseTracking(True)
+        self.viewport().setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column in range(1, len(headers)):
+            self.setColumnHidden(column, True)
+        self.setItemDelegateForColumn(0, RowCardDelegate(self))
+
+
+class RowCardDelegate(QStyledItemDelegate):
+    def paint(
+        self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex
+    ) -> None:
+        card = index.data(CARD_ROLE)
+        if not isinstance(card, RowCard):
+            super().paint(painter, option, index)
+            return
+        tokens = current_tokens()
+        rect = QRect(option.rect)  # type: ignore[attr-defined]
+        state = option.state  # type: ignore[attr-defined]
+        font = QFont(option.font)  # type: ignore[attr-defined]
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        box = QRectF(rect.left() + 1.5, rect.top() + 0.5, rect.width() - 3, ROW_CARD_HEIGHT)
+        painter.setPen(QPen(QColor(tokens.border), 1))
+        painter.setBrush(QColor(tokens.surface))
+        painter.drawRoundedRect(box, CARD_RADIUS, CARD_RADIUS)
+        inner = box.adjusted(5, 5, -5, -5)
+        if state & QStyle.StateFlag.State_Selected:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(tokens.selected))
+            painter.drawRoundedRect(inner, 7, 7)
+            painter.setBrush(QColor(tokens.accent))
+            painter.drawRoundedRect(QRectF(inner.left(), inner.top() + 10, 3, inner.height() - 20), 1.5, 1.5)
+        elif state & QStyle.StateFlag.State_MouseOver:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(tokens.hover))
+            painter.drawRoundedRect(inner, 7, 7)
+        if state & QStyle.StateFlag.State_HasFocus:
+            painter.setPen(QPen(QColor(tokens.focus), 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(inner.adjusted(0.5, 0.5, -0.5, -0.5), 7, 7)
+        middle = int(box.center().y())
+        fg, bg = status_colors(card.tone, tokens) if card.tone else (tokens.accent, tokens.neutral_bg)
+        tile = QRectF(box.left() + 16, middle - 18, 36, 36)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(bg))
+        painter.drawRoundedRect(tile, 9, 9)
+        icon(card.icon, fg).paint(painter, tile.toRect().adjusted(8, 8, -8, -8))
+        # Pastilles à droite, de la dernière à la première.
+        badge_font = _resized(font, -1.0, QFont.Weight.DemiBold)
+        badge_metrics = QFontMetrics(badge_font)
+        x = int(box.right()) - 16
+        painter.setFont(badge_font)
+        for text, name, tone in reversed(card.badges):
+            bfg, bbg = status_colors(tone, tokens)
+            width = badge_metrics.horizontalAdvance(text) + 34
+            badge = QRectF(x - width, middle - 11, width, 22)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(bbg))
+            painter.drawRoundedRect(badge, 11, 11)
+            icon(name, bfg).paint(painter, QRect(int(badge.left()) + 9, middle - 7, 14, 14))
+            painter.setPen(QColor(bfg))
+            painter.drawText(badge.adjusted(27, 0, -8, 0), Qt.AlignmentFlag.AlignVCenter, text)
+            x = int(badge.left()) - 6
+        left = int(tile.right()) + 14
+        width = max(0, x - 12 - left)
+        title_font = _resized(font, 0.5, QFont.Weight.DemiBold)
+        mono = mono_font(9.0)
+        title_metrics, mono_metrics = QFontMetrics(title_font), QFontMetrics(mono)
+        y = middle - (title_metrics.height() + mono_metrics.height() + 2) // 2
+        painter.setFont(title_font)
+        painter.setPen(QColor(tokens.text))
+        painter.drawText(
+            QRect(left, y, width, title_metrics.height()),
+            Qt.AlignmentFlag.AlignVCenter,
+            title_metrics.elidedText(card.title, Qt.TextElideMode.ElideRight, width),
+        )
+        y += title_metrics.height() + 2
+        painter.setFont(mono)
+        painter.setPen(QColor(tokens.muted))
+        painter.drawText(
+            QRect(left, y, width, mono_metrics.height()),
+            Qt.AlignmentFlag.AlignVCenter,
+            mono_metrics.elidedText(card.subtitle, Qt.TextElideMode.ElideMiddle, width),
+        )
+        painter.restore()
+
+
+def app_card(app: AccessApp) -> RowCard:
+    """Carte d'une application Access : type, et alerte si aucune politique ne la rend accessible."""
+    badges: list[tuple[str, str, str]] = [(app_type_label(app.type), "app-window", "neutral")]
+    tone: str | None = None
+    if app.policy_count == 0:
+        badges.append((tr("Aucune politique"), "alert-triangle", "warning"))
+        tone = "warning"
+    elif app.policy_count:
+        badges.append((plural(app.policy_count, tr("{n} politique"), tr("{n} politiques")), "user", "info"))
+    icon_name = "world" if app.type == "warp" else "shield-check"
+    return RowCard(icon_name, tone, app.name, app.domain, tuple(badges))
+
+
+def token_card(token: RemoteServiceToken, local: tuple[str, str] | None) -> RowCard:
+    """Carte d'un service token du compte : échéance (en couleur si elle approche) et présence dans CMA."""
+    expiry_tone = expiry_status(token.expires_at)
+    badges: list[tuple[str, str, str]] = [
+        (
+            tr("Expire le {date}").format(date=expiry_label(token.expires_at))
+            if token.expires_at
+            else tr("Échéance inconnue"),
+            "hourglass",
+            expiry_tone or "neutral",
+        )
+    ]
+    if local is not None:
+        text, tone = local
+        badges.append(
+            (
+                tr("Dans CMA") if tone == "success" else text,
+                "circle-check" if tone == "success" else "alert-triangle",
+                tone,
+            )
+        )
+    return RowCard("key", expiry_tone, token.name, token.client_id, tuple(badges))

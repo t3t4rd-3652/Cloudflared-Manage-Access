@@ -20,6 +20,7 @@ import asyncio
 import sys
 import traceback
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -70,6 +71,16 @@ def read_only(admin: CloudflareAdmin, account: str) -> None:
     step("service tokens", lambda: api.list_service_tokens(account))
     groups = run(admin.groups())
     print(f"  [info]  {len(groups)} groupe(s) Access lisible(s) (permission facultative)")
+    for tunnel in tunnels:
+        step(f"règles de {tunnel.name}", lambda t=tunnel: api.tunnel_ingress(account, t.id))
+    for app in (a for a in apps if a.type == "self_hosted"):
+        step(f"réglages de {app.name}", lambda a=app: api.app_settings(account, a.id))
+    try:
+        requests = api.access_requests(account, 5)
+        print(f"  [OK]    journal des accès ({len(requests)} entrée(s) lue(s))")
+    except CloudflareApiError as exc:
+        # Permission facultative : son absence n'est pas un échec de la recette.
+        print(f"  [info]  journal des accès : {exc}")
 
 
 def write_tests(admin: CloudflareAdmin, account: str, zone: str) -> None:
@@ -93,6 +104,7 @@ def write_tests(admin: CloudflareAdmin, account: str, zone: str) -> None:
             config = {
                 "ingress": [
                     {"hostname": host, "service": "http://localhost:8080"},
+                    {"hostname": host, "path": "/api", "service": "http://localhost:9000"},
                     {"service": "http_status:404"},
                 ]
             }
@@ -118,6 +130,7 @@ def write_tests(admin: CloudflareAdmin, account: str, zone: str) -> None:
                 if not ok:
                     failures.append("relecture du service")
             step("état des connecteurs (aucun attendu)", lambda: run(admin.connectors(created["tunnel"])))
+            path_tests(admin, account, created["tunnel"], host)
 
         app = step("créer une application Access", lambda: api.create_access_app(account, host, host))
         if app:
@@ -145,6 +158,7 @@ def write_tests(admin: CloudflareAdmin, account: str, zone: str) -> None:
                 print("           retirée :", run(admin.policies(app))[0] == [])
                 step("la remettre (politique existante)", lambda: run(admin.attach_policy(app, saved)))
                 step("la retirer à nouveau", lambda: run(admin.remove_policy(app, saved)))
+            settings_tests(admin, app)
 
         token = step(
             "créer un service token", lambda: run(admin.create_service_token(NAME, duration="8760h"))
@@ -167,6 +181,55 @@ def write_tests(admin: CloudflareAdmin, account: str, zone: str) -> None:
         failures.append("exception")
     finally:
         cleanup(admin, account, host, "== Nettoyage")
+
+
+def path_tests(admin: CloudflareAdmin, account: str, tunnel: Any, host: str) -> None:
+    """Règle avec chemin, ordre, règle finale : sans DNS (la règle /api est posée avec la configuration)."""
+    api = admin.api()
+    rule = next((r for r in api.tunnel_ingress(account, tunnel.id)[0] if r.path == "/api"), None)
+    if rule is None:
+        failures.append("règle /api absente")
+        return
+    step("monter la règle /api", lambda: run(admin.move_rule(tunnel, rule, -1)))
+    rules = api.tunnel_ingress(account, tunnel.id)[0]
+    check("ordre relu", [r.path for r in rules] == ["/api", ""], rules)
+    step(
+        "modifier la seule règle /api",
+        lambda: run(admin.edit_hostname(tunnel, host, "http://localhost:9001", path="/api")),
+    )
+    services = {r.path: r.service for r in api.tunnel_ingress(account, tunnel.id)[0]}
+    check(
+        "l'autre règle est intacte",
+        services.get("/api") == "http://localhost:9001" and "" in services,
+        services,
+    )
+    step("règle finale 503", lambda: run(admin.set_catch_all(tunnel, "http_status:503")))
+    check("règle finale relue", api.tunnel_ingress(account, tunnel.id)[1] == "http_status:503", None)
+    step("retirer la règle /api (le nom d'hôte reste)", lambda: run(admin.unpublish(tunnel, host, "/api")))
+    check("une règle reste", [r.path for r in api.tunnel_ingress(account, tunnel.id)[0]] == [""], None)
+
+
+def settings_tests(admin: CloudflareAdmin, app: Any) -> None:
+    """Réglages de l'application de test : modifiés, relus ; elle est supprimée au nettoyage."""
+    current = step("lire les réglages de l'application", lambda: run(admin.app_settings(app)))
+    if current is None:
+        return
+    wanted = replace(current, name=NAME + "-reglee", session_duration="15m", app_launcher_visible=False)
+    saved = step("modifier les réglages", lambda: run(admin.save_app_settings(app, wanted)))
+    reread = run(admin.app_settings(app))
+    check(
+        "réglages relus",
+        saved is not None
+        and (reread.name, reread.session_duration, reread.app_launcher_visible)
+        == (wanted.name, "15m", False),
+        reread,
+    )
+
+
+def check(label: str, ok: bool, detail: Any) -> None:
+    print(f"           {label} :", "conforme" if ok else f"INATTENDU {detail}")
+    if not ok:
+        failures.append(label)
 
 
 def is_test_name(name: str) -> bool:

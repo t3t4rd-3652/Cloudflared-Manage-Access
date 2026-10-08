@@ -111,6 +111,43 @@ class AccessApp:
     name: str
     domain: str
     type: str
+    # Nombre de politiques attachées (None : inconnu) et identifiant repris par le journal des accès (`app_uid`).
+    policy_count: int | None = field(default=None, compare=False)
+    uid: str = field(default="", compare=False)
+
+
+# Durées de session proposées pour une application Access ; « 0s » : la session expire aussitôt.
+SESSION_DURATIONS = ("0s", "15m", "30m", "6h", "12h", "24h", "168h", "730h")
+
+
+@dataclass(frozen=True)
+class AppSettings:
+    """Réglages d'une application Access que CMA modifie. Les fournisseurs d'identité choisis sont lus et renvoyés
+    tels quels (la liste des fournisseurs demande une permission que le jeton n'a pas toujours)."""
+
+    name: str
+    session_duration: str
+    app_launcher_visible: bool
+    auto_redirect_to_identity: bool
+    allowed_idps: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class AccessRequest:
+    """Une connexion à une application Access, telle que Cloudflare la journalise."""
+
+    created_at: str
+    user: str  # adresse de l'utilisateur ; vide pour un service token ou un accès sans identité
+    app_domain: str
+    app_uid: str
+    allowed: bool
+    action: str
+    country: str = ""
+    ip: str = ""
+    connection: str = ""
+
+
+AUDIT_PERMISSION = "Access: Audit Logs : Read"
 
 
 @dataclass(frozen=True)
@@ -311,8 +348,13 @@ class CloudflareApi:
         return cast(dict[str, Any], result.get("config") or {})
 
     def tunnel_hostnames(self, account_id: str, tunnel_id: str) -> list[IngressRule]:
+        return self.tunnel_ingress(account_id, tunnel_id)[0]
+
+    def tunnel_ingress(self, account_id: str, tunnel_id: str) -> tuple[list[IngressRule], str]:
+        """Règles nommées du tunnel, dans l'ordre où cloudflared les essaie, et service de la règle finale."""
         config = self.tunnel_config(account_id, tunnel_id)
         rules: list[IngressRule] = []
+        catch_all = CATCH_ALL["service"]
         for rule in cast(list[dict[str, Any]], config.get("ingress") or []):
             if rule.get("hostname"):
                 rules.append(
@@ -323,11 +365,39 @@ class CloudflareApi:
                         dict(cast(dict[str, Any], rule.get("originRequest") or {})),
                     )
                 )
-        return rules
+            else:
+                catch_all = str(rule.get("service") or catch_all)
+        return rules, catch_all
 
-    def publish_hostname(self, account_id: str, tunnel: Tunnel, hostname: str, service: str) -> IngressRule:
-        """Ajoute (ou met à jour) `hostname → service` dans le tunnel, puis crée l'enregistrement DNS."""
+    def _put_ingress(self, account_id: str, tunnel: Tunnel, config: dict[str, Any]) -> None:
+        self._result(
+            "PUT", f"/accounts/{account_id}/cfd_tunnel/{tunnel.id}/configurations", body={"config": config}
+        )
+
+    @staticmethod
+    def _same_rule(rule: dict[str, Any], hostname: str, path: str) -> bool:
+        """Une règle est identifiée par son nom d'hôte et son chemin : `app.fr` et `app.fr` + `/api` sont deux règles."""
+        return rule.get("hostname") == hostname and str(rule.get("path") or "") == path
+
+    def _find_rule(
+        self, ingress: list[dict[str, Any]], tunnel: Tunnel, hostname: str, path: str
+    ) -> dict[str, Any]:
+        rule = next((r for r in ingress if self._same_rule(r, hostname, path)), None)
+        if rule is None:
+            raise CloudflareApiError(
+                tr("{host} n'est pas publié sur le tunnel {tunnel}.").format(
+                    host=hostname + path, tunnel=tunnel.name
+                )
+            )
+        return rule
+
+    def publish_hostname(
+        self, account_id: str, tunnel: Tunnel, hostname: str, service: str, path: str = ""
+    ) -> IngressRule:
+        """Ajoute (ou met à jour) la règle `hostname` + `path` → `service` dans le tunnel, avant la règle finale, puis
+        crée l'enregistrement DNS s'il manque. Les autres règles du même nom d'hôte (autres chemins) sont gardées."""
         hostname = hostname.lower().strip().rstrip(".")
+        path = path.strip()
         zone = self.zone_for_hostname(account_id, hostname)
         if zone is None:
             raise CloudflareApiError(
@@ -336,20 +406,22 @@ class CloudflareApi:
                 )
             )
         config = self.tunnel_config(account_id, tunnel.id)
-        ingress = [
-            r
-            for r in cast(list[dict[str, Any]], config.get("ingress") or [])
-            if r.get("hostname") != hostname
-        ]
-        catch_all = [r for r in ingress if not r.get("hostname")]
-        named = [r for r in ingress if r.get("hostname")]
-        named.append({"hostname": hostname, "service": service})
-        config["ingress"] = [*named, *(catch_all or [CATCH_ALL])]
-        self._result(
-            "PUT", f"/accounts/{account_id}/cfd_tunnel/{tunnel.id}/configurations", body={"config": config}
-        )
+        ingress = cast(list[dict[str, Any]], config.get("ingress") or [])
+        existing = next((r for r in ingress if self._same_rule(r, hostname, path)), None)
+        if existing is not None:
+            # Déjà publiée : seul le service change ; position, options d'origine et clés inconnues sont gardées.
+            existing["service"] = service
+        else:
+            catch_all = [r for r in ingress if not r.get("hostname")]
+            named = [r for r in ingress if r.get("hostname")]
+            rule: dict[str, Any] = {"hostname": hostname, "service": service}
+            if path:
+                rule["path"] = path
+            named.append(rule)
+            config["ingress"] = [*named, *(catch_all or [CATCH_ALL])]
+        self._put_ingress(account_id, tunnel, config)
         self.ensure_cname(zone, hostname, tunnel.cname_target)
-        return IngressRule(hostname, service)
+        return IngressRule(hostname, service, path)
 
     def update_hostname_service(
         self,
@@ -358,20 +430,15 @@ class CloudflareApi:
         hostname: str,
         service: str,
         origin: dict[str, Any] | None = None,
+        path: str = "",
     ) -> IngressRule:
-        """Change le service d'un nom d'hôte déjà publié. Les autres clés de la règle (`path`, autres options
-        d'origine) sont gardées ; le DNS ne change pas.
+        """Change le service d'une règle déjà publiée (nom d'hôte + chemin). Les autres clés de la règle (`id`,
+        autres options d'origine) sont gardées ; le DNS ne change pas.
 
         `origin` modifie des options d'origine : une valeur vide, fausse ou None retire l'option."""
         config = self.tunnel_config(account_id, tunnel.id)
         ingress = cast(list[dict[str, Any]], config.get("ingress") or [])
-        rule = next((r for r in ingress if r.get("hostname") == hostname), None)
-        if rule is None:
-            raise CloudflareApiError(
-                tr("{host} n'est pas publié sur le tunnel {tunnel}.").format(
-                    host=hostname, tunnel=tunnel.name
-                )
-            )
+        rule = self._find_rule(ingress, tunnel, hostname, path)
         rule["service"] = service
         if origin is not None:
             options = dict(cast(dict[str, Any], rule.get("originRequest") or {}))
@@ -384,9 +451,7 @@ class CloudflareApi:
                 rule["originRequest"] = options
             else:
                 rule.pop("originRequest", None)
-        self._result(
-            "PUT", f"/accounts/{account_id}/cfd_tunnel/{tunnel.id}/configurations", body={"config": config}
-        )
+        self._put_ingress(account_id, tunnel, config)
         return IngressRule(
             hostname,
             service,
@@ -394,15 +459,42 @@ class CloudflareApi:
             dict(cast(dict[str, Any], rule.get("originRequest") or {})),
         )
 
-    def unpublish_hostname(self, account_id: str, tunnel: Tunnel, hostname: str) -> None:
-        """Retire `hostname` du tunnel. L'enregistrement DNS est supprimé s'il vise encore ce tunnel."""
+    def unpublish_hostname(self, account_id: str, tunnel: Tunnel, hostname: str, path: str = "") -> None:
+        """Retire la règle `hostname` + `path` du tunnel. L'enregistrement DNS n'est supprimé que si plus aucune
+        règle du tunnel n'utilise ce nom d'hôte (et seulement s'il vise ce tunnel)."""
         config = self.tunnel_config(account_id, tunnel.id)
         ingress = cast(list[dict[str, Any]], config.get("ingress") or [])
-        config["ingress"] = [r for r in ingress if r.get("hostname") != hostname] or [CATCH_ALL]
-        self._result(
-            "PUT", f"/accounts/{account_id}/cfd_tunnel/{tunnel.id}/configurations", body={"config": config}
-        )
-        self.delete_tunnel_cname(account_id, tunnel, hostname)
+        config["ingress"] = [r for r in ingress if not self._same_rule(r, hostname, path)] or [CATCH_ALL]
+        self._put_ingress(account_id, tunnel, config)
+        if not any(r.get("hostname") == hostname for r in config["ingress"]):
+            self.delete_tunnel_cname(account_id, tunnel, hostname)
+
+    def move_rule(self, account_id: str, tunnel: Tunnel, hostname: str, path: str, offset: int) -> int:
+        """Avance (offset -1) ou recule (+1) une règle parmi les règles nommées ; la règle finale reste la dernière.
+        Renvoie la nouvelle position (0 = première essayée)."""
+        config = self.tunnel_config(account_id, tunnel.id)
+        ingress = cast(list[dict[str, Any]], config.get("ingress") or [])
+        named = [r for r in ingress if r.get("hostname")]
+        rest = [r for r in ingress if not r.get("hostname")]
+        rule = self._find_rule(named, tunnel, hostname, path)
+        position = named.index(rule)
+        target = max(0, min(len(named) - 1, position + offset))
+        if target != position:
+            named.insert(target, named.pop(position))
+            config["ingress"] = [*named, *(rest or [CATCH_ALL])]
+            self._put_ingress(account_id, tunnel, config)
+        return target
+
+    def set_catch_all(self, account_id: str, tunnel: Tunnel, service: str) -> None:
+        """Service de la règle finale (sans nom d'hôte) : « http_status:404 », « http_status:503 » ou un service."""
+        config = self.tunnel_config(account_id, tunnel.id)
+        ingress = cast(list[dict[str, Any]], config.get("ingress") or [])
+        named = [r for r in ingress if r.get("hostname")]
+        rest = [r for r in ingress if not r.get("hostname")]
+        final = dict(rest[-1]) if rest else {}
+        final["service"] = service
+        config["ingress"] = [*named, final]
+        self._put_ingress(account_id, tunnel, config)
 
     def delete_tunnel_cname(self, account_id: str, tunnel: Tunnel, hostname: str) -> bool:
         """Supprime l'enregistrement CNAME de `hostname` s'il vise ce tunnel (et seulement dans ce cas)."""
@@ -456,7 +548,12 @@ class CloudflareApi:
         return sorted(
             (
                 AccessApp(
-                    str(a["id"]), str(a.get("name", "")), str(a.get("domain", "")), str(a.get("type", ""))
+                    str(a["id"]),
+                    str(a.get("name", "")),
+                    str(a.get("domain", "")),
+                    str(a.get("type", "")),
+                    len(cast(list[Any], a["policies"])) if isinstance(a.get("policies"), list) else None,
+                    str(a.get("uid") or a.get("aud") or ""),
                 )
                 for a in apps
             ),
@@ -561,6 +658,76 @@ class CloudflareApi:
         body["policies"] = [{"id": pid, "precedence": rank} for rank, pid in enumerate(policy_ids, start=1)]
         self._result("PUT", f"/accounts/{account_id}/access/apps/{app_id}", body=body)
 
+    def access_requests(self, account_id: str, limit: int = 200) -> list[AccessRequest]:
+        """Dernières connexions aux applications Access, de la plus récente à la plus ancienne. Un refus 403 dit
+        quelle permission ajouter au jeton (elle n'est pas dans la liste de base)."""
+        try:
+            rows = cast(
+                list[dict[str, Any]],
+                self._result(
+                    "GET",
+                    f"/accounts/{account_id}/access/logs/access_requests",
+                    params={"limit": limit, "direction": "desc"},
+                )
+                or [],
+            )
+        except CloudflareApiError as exc:
+            if exc.status == 403:
+                raise CloudflareApiError(
+                    tr(
+                        "Le jeton n'a pas la permission « {permission} » : ajoutez-la pour lire le journal des accès."
+                    ).format(permission=AUDIT_PERMISSION),
+                    status=403,
+                    codes=exc.codes,
+                ) from exc
+            raise
+        return [
+            AccessRequest(
+                created_at=str(row.get("created_at", "")),
+                user=str(row.get("user_email") or ""),
+                app_domain=str(row.get("app_domain") or ""),
+                app_uid=str(row.get("app_uid") or ""),
+                allowed=bool(row.get("allowed")),
+                action=str(row.get("action") or ""),
+                country=str(row.get("country") or ""),
+                ip=str(row.get("ip_address") or ""),
+                connection=str(row.get("connection") or ""),
+            )
+            for row in rows
+        ]
+
+    def app_settings(self, account_id: str, app_id: str) -> AppSettings:
+        app = cast(dict[str, Any], self._result("GET", f"/accounts/{account_id}/access/apps/{app_id}"))
+        return _settings_of(app)
+
+    def update_app_settings(self, account_id: str, app_id: str, settings: AppSettings) -> AppSettings:
+        """Change nom, durée de session, visibilité dans le lanceur et redirection automatique d'une application
+        `self_hosted`, par un PUT complet de l'application relue (politiques renvoyées en liens, dans leur ordre)."""
+        app = self.app_for_update(account_id, app_id)
+        if app.get("type") != "self_hosted":
+            raise CloudflareApiError(
+                tr(
+                    "Seules les applications « self-hosted » se règlent depuis CMA ({name} est de type {type})."
+                ).format(name=app.get("name", app_id), type=app.get("type", "?"))
+            )
+        body = {k: v for k, v in app.items() if k not in _APP_READ_ONLY}
+        links = cast(list[dict[str, Any]], app.get("policies") or [])
+        body["policies"] = [
+            {"id": link["id"], "precedence": link.get("precedence", rank)}
+            for rank, link in enumerate(links, start=1)
+            if link.get("id")
+        ]
+        body.update(
+            name=settings.name,
+            session_duration=settings.session_duration,
+            app_launcher_visible=settings.app_launcher_visible,
+            auto_redirect_to_identity=settings.auto_redirect_to_identity,
+        )
+        result = cast(
+            dict[str, Any], self._result("PUT", f"/accounts/{account_id}/access/apps/{app_id}", body=body)
+        )
+        return _settings_of(result or {**app, **body})
+
     def app_for_update(self, account_id: str, app_id: str) -> dict[str, Any]:
         """L'application, si CMA peut changer ses politiques sans risque ; sinon une erreur qui explique pourquoi."""
         app = cast(dict[str, Any], self._result("GET", f"/accounts/{account_id}/access/apps/{app_id}"))
@@ -664,3 +831,13 @@ def guess_service_from_ingress(service: str) -> tuple[str, int | None]:
     except ValueError:
         port = None
     return parsed.scheme.lower(), port
+
+
+def _settings_of(app: dict[str, Any]) -> AppSettings:
+    return AppSettings(
+        name=str(app.get("name", "")),
+        session_duration=str(app.get("session_duration") or "24h"),
+        app_launcher_visible=bool(app.get("app_launcher_visible", True)),
+        auto_redirect_to_identity=bool(app.get("auto_redirect_to_identity", False)),
+        allowed_idps=tuple(str(i) for i in cast(list[Any], app.get("allowed_idps") or [])),
+    )

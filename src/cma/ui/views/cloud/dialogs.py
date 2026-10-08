@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from cma.core.cfadmin import Overview, PublishRequest, PublishResult
-from cma.core.cfapi import AccessApp, IngressRule, Tunnel
+from cma.core.cfapi import SESSION_DURATIONS, AccessApp, AppSettings, IngressRule, Tunnel
 from cma.core.models import ServiceToken
 from cma.i18n import tr
 from cma.ui.icons import app_icon
@@ -433,6 +433,203 @@ class CreateTokenDialog(QDialog):
         return self.name.text().strip(), str(self.duration.currentData())
 
 
+class PathRuleDialog(QDialog):
+    """Règle avec chemin sur un nom d'hôte déjà publié : `/api` vers un autre service, même DNS et même Access."""
+
+    def __init__(self, parent: QWidget | None, tunnel: Tunnel, hostname: str) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(tr("Ajouter une règle avec chemin"))
+        self.setWindowIcon(app_icon())
+        self.resize(560, 260)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.addWidget(title(tr("Ajouter une règle avec chemin"), "SectionTitle"))
+        layout.addWidget(label(hostname, "mono", selectable=True))
+        layout.addWidget(label(tr("Tunnel : {name}").format(name=tunnel.name), "meta"))
+        form = QFormLayout()
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        self.path = QLineEdit()
+        self.path.setPlaceholderText("/api")
+        form.addRow(tr("Chemin"), self.path)
+        self.service = QLineEdit()
+        self.service.setPlaceholderText("http://localhost:8080")
+        form.addRow(tr("Service"), self.service)
+        layout.addLayout(form)
+        layout.addWidget(
+            label(
+                tr(
+                    "cloudflared essaie les règles dans l'ordre : placez la règle avec chemin avant celle du nom "
+                    "d'hôte seul (« Monter »). Le chemin est une expression régulière : /api couvre aussi /api/v1."
+                ),
+                "muted",
+                wrap=True,
+            )
+        )
+        self.error = label("", "error", wrap=True)
+        self.error.hide()
+        layout.addWidget(self.error)
+        layout.addStretch()
+        buttons, self.ok_button = dialog_buttons(self, tr("Ajouter"))
+        self.ok_button.clicked.connect(self.accept)
+        layout.addWidget(buttons)
+        self.path.textChanged.connect(self._refresh)
+        self.service.textChanged.connect(self._refresh)
+        self._refresh()
+
+    def value(self) -> tuple[str, str]:
+        return self.path.text().strip(), self.service.text().strip()
+
+    def _refresh(self) -> None:
+        path, service = self.value()
+        problem = None
+        if path and not path.startswith(("/", "^")):
+            problem = tr("Le chemin commence par / (ou ^ pour une expression régulière).")
+        elif service:
+            problem = service_error(service)
+        self.error.setText(problem or "")
+        self.error.setVisible(bool(problem))
+        self.ok_button.setEnabled(bool(path and service) and problem is None)
+
+
+class CatchAllDialog(QDialog):
+    """Règle finale du tunnel : ce que reçoit une requête qu'aucune règle nommée ne prend."""
+
+    CHOICES = ("http_status:404", "http_status:503")
+
+    def __init__(self, parent: QWidget | None, tunnel: Tunnel, current: str) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(tr("Règle finale"))
+        self.setWindowIcon(app_icon())
+        self.resize(520, 240)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.addWidget(title(tr("Règle finale du tunnel {name}").format(name=tunnel.name), "SectionTitle"))
+        layout.addWidget(
+            label(
+                tr("Ce que reçoit une requête qu'aucune règle du tunnel ne prend en charge."),
+                "muted",
+                wrap=True,
+            )
+        )
+        self.choice = QComboBox()
+        self.choice.setAccessibleName(tr("Règle finale"))
+        self.choice.addItem(tr("Page « introuvable » (404, recommandé)"), "http_status:404")
+        self.choice.addItem(tr("Service indisponible (503)"), "http_status:503")
+        self.choice.addItem(tr("Un service…"), "")
+        layout.addWidget(self.choice)
+        self.service = QLineEdit()
+        self.service.setAccessibleName(tr("Service"))
+        self.service.setPlaceholderText("http://localhost:8080")
+        layout.addWidget(self.service)
+        self.error = label("", "error", wrap=True)
+        self.error.hide()
+        layout.addWidget(self.error)
+        layout.addStretch()
+        buttons, self.ok_button = dialog_buttons(self, tr("Enregistrer"))
+        self.ok_button.clicked.connect(self.accept)
+        layout.addWidget(buttons)
+        index = self.choice.findData(current) if current in self.CHOICES else 2
+        self.choice.setCurrentIndex(index)
+        if current not in self.CHOICES:
+            self.service.setText(current)
+        self.choice.currentIndexChanged.connect(self._refresh)
+        self.service.textChanged.connect(self._refresh)
+        self._refresh()
+
+    def value(self) -> str:
+        return str(self.choice.currentData()) or self.service.text().strip()
+
+    def _refresh(self) -> None:
+        custom = not self.choice.currentData()
+        self.service.setVisible(custom)
+        problem = service_error(self.value()) if custom and self.value() else None
+        self.error.setText(problem or "")
+        self.error.setVisible(bool(problem))
+        self.ok_button.setEnabled(bool(self.value()) and problem is None)
+
+
+class AppSettingsDialog(QDialog):
+    """Réglages d'une application Access : nom, durée de session, lanceur, redirection vers le fournisseur."""
+
+    def __init__(self, parent: QWidget | None, app: AccessApp, settings: AppSettings) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(tr("Réglages de l'application"))
+        self.setWindowIcon(app_icon())
+        self.resize(560, 360)
+        self.settings = settings
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.addWidget(title(tr("Réglages de l'application"), "SectionTitle"))
+        layout.addWidget(label(app.domain, "mono", selectable=True))
+        form = QFormLayout()
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        self.name = QLineEdit(settings.name)
+        form.addRow(tr("Nom"), self.name)
+        self.duration = QComboBox()
+        for value in SESSION_DURATIONS:
+            self.duration.addItem(session_duration_label(value), value)
+        if self.duration.findData(settings.session_duration) < 0:
+            self.duration.addItem(settings.session_duration, settings.session_duration)
+        self.duration.setCurrentIndex(self.duration.findData(settings.session_duration))
+        form.addRow(tr("Durée de session"), self.duration)
+        self.launcher = QCheckBox(tr("Visible dans le lanceur d'applications Access"))
+        self.launcher.setChecked(settings.app_launcher_visible)
+        form.addRow(self.launcher)
+        self.redirect = QCheckBox(tr("Rediriger directement vers le fournisseur d'identité"))
+        self.redirect.setChecked(settings.auto_redirect_to_identity)
+        # Cloudflare n'accepte la redirection automatique qu'avec un seul fournisseur d'identité choisi.
+        single = len(settings.allowed_idps) == 1
+        self.redirect.setEnabled(single or settings.auto_redirect_to_identity)
+        if not single:
+            self.redirect.setToolTip(
+                tr("Possible seulement quand un seul fournisseur d'identité est choisi.")
+            )
+        form.addRow(self.redirect)
+        layout.addLayout(form)
+        idps = len(settings.allowed_idps)
+        layout.addWidget(
+            label(
+                (
+                    tr("Fournisseurs d'identité : tous ceux du compte.")
+                    if not idps
+                    else tr("Fournisseurs d'identité : {n} choisi(s), inchangés par CMA.").format(n=idps)
+                ),
+                "muted",
+                wrap=True,
+            )
+        )
+        layout.addStretch()
+        buttons, self.ok_button = dialog_buttons(self, tr("Enregistrer"))
+        self.ok_button.clicked.connect(self.accept)
+        layout.addWidget(buttons)
+        self.name.textChanged.connect(lambda text: self.ok_button.setEnabled(bool(text.strip())))
+
+    def value(self) -> AppSettings:
+        return AppSettings(
+            self.name.text().strip(),
+            str(self.duration.currentData()),
+            self.launcher.isChecked(),
+            self.redirect.isChecked(),
+            self.settings.allowed_idps,
+        )
+
+
+def session_duration_label(value: str) -> str:
+    """« Expire aussitôt », « 15 minutes », « 24 heures », « 1 semaine »… ; une valeur inconnue reste telle quelle."""
+    return {
+        "0s": tr("Expire aussitôt"),
+        "15m": tr("15 minutes"),
+        "30m": tr("30 minutes"),
+        "6h": tr("6 heures"),
+        "12h": tr("12 heures"),
+        "24h": tr("24 heures"),
+        "168h": tr("1 semaine"),
+        "730h": tr("1 mois"),
+    }.get(value, value)
+
+
 # Fonctions de module : les tests les remplacent pour ne pas ouvrir de boîte modale.
 
 
@@ -453,6 +650,21 @@ def ask_allow(parent: QWidget, app: AccessApp, tokens: list[ServiceToken]) -> Se
 
 def ask_create_token(parent: QWidget, account: str, persistent: bool) -> tuple[str, str] | None:
     dialog = CreateTokenDialog(parent, account, persistent)
+    return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
+
+
+def ask_path_rule(parent: QWidget, tunnel: Tunnel, hostname: str) -> tuple[str, str] | None:
+    dialog = PathRuleDialog(parent, tunnel, hostname)
+    return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
+
+
+def ask_catch_all(parent: QWidget, tunnel: Tunnel, current: str) -> str | None:
+    dialog = CatchAllDialog(parent, tunnel, current)
+    return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
+
+
+def ask_app_settings(parent: QWidget, app: AccessApp, settings: AppSettings) -> AppSettings | None:
+    dialog = AppSettingsDialog(parent, app, settings)
     return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
 
 

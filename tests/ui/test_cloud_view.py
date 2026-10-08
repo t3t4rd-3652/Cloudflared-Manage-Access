@@ -6,6 +6,8 @@ from dataclasses import replace
 
 import pytest
 
+import cma.ui.views.cloud.helpers as cloud_helpers
+import cma.ui.views.cloud.tokens_tab as tokens_module
 import cma.ui.views.cloud.view as cloud_module
 from cma.core.cfadmin import NewTunnel, PublishRequest
 from cma.core.cfapi import TOKEN_SECRET_KEY, Tunnel
@@ -71,7 +73,7 @@ def test_cloud_view_full_flow(qtbot, gui, cf, monkeypatch):
     assert len(ctx.config().cloudflare_profiles) == 3
 
     # Service token créé chez Cloudflare et rangé dans le coffre.
-    monkeypatch.setattr(cloud_module, "ask_create_token", lambda *_a: ("Robot", "17520h"))
+    monkeypatch.setattr(tokens_module, "ask_create_token", lambda *_a: ("Robot", "17520h"))
     view.create_token()
     qtbot.waitUntil(lambda: view.remote_tokens.rowCount() == 1, timeout=10000)
     assert cf.state.service_tokens[0]["duration"] == "17520h"
@@ -86,11 +88,11 @@ def test_cloud_view_full_flow(qtbot, gui, cf, monkeypatch):
     view.extend_selected_token()
     qtbot.waitUntil(lambda: ctx.config().tokens[0].expires_at.year == 2028, timeout=10000)
     old_secret = ctx.core.secrets.get(token.secret_key)
-    monkeypatch.setattr(cloud_module, "confirm", lambda *_a: False)
+    monkeypatch.setattr(tokens_module, "confirm", lambda *_a: False)
     view.remote_tokens.selectRow(0)
     view.rotate_selected_token()  # refusé : rien ne change
     assert ctx.core.secrets.get(token.secret_key) == old_secret
-    monkeypatch.setattr(cloud_module, "confirm", lambda *_a: True)
+    monkeypatch.setattr(tokens_module, "confirm", lambda *_a: True)
     view.rotate_selected_token()
     qtbot.waitUntil(lambda: ctx.core.secrets.get(token.secret_key) != old_secret, timeout=10000)
     qtbot.waitUntil(lambda: view.remote_tokens.rowCount() == 1, timeout=10000)
@@ -326,6 +328,7 @@ def test_cloud_view_account_policies_and_cleanup(qtbot, gui, cf, monkeypatch):
 
     # Ménage : renommer et supprimer un tunnel arrêté, supprimer une application et un token.
     monkeypatch.setattr(cloud_module, "confirm", lambda *_a: True)
+    monkeypatch.setattr(tokens_module, "confirm", lambda *_a: True)
     labo = view.tree.topLevelItem(1).data(0, cloud_module.TUNNEL_ROLE)
     monkeypatch.setattr(cloud_module, "ask_tunnel_name", lambda _p, _existing, current: current + "-2")
     view.rename_tunnel(labo)
@@ -564,6 +567,208 @@ def test_cloud_presentation_helpers():
     soon = (datetime.now() + timedelta(days=10)).strftime("%Y-%m-%d")
     past = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     later = (datetime.now() + timedelta(days=400)).strftime("%Y-%m-%d")
-    assert cloud_module.expiry_status(soon) == "warning"
-    assert cloud_module.expiry_status(past) == "danger"
-    assert cloud_module.expiry_status(later) is None and cloud_module.expiry_status("") is None
+    assert cloud_helpers.expiry_status(soon) == "warning"
+    assert cloud_helpers.expiry_status(past) == "danger"
+    assert cloud_helpers.expiry_status(later) is None and cloud_helpers.expiry_status("") is None
+
+
+def test_app_and_token_cards():
+    from cma.core.cfapi import AccessApp, RemoteServiceToken
+    from cma.ui.views.cloud.cards import app_card, token_card
+
+    open_app = app_card(AccessApp("a", "Grafana", "grafana.exemple.fr", "self_hosted", 2))
+    assert (open_app.icon, open_app.tone, open_app.subtitle) == ("shield-check", None, "grafana.exemple.fr")
+    assert [b[0] for b in open_app.badges] == ["Self-hosted", "2 politiques"]
+    closed = app_card(AccessApp("b", "Vide", "vide.exemple.fr", "self_hosted", 0))
+    assert closed.tone == "warning" and closed.badges[-1][:1] == ("Aucune politique",)
+    assert app_card(AccessApp("c", "WARP", "", "warp")).icon == "world"
+    expired = token_card(
+        RemoteServiceToken("t", "Robot", "r.access", "2020-01-01T00:00:00Z"), ("Oui", "success")
+    )
+    assert expired.tone == "danger"
+    assert [b[0] for b in expired.badges] == ["Expire le 01/01/2020", "Dans CMA"]
+    unknown = token_card(RemoteServiceToken("u", "Autre", "a.access"), ("Secret indisponible", "warning"))
+    assert [b[0] for b in unknown.badges] == ["Échéance inconnue", "Secret indisponible"]
+    assert (
+        token_card(RemoteServiceToken("v", "Ailleurs", "x.access"), None).badges[-1][0] == "Échéance inconnue"
+    )
+
+
+def test_ingress_rules_from_the_tunnel_menu(qtbot, gui, cf, monkeypatch):
+    """Règle avec chemin, ordre et règle finale depuis le menu d'un tunnel ou d'une règle."""
+    ctx, window = gui
+    ctx.core.manager.cloudflare.base_url = cf.base_url
+    window.show_view("cloud")
+    view = window.cloud
+    view.token_field.set_text(TOKEN)
+    view.connect_account()
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+    bureau = view.tree.topLevelItem(0)
+    first = bureau.child(0)
+    host = first.data(0, cloud_module.RULE_ROLE).hostname
+
+    # Menu d'une règle : les actions de règle, « Monter » désactivé pour la première.
+    actions = {a.text(): a for a in view.tree_menu(first).actions() if a.text()}
+    assert {"Modifier le service…", "Ajouter une règle avec chemin…", "Monter", "Descendre"} <= set(actions)
+    assert not actions["Monter"].isEnabled() and actions["Descendre"].isEnabled()
+    assert "Règle finale…" in [a.text() for a in view.tree_menu(bureau).actions()]
+
+    def cnames() -> int:
+        return sum(1 for records in cf.state.dns.values() for r in records if r.get("name") == host)
+
+    # Ajouter /api sur le même nom d'hôte : une règle de plus, un seul enregistrement DNS pour ce nom.
+    monkeypatch.setattr(cloud_module, "ask_path_rule", lambda *_a: ("/api", "http://localhost:8080"))
+    actions["Ajouter une règle avec chemin…"].trigger()
+    qtbot.waitUntil(lambda: view.tree.topLevelItem(0).childCount() == 4, timeout=10000)
+    assert cnames() == 1
+    bureau = view.tree.topLevelItem(0)
+    added = bureau.child(3)
+    assert added.text(0) == host + "/api"
+
+    # La faire passer devant la règle du nom d'hôte seul.
+    for _ in range(3):
+        view.move_rule(bureau.data(0, cloud_module.TUNNEL_ROLE), added.data(0, cloud_module.RULE_ROLE), -1)
+        qtbot.wait(50)
+    qtbot.waitUntil(lambda: view.tree.topLevelItem(0).child(0).text(0) == host + "/api", timeout=10000)
+
+    # Règle finale : 503.
+    monkeypatch.setattr(cloud_module, "ask_catch_all", lambda *_a: "http_status:503")
+    view.edit_catch_all(view.tree.topLevelItem(0).data(0, cloud_module.TUNNEL_ROLE))
+    qtbot.waitUntil(
+        lambda: cf.state.configs["t1"]["ingress"][-1]["service"] == "http_status:503", timeout=10000
+    )
+
+    # Retirer la règle /api : le nom d'hôte reste publié (son DNS aussi), la confirmation le dit.
+    view.tree.topLevelItem(0).child(0).setSelected(True)
+    told: list[str] = []
+    monkeypatch.setattr(cloud_module, "confirm", lambda _p, _h, text, *_a: told.append(text) or True)
+    view.unpublish_selected()
+    qtbot.waitUntil(lambda: view.tree.topLevelItem(0).childCount() == 3, timeout=10000)
+    assert "reste publié" in told[0]
+    assert cnames() == 1
+
+
+def test_path_rule_and_catch_all_dialogs(qtbot):
+    from cma.ui.views.cloud.dialogs import CatchAllDialog, PathRuleDialog
+
+    tunnel = Tunnel("t1", "bureau", "healthy")
+    dialog = PathRuleDialog(None, tunnel, "app.exemple.fr")
+    qtbot.addWidget(dialog)
+    assert not dialog.ok_button.isEnabled()
+    dialog.path.setText("api")
+    dialog.service.setText("http://localhost:8080")
+    assert not dialog.ok_button.isEnabled() and "commence par /" in dialog.error.text()
+    dialog.path.setText("/api")
+    assert dialog.ok_button.isEnabled() and dialog.value() == ("/api", "http://localhost:8080")
+    dialog.service.setText("localhost:8080")
+    assert not dialog.ok_button.isEnabled()
+
+    final = CatchAllDialog(None, tunnel, "http_status:404")
+    qtbot.addWidget(final)
+    assert final.value() == "http_status:404" and final.service.isHidden()
+    final.choice.setCurrentIndex(2)
+    assert not final.ok_button.isEnabled()
+    final.service.setText("http://localhost:9000")
+    assert final.ok_button.isEnabled() and final.value() == "http://localhost:9000"
+    custom = CatchAllDialog(None, tunnel, "http://localhost:1234")
+    qtbot.addWidget(custom)
+    assert custom.choice.currentIndex() == 2 and custom.value() == "http://localhost:1234"
+
+
+def test_app_settings_from_the_apps_tab(qtbot, gui, cf, monkeypatch):
+    from dataclasses import replace as replaced
+
+    ctx, window = gui
+    ctx.core.manager.cloudflare.base_url = cf.base_url
+    window.show_view("cloud")
+    view = window.cloud
+    view.token_field.set_text(TOKEN)
+    view.connect_account()
+    qtbot.waitUntil(lambda: view.apps.rowCount() > 0, timeout=10000)
+    assert not view.app_settings_button.isEnabled()
+    view.apps.selectRow(0)
+    assert view.app_settings_button.isEnabled()
+    app = view._selected_app()
+    shown: list[object] = []
+
+    def answer(_parent, _app, settings):
+        shown.append(settings)
+        return replaced(settings, name="Renommée", session_duration="15m")
+
+    monkeypatch.setattr(cloud_module, "ask_app_settings", answer)
+    view.edit_app_settings()
+    stored = next(a for a in cf.state.apps if a["id"] == app.id)
+    qtbot.waitUntil(lambda: stored.get("name") == "Renommée", timeout=10000)
+    assert stored["session_duration"] == "15m" and shown
+
+
+def test_app_settings_dialog(qtbot):
+    from cma.core.cfapi import AccessApp, AppSettings
+    from cma.ui.views.cloud.dialogs import AppSettingsDialog, session_duration_label
+
+    app = AccessApp("a", "Grafana", "grafana.exemple.fr", "self_hosted")
+    dialog = AppSettingsDialog(None, app, AppSettings("Grafana", "0s", True, False, ("idp-1", "idp-2")))
+    qtbot.addWidget(dialog)
+    assert dialog.duration.currentText() == "Expire aussitôt"
+    assert not dialog.redirect.isEnabled()  # deux fournisseurs : pas de redirection automatique
+    dialog.duration.setCurrentIndex(dialog.duration.findData("168h"))
+    dialog.launcher.setChecked(False)
+    assert dialog.value() == AppSettings("Grafana", "168h", False, False, ("idp-1", "idp-2"))
+    dialog.name.setText("  ")
+    assert not dialog.ok_button.isEnabled()
+    odd = AppSettingsDialog(None, app, AppSettings("X", "45m", True, False, ("idp-1",)))
+    qtbot.addWidget(odd)
+    assert odd.duration.currentData() == "45m" and odd.redirect.isEnabled()
+    assert session_duration_label("730h") == "1 mois"
+
+
+def test_access_log(qtbot, gui, cf, monkeypatch):
+    from cma.core.cfapi import AccessApp, AccessRequest
+    from cma.ui.views.cloud.access_log import AccessLogDialog, request_time, request_user
+
+    ctx, window = gui
+    ctx.core.manager.cloudflare.base_url = cf.base_url
+    window.show_view("cloud")
+    view = window.cloud
+    view.token_field.set_text(TOKEN)
+    view.connect_account()
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+    opened: list[tuple[int, object]] = []
+    monkeypatch.setattr(
+        cloud_module,
+        "show_access_log",
+        lambda _p, requests, _apps, selected: opened.append((len(requests), selected)),
+    )
+    view.open_access_log()
+    qtbot.waitUntil(lambda: bool(opened), timeout=10000)
+    assert opened[0] == (2, None)
+
+    # Sans la permission : l'erreur dit laquelle ajouter.
+    cf.state.audit_allowed = False
+    errors: list[str] = []
+    monkeypatch.setattr(view.ctx, "notify", lambda level, text, **_k: errors.append(text))
+    view.open_access_log()
+    qtbot.waitUntil(lambda: any("Audit Logs" in e for e in errors), timeout=10000)
+
+    # La boîte : filtre par application (identifiant, sinon nom d'hôte), refus comptés.
+    requests = [
+        AccessRequest("2026-10-08T09:12:00Z", "alice@exemple.fr", "ssh.exemple.fr", "uid-ssh", True, "login"),
+        AccessRequest(
+            "2026-10-08T09:10:00Z", "", "grafana.exemple.fr", "", False, "login", connection="service_token"
+        ),
+    ]
+    apps = [
+        AccessApp("a1", "SSH", "ssh.exemple.fr", "self_hosted", uid="uid-ssh"),
+        AccessApp("a2", "Grafana", "grafana.exemple.fr/", "self_hosted"),
+    ]
+    dialog = AccessLogDialog(None, requests, apps)
+    qtbot.addWidget(dialog)
+    assert dialog.table.rowCount() == 2 and dialog.summary.text() == "2 connexions · 1 refusée"
+    dialog.app_filter.setCurrentIndex(dialog.app_filter.findData(apps[1]))
+    assert [r.app_domain for r in dialog.shown()] == ["grafana.exemple.fr"]
+    assert dialog.table.item(0, 1).text() == "Service token" and dialog.table.item(0, 3).text() == "Refusé"
+    focused = AccessLogDialog(None, requests, apps, apps[0])
+    qtbot.addWidget(focused)
+    assert [r.user for r in focused.shown()] == ["alice@exemple.fr"]
+    assert request_time("pas une date") == "pas une date" and request_time("") == "—"
+    assert request_user(AccessRequest("", "", "", "", True, "")) == "—"

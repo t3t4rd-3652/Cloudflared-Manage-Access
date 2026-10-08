@@ -57,6 +57,8 @@ Filename: "{app}\CloudflaredManageAccess.exe"; Flags: nowait; Check: ShouldRelau
 
 [UninstallRun]
 Filename: "{app}\cma.exe"; Parameters: "quit"; Flags: runhidden; RunOnceId: "QuitCMA"
+; Tâche planifiée « surveillance des tunnels » (Paramètres) : sans effet si elle n'existe pas.
+Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""Cloudflared Manage Access\Surveillance des tunnels"" /F"; Flags: runhidden; RunOnceId: "DeleteWatchTask"
 
 [Code]
 function ShouldRelaunch: Boolean;

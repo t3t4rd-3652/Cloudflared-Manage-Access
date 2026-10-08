@@ -115,3 +115,25 @@ def test_troubled_tunnels_stay_visible_in_navigation_and_tray(qtbot, gui, monkey
     ctx.update_config(lambda c: setattr(c.settings, "watch_tunnels", False))
     assert window.check_tunnels() is False
     assert not item.text().endswith("!") and tray.global_state() == (None, None)
+
+
+def test_settings_schedule_the_closed_watch(qtbot, gui, monkeypatch):
+    from cma.platform import schedule
+
+    ctx, window = gui
+    notes: list[tuple[str, str]] = []
+    monkeypatch.setattr(ctx, "notify", lambda level, text, **_k: notes.append((level, text)))
+    calls: list[bool] = []
+    monkeypatch.setattr(schedule, "set_enabled", calls.append)
+    box = window.settings.watch_closed
+    box.setChecked(not box.isChecked())
+    assert calls == [box.isChecked()] and notes[-1][0] == "success"
+
+    def refuse(_enabled: bool) -> None:
+        raise OSError("Accès refusé.")
+
+    monkeypatch.setattr(schedule, "set_enabled", refuse)
+    before = box.isChecked()
+    box.setChecked(not before)
+    assert box.isChecked() == before  # remis comme avant
+    assert notes[-1][0] == "error" and "Accès refusé" in notes[-1][1]

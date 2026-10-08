@@ -18,8 +18,6 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtGui import (
-    QBrush,
-    QColor,
     QDesktopServices,
     QKeySequence,
     QShowEvent,
@@ -45,51 +43,53 @@ from cma.core.cfadmin import CloudflareAdmin, NewTunnel, Overview, PublishReques
 from cma.core.cfapi import (
     TOKENS_PAGE,
     AccessApp,
+    AccessRequest,
     Account,
-    CloudflareApiError,
+    AppSettings,
     Connector,
     IngressRule,
-    RemoteServiceToken,
     Tunnel,
 )
-from cma.core.models import CloudflareProfile, ServiceToken
+from cma.core.models import CloudflareProfile
 from cma.core.policies import AccessGroup, AccessPolicy
 from cma.i18n import tr
 from cma.ui.context import GuiContext
 from cma.ui.format import last_read
 from cma.ui.icons import set_glyph, token_icon
-from cma.ui.state import remember_header
-from cma.ui.theme import current_tokens, mono_font, status_colors
+from cma.ui.theme import current_tokens, mono_font
+from cma.ui.views.cloud.access_log import show_access_log
 from cma.ui.views.cloud.cards import (
+    CARD_ROLE,
     PROFILE_ROLE,
     PROTECTED_ROLE,
     RULE_ROLE,
-    TOKEN_ROLE,
     TUNNEL_ROLE,
+    CardTable,
     StatTile,
     TunnelTree,
+    app_card,
     service_icon,
 )
 from cma.ui.views.cloud.connectors import show_connectors
 from cma.ui.views.cloud.dialogs import (
     PublishDialog,
     ask_allow,
-    ask_create_token,
+    ask_app_settings,
+    ask_catch_all,
+    ask_path_rule,
     ask_protect,
     ask_service,
     publish_summary,
 )
 from cma.ui.views.cloud.helpers import (
     app_type_label,
-    data_table,
     describe_api_error,
-    expiry_label,
-    expiry_status,
     plural,
     tunnel_state,
 )
 from cma.ui.views.cloud.policies import AccountPoliciesDialog, PoliciesDialog, show_policies
 from cma.ui.views.cloud.summary import account_stats, protected_hosts
+from cma.ui.views.cloud.tokens_tab import TokensTab
 from cma.ui.views.cloud.tunnel_create import ask_tunnel_name, show_new_tunnel
 from cma.ui.views.common import confirm
 from cma.ui.widgets import (
@@ -113,6 +113,7 @@ PERMISSION_GROUPS = (
             "Cloudflare Tunnel : Edit",
             "Access: Apps and Policies : Edit",
             "Access: Service Tokens : Edit",
+            "Access: Audit Logs : Read",
         ),
     ),
     ("Zone", ("DNS : Edit", "Zone : Read")),
@@ -318,7 +319,18 @@ class CloudView(QWidget):
         self.tabs.setProperty("role", "plain")
         self.tabs.addTab(self._build_tunnels(), token_icon("cloud"), tr("Tunnels"))
         self.tabs.addTab(self._build_apps(), token_icon("shield-check"), tr("Applications Access"))
-        self.tabs.addTab(self._build_tokens(), token_icon("key"), tr("Service tokens"))
+        self.tokens_tab = TokensTab(self)
+        self.tabs.addTab(self.tokens_tab, token_icon("key"), tr("Service tokens"))
+        # Noms d'avant le découpage, gardés pour la palette, les menus et les tests.
+        self.remote_tokens = self.tokens_tab.table
+        self.extend_button = self.tokens_tab.extend_button
+        self.rotate_button = self.tokens_tab.rotate_button
+        self.delete_token_button = self.tokens_tab.delete_button
+        self.create_token = self.tokens_tab.create_token
+        self.extend_selected_token = self.tokens_tab.extend_selected_token
+        self.rotate_selected_token = self.tokens_tab.rotate_selected_token
+        self.delete_selected_token = self.tokens_tab.delete_selected_token
+        self.selected_remote_token = self.tokens_tab.selected_remote_token
         outer.addWidget(self.tabs, 1)
         return host
 
@@ -379,15 +391,23 @@ class CloudView(QWidget):
         self.policies_button = button(tr("Politiques…"), "user")
         self.policies_button.setToolTip(tr("Qui peut atteindre l'application"))
         self.policies_button.clicked.connect(self.manage_policies)
+        self.app_settings_button = button(tr("Réglages…"), "settings")
+        self.app_settings_button.setToolTip(tr("Nom, durée de session, lanceur d'applications"))
+        self.app_settings_button.clicked.connect(self.edit_app_settings)
         self.delete_app_button = button(tr("Supprimer…"), "trash", danger=True)
         self.delete_app_button.clicked.connect(self.delete_selected_app)
         account_policies = button(tr("Politiques du compte…"), "list-details")
         account_policies.clicked.connect(self.manage_account_policies)
+        self.access_log_button = button(tr("Journal des accès…"), "history")
+        self.access_log_button.setToolTip(tr("Qui s'est connecté, quand, autorisé ou refusé"))
+        self.access_log_button.clicked.connect(self.open_access_log)
         row.addWidget(protect)
         row.addWidget(self.allow_button)
         row.addWidget(self.policies_button)
+        row.addWidget(self.app_settings_button)
         row.addWidget(self.delete_app_button)
         row.addStretch()
+        row.addWidget(self.access_log_button)
         row.addWidget(account_policies)
         box.addLayout(row)
         self.apps_hint = label(
@@ -395,10 +415,7 @@ class CloudView(QWidget):
             "muted",
         )
         box.addWidget(self.apps_hint)
-        self.apps = data_table([tr("Nom"), tr("Domaine"), tr("Type")], tr("Applications Access"))
-        self.apps.horizontalHeader().resizeSection(0, 220)
-        self.apps.horizontalHeader().resizeSection(1, 280)
-        remember_header(self.apps.horizontalHeader(), "cloud-apps")
+        self.apps = CardTable([tr("Nom"), tr("Domaine"), tr("Type")], tr("Applications Access"))
         self.apps.itemSelectionChanged.connect(self._update_app_actions)
         protect_empty = primary_button(tr("Protéger un nom d'hôte…"), "shield-check")
         protect_empty.clicked.connect(self.protect_hostname)
@@ -412,61 +429,6 @@ class CloudView(QWidget):
         self.apps_stack.addWidget(self.apps)
         self.apps_stack.addWidget(self.apps_empty)
         box.addWidget(self.apps_stack, 1)
-        return page
-
-    def _build_tokens(self) -> QWidget:
-        page = QWidget()
-        box = QVBoxLayout(page)
-        box.setContentsMargins(0, 12, 0, 0)
-        box.setSpacing(8)
-        row = QHBoxLayout()
-        create = primary_button(tr("Créer un service token…"), "plus")
-        create.clicked.connect(self.create_token)
-        row.addWidget(create)
-        self.extend_button = button(
-            tr("Prolonger"), "hourglass", tooltip=tr("Repousser l'échéance, sans changer le secret")
-        )
-        self.extend_button.clicked.connect(self.extend_selected_token)
-        row.addWidget(self.extend_button)
-        self.rotate_button = button(tr("Changer le secret…"), "rotate-clockwise")
-        self.rotate_button.clicked.connect(self.rotate_selected_token)
-        row.addWidget(self.rotate_button)
-        self.delete_token_button = button(tr("Supprimer…"), "trash", danger=True)
-        self.delete_token_button.clicked.connect(self.delete_selected_token)
-        row.addWidget(self.delete_token_button)
-        row.addStretch()
-        box.addLayout(row)
-        box.addWidget(
-            label(
-                tr(
-                    "Service tokens du compte Cloudflare. « Dans CMA » indique si le token est aussi "
-                    "enregistré sur ce poste, avec son secret. Seul un token enregistré dans CMA peut changer "
-                    "de secret : le nouveau part directement dans le coffre."
-                ),
-                "muted",
-                wrap=True,
-            )
-        )
-        self.remote_tokens = data_table(
-            [tr("Nom"), tr("ID client"), tr("Expiration"), tr("Dans CMA")], tr("Service tokens du compte")
-        )
-        header = self.remote_tokens.horizontalHeader()
-        for column, width in enumerate((200, 280, 120)):
-            header.resizeSection(column, width)
-        remember_header(header, "cloud-tokens")
-        self.remote_tokens.itemSelectionChanged.connect(self._update_token_actions)
-        create_empty = primary_button(tr("Créer un service token…"), "plus")
-        create_empty.clicked.connect(self.create_token)
-        self.tokens_empty = EmptyState(
-            "key",
-            tr("Aucun service token dans ce compte."),
-            tr("Le secret d'un token créé ici part directement dans le coffre de CMA."),
-            [create_empty],
-        )
-        self.tokens_stack = QStackedWidget()
-        self.tokens_stack.addWidget(self.remote_tokens)
-        self.tokens_stack.addWidget(self.tokens_empty)
-        box.addWidget(self.tokens_stack, 1)
         return page
 
     # --- État ----------------------------------------------------------------------------------------
@@ -633,7 +595,6 @@ class CloudView(QWidget):
             self._update_tunnel_actions()
             self._update_app_actions()
             return
-        tokens = current_tokens()
         mono = mono_font(9.5)
         protected = protected_hosts(overview.apps)
         imported = {p.hostname.lower() for p in self.ctx.config().cloudflare_profiles if p.hostname}
@@ -647,11 +608,16 @@ class CloudView(QWidget):
                     n=guarded, total=len(view.hostnames)
                 )
             parent = QTreeWidgetItem([view.tunnel.name, summary, f"{symbol} {text}"])
-            parent.setToolTip(0, tr("Tunnel {name} ({id})").format(name=view.tunnel.name, id=view.tunnel.id))
+            parent.setToolTip(
+                0,
+                tr("Tunnel {name} ({id})").format(name=view.tunnel.name, id=view.tunnel.id)
+                + "\n"
+                + tr("Règle finale : {service}").format(service=view.catch_all),
+            )
             parent.setData(0, TUNNEL_ROLE, view.tunnel)
             parent.setData(0, Qt.ItemDataRole.AccessibleTextRole, f"{view.tunnel.name}, {text}, {summary}")
             for rule in view.hostnames:
-                child = QTreeWidgetItem([rule.hostname, rule.service, "—"])
+                child = QTreeWidgetItem([rule.hostname + rule.path, rule.service, "—"])
                 child.setIcon(0, token_icon(service_icon(rule.service), "muted"))
                 child.setFont(1, mono)
                 is_protected = rule.hostname.lower() in protected
@@ -677,48 +643,23 @@ class CloudView(QWidget):
         for app in sorted(overview.apps, key=lambda a: a.name.lower()):
             row = self.apps.rowCount()
             self.apps.insertRow(row)
+            card = app_card(app)
             for column, value in enumerate((app.name, app.domain, app_type_label(app.type))):
                 item = QTableWidgetItem(value)
                 item.setToolTip(value)
                 item.setData(TUNNEL_ROLE, app)
                 if column == 0:
-                    item.setIcon(token_icon("shield-check", "accent"))
-                elif column == 1:
-                    item.setFont(mono)
-                else:
-                    item.setForeground(QBrush(QColor(tokens.muted)))
+                    item.setData(CARD_ROLE, card)
+                    item.setData(
+                        Qt.ItemDataRole.AccessibleTextRole,
+                        ", ".join([app.name, app.domain, *(badge[0] for badge in card.badges)]),
+                    )
                 self.apps.setItem(row, column, item)
         self.apps_stack.setCurrentWidget(self.apps if overview.apps else self.apps_empty)
-        local = {t.client_id: t for t in self.ctx.config().tokens}
-        for token in sorted(overview.tokens, key=lambda t: t.name.lower()):
-            row = self.remote_tokens.rowCount()
-            self.remote_tokens.insertRow(row)
-            mine = local.get(token.client_id)
-            if mine is None:
-                in_cma, in_tone = tr("Non"), "neutral"
-            elif self.ctx.core.secrets.get(mine.secret_key):
-                in_cma, in_tone = tr("Oui"), "success"
-            else:
-                in_cma, in_tone = tr("Secret indisponible"), "warning"
-            expiry_tone = expiry_status(token.expires_at)
-            values = (token.name, token.client_id, expiry_label(token.expires_at), in_cma)
-            for column, value in enumerate(values):
-                item = QTableWidgetItem(value)
-                item.setToolTip(value)
-                if column == 0:
-                    item.setIcon(token_icon("key", "accent"))
-                    item.setData(TOKEN_ROLE, token)
-                elif column == 1:
-                    item.setFont(mono)
-                elif column == 2 and expiry_tone:
-                    item.setForeground(QBrush(QColor(status_colors(expiry_tone, tokens)[0])))
-                elif column == 3:
-                    item.setForeground(QBrush(QColor(status_colors(in_tone, tokens)[0])))
-                self.remote_tokens.setItem(row, column, item)
-        self.tokens_stack.setCurrentWidget(self.remote_tokens if overview.tokens else self.tokens_empty)
+        self.tokens_tab.fill(overview)
         self._update_tunnel_actions()
         self._update_app_actions()
-        self._update_token_actions()
+        self.tokens_tab.update_actions()
 
     # --- Tunnels -----------------------------------------------------------------------------------------
 
@@ -804,6 +745,12 @@ class CloudView(QWidget):
         if item is None:
             return
         self.tree.setCurrentItem(item)
+        menu = self.tree_menu(item)
+        menu.exec(self.tree.viewport().mapToGlobal(pos))
+        menu.deleteLater()
+
+    def tree_menu(self, item: QTreeWidgetItem) -> QMenu:
+        """Menu d'un tunnel ou d'une règle (construit à part de son `exec`, pour les tests)."""
         rule = item.data(0, RULE_ROLE)
         tunnel = item.data(0, TUNNEL_ROLE)
         menu = QMenu(self)
@@ -817,20 +764,73 @@ class CloudView(QWidget):
                 )
             parent = item.parent()
             owner = parent.data(0, TUNNEL_ROLE) if parent is not None else None
-            if isinstance(owner, Tunnel):
+            if isinstance(owner, Tunnel) and parent is not None:
                 menu.addAction(tr("Modifier le service…"), lambda: self.edit_service(owner, rule))
+                menu.addAction(tr("Ajouter une règle avec chemin…"), lambda: self.add_path_rule(owner, rule))
+                menu.addSeparator()
+                position, count = parent.indexOfChild(item), parent.childCount()
+                up = menu.addAction(tr("Monter"), lambda: self.move_rule(owner, rule, -1))
+                up.setEnabled(position > 0)
+                down = menu.addAction(tr("Descendre"), lambda: self.move_rule(owner, rule, 1))
+                down.setEnabled(position < count - 1)
             menu.addSeparator()
-            menu.addAction(tr("Retirer ce nom d'hôte…"), self.unpublish_selected)
+            menu.addAction(
+                tr("Retirer cette règle…") if rule.path else tr("Retirer ce nom d'hôte…"),
+                self.unpublish_selected,
+            )
         elif isinstance(tunnel, Tunnel):
             menu.addAction(tr("Importer ses noms d'hôte"), self.import_selected)
             publish = menu.addAction(tr("Publier un service sur ce tunnel…"), lambda: self.publish(tunnel))
             publish.setEnabled(self.publish_button.isEnabled())
+            menu.addAction(tr("Règle finale…"), lambda: self.edit_catch_all(tunnel))
             menu.addAction(tr("État des connecteurs…"), lambda: self.check_connectors(tunnel))
             menu.addSeparator()
             menu.addAction(tr("Renommer…"), lambda: self.rename_tunnel(tunnel))
             menu.addAction(tr("Supprimer le tunnel…"), lambda: self.delete_tunnel(tunnel))
-        menu.exec(self.tree.viewport().mapToGlobal(pos))
-        menu.deleteLater()
+        return menu
+
+    def add_path_rule(self, tunnel: Tunnel, rule: IngressRule) -> None:
+        """Nouvelle règle avec chemin sur le nom d'hôte de `rule` (même DNS, même protection Access)."""
+        answer = ask_path_rule(self, tunnel, rule.hostname)
+        if not answer:
+            return
+        path, service = answer
+
+        def done(added: IngressRule) -> None:
+            self.ctx.notify(
+                "success",
+                tr("{host} pointe désormais vers {service}.").format(
+                    host=added.hostname + added.path, service=added.service
+                ),
+            )
+            self.refresh()
+
+        self.ctx.run(self.admin.add_path_rule(tunnel, rule.hostname, path, service), done, self._error)
+
+    def move_rule(self, tunnel: Tunnel, rule: IngressRule, offset: int) -> None:
+        self.ctx.run(self.admin.move_rule(tunnel, rule, offset), lambda _p: self.refresh(), self._error)
+
+    def edit_catch_all(self, tunnel: Tunnel) -> None:
+        current = next(
+            (
+                v.catch_all
+                for v in (self.overview.tunnels if self.overview else [])
+                if v.tunnel.id == tunnel.id
+            ),
+            "http_status:404",
+        )
+        service = ask_catch_all(self, tunnel, current)
+        if not service or service == current:
+            return
+
+        def done(_result: object) -> None:
+            self.ctx.notify(
+                "success",
+                tr("Règle finale du tunnel {name} : {service}.").format(name=tunnel.name, service=service),
+            )
+            self.refresh()
+
+        self.ctx.run(self.admin.set_catch_all(tunnel, service), done, self._error)
 
     def edit_service(self, tunnel: Tunnel, rule: IngressRule) -> None:
         """Change la cible d'un nom d'hôte publié (même nom, même DNS, même protection Access)."""
@@ -849,7 +849,9 @@ class CloudView(QWidget):
             )
             self.refresh()
 
-        self.ctx.run(self.admin.edit_hostname(tunnel, rule.hostname, service, origin), done, self._error)
+        self.ctx.run(
+            self.admin.edit_hostname(tunnel, rule.hostname, service, origin, rule.path), done, self._error
+        )
 
     def create_tunnel(self) -> None:
         """Crée un tunnel géré depuis Cloudflare, puis donne la commande d'installation de son connecteur."""
@@ -924,22 +926,35 @@ class CloudView(QWidget):
         if not isinstance(rule, IngressRule) or not isinstance(tunnel, Tunnel):
             self.ctx.notify("info", tr("Sélectionnez un nom d'hôte à retirer."))
             return
+        shared = self.overview is not None and any(
+            r.hostname == rule.hostname and r.path != rule.path
+            for v in self.overview.tunnels
+            if v.tunnel.id == tunnel.id
+            for r in v.hostnames
+        )
         if not confirm(
             self,
-            tr("Retirer {host} ?").format(host=rule.hostname),
-            tr(
-                "La règle est retirée du tunnel {tunnel} et l'enregistrement DNS est supprimé. "
-                "Le tunnel, l'application Access et les profils CMA sont conservés."
+            tr("Retirer {host} ?").format(host=rule.hostname + rule.path),
+            (
+                tr(
+                    "La règle est retirée du tunnel {tunnel}. Le nom d'hôte reste publié par ses autres règles : "
+                    "son enregistrement DNS est gardé."
+                )
+                if shared
+                else tr(
+                    "La règle est retirée du tunnel {tunnel} et l'enregistrement DNS est supprimé. "
+                    "Le tunnel, l'application Access et les profils CMA sont conservés."
+                )
             ).format(tunnel=tunnel.name),
             tr("Retirer"),
         ):
             return
 
         def done(_result: object) -> None:
-            self.ctx.notify("success", tr("{host} retiré.").format(host=rule.hostname))
+            self.ctx.notify("success", tr("{host} retiré.").format(host=rule.hostname + rule.path))
             self.refresh()
 
-        self.ctx.run(self.admin.unpublish(tunnel, rule.hostname), done, self._error)
+        self.ctx.run(self.admin.unpublish(tunnel, rule.hostname, rule.path), done, self._error)
 
     # --- Access et service tokens ------------------------------------------------------------------------------
 
@@ -950,10 +965,12 @@ class CloudView(QWidget):
         return app if isinstance(app, AccessApp) else None
 
     def _update_app_actions(self) -> None:
-        has_app = self._selected_app() is not None
+        app = self._selected_app()
+        has_app = app is not None
         self.allow_button.setEnabled(has_app)
         self.policies_button.setEnabled(has_app)
         self.delete_app_button.setEnabled(has_app)
+        self.app_settings_button.setEnabled(app is not None and app.type == "self_hosted")
         self.apps_hint.setVisible(not has_app and bool(self.overview and self.overview.apps))
 
     def _policy_tokens(self) -> dict[str, str]:
@@ -1087,6 +1104,39 @@ class CloudView(QWidget):
 
         self.ctx.run(self.admin.delete_tunnel(tunnel, hostnames), done, self._error)
 
+    def open_access_log(self) -> None:
+        """Dernières connexions du compte ; filtrées d'emblée sur l'application choisie, s'il y en a une."""
+        selected = self._selected_app()
+        apps = list(self.overview.apps) if self.overview is not None else []
+        self.status.setText(tr("Lecture du journal des accès…"))
+
+        def done(requests: list[AccessRequest]) -> None:
+            self._show_summary()
+            show_access_log(self, requests, apps, selected)
+
+        self.ctx.run(self.admin.access_requests(), done, self._error)
+
+    def edit_app_settings(self) -> None:
+        """Réglages de l'application choisie : relus, présentés, puis renvoyés par un PUT complet."""
+        app = self._selected_app()
+        if app is None:
+            return
+        self.status.setText(tr("Lecture des réglages…"))
+
+        def loaded(settings: AppSettings) -> None:
+            self._show_summary()
+            answer = ask_app_settings(self, app, settings)
+            if answer is None or answer == settings:
+                return
+
+            def saved(_settings: AppSettings) -> None:
+                self.ctx.notify("success", tr("Réglages de {name} enregistrés.").format(name=answer.name))
+                self.refresh()
+
+            self.ctx.run(self.admin.save_app_settings(app, answer), saved, self._error)
+
+        self.ctx.run(self.admin.app_settings(app), loaded, self._error)
+
     def delete_selected_app(self) -> None:
         app = self._selected_app()
         if app is None or not confirm(
@@ -1106,37 +1156,6 @@ class CloudView(QWidget):
             self.refresh()
 
         self.ctx.run(self.admin.delete_app(app), done, self._error)
-
-    def delete_selected_token(self) -> None:
-        remote = self.selected_remote_token()
-        if remote is None:
-            return
-        local = self._local_token(remote)
-        text = tr(
-            "Cloudflare révoque le token aussitôt : les accès qui l'utilisent sont refusés. Les politiques "
-            "inutilisées qui ne servaient qu'à lui sont supprimées avec lui."
-        )
-        if local is not None:
-            text += " " + tr("Sa copie dans CMA reste dans la vue Service tokens, à supprimer à part.")
-        if not confirm(
-            self,
-            tr("Supprimer le service token « {name} » ?").format(name=remote.name),
-            text,
-            tr("Supprimer"),
-        ):
-            return
-        self.status.setText(tr("Suppression du service token…"))
-
-        def done(policies: list[str]) -> None:
-            text = tr("Service token « {name} » supprimé.").format(name=remote.name)
-            if policies:
-                text += " " + tr("Politique(s) supprimée(s) avec lui : {names}.").format(
-                    names=", ".join(policies)
-                )
-            self.ctx.notify("success", text)
-            self.refresh()
-
-        self.ctx.run(self.admin.delete_remote_token(remote), done, self._error)
 
     def protect_hostname(self) -> None:
         hostnames = []
@@ -1194,96 +1213,3 @@ class CloudView(QWidget):
             )
 
         self.ctx.run(self.admin.allow_token(app, token.id), done, failed)
-
-    def create_token(self) -> None:
-        account = self.account.currentText() or "—"
-        answer = ask_create_token(self, account, self.ctx.core.secrets.persistent)
-        name, duration = answer if answer is not None else ("", "")
-        name = name.strip()
-        if not name:
-            return
-        self.status.setText(tr("Création du service token…"))
-
-        def done(_token: ServiceToken) -> None:
-            self.ctx.notify("success", tr("Service token créé et enregistré dans CMA."))
-            self.refresh()
-
-        def failed(error: BaseException) -> None:
-            if isinstance(error, CloudflareApiError):
-                self._error(error)
-                return
-            self._error(
-                RuntimeError(
-                    tr("Le token a été créé dans Cloudflare, mais son secret n'a pas pu être enregistré.")
-                    + f" ({error})"
-                )
-            )
-            self.refresh()
-
-        self.ctx.run(self.admin.create_service_token(name, duration=duration), done, failed)
-
-    # --- Échéance et secret des service tokens --------------------------------------------------------------
-
-    def selected_remote_token(self) -> RemoteServiceToken | None:
-        rows = self.remote_tokens.selectionModel().selectedRows()
-        item = self.remote_tokens.item(rows[0].row(), 0) if rows else None
-        token = item.data(TOKEN_ROLE) if item is not None else None
-        return token if isinstance(token, RemoteServiceToken) else None
-
-    def _local_token(self, remote: RemoteServiceToken | None) -> ServiceToken | None:
-        if remote is None:
-            return None
-        return next((t for t in self.ctx.config().tokens if t.client_id == remote.client_id), None)
-
-    def _update_token_actions(self) -> None:
-        remote = self.selected_remote_token()
-        self.extend_button.setEnabled(remote is not None)
-        self.rotate_button.setEnabled(self._local_token(remote) is not None)
-        self.delete_token_button.setEnabled(remote is not None)
-
-    def extend_selected_token(self) -> None:
-        remote = self.selected_remote_token()
-        if remote is None:
-            return
-        self.status.setText(tr("Prolongation du service token…"))
-
-        def done(expires_at: str) -> None:
-            self.ctx.notify(
-                "success",
-                tr("« {name} » expire désormais le {date}.").format(
-                    name=remote.name, date=expiry_label(expires_at)
-                ),
-            )
-            self.refresh()
-
-        self.ctx.run(self.admin.extend_token(remote), done, self._error)
-
-    def rotate_selected_token(self) -> None:
-        local = self._local_token(self.selected_remote_token())
-        if local is None:
-            return
-        users = [p.name for p in self.ctx.config().profiles_using_token(local.id)]
-        text = tr(
-            "Cloudflare crée un nouveau secret et révoque aussitôt l'ancien. Le nouveau secret est rangé dans le "
-            "coffre de CMA ; l'ID client ne change pas."
-        )
-        if users:
-            text += "\n\n" + tr("Les accès en cours qui l'utilisent sont à relancer : {names}.").format(
-                names=", ".join(users)
-            )
-        if not confirm(
-            self,
-            tr("Changer le secret de « {name} » ?").format(name=local.name),
-            text,
-            tr("Changer le secret"),
-        ):
-            return
-        self.status.setText(tr("Changement du secret…"))
-
-        def done(token: ServiceToken) -> None:
-            self.ctx.notify(
-                "success", tr("Nouveau secret de « {name} » enregistré dans CMA.").format(name=token.name)
-            )
-            self.refresh()
-
-        self.ctx.run(self.admin.rotate_token(local.id), done, self._error)

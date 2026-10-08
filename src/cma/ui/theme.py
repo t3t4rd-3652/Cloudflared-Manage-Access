@@ -366,6 +366,10 @@ QTreeView#CardTree::item, QTreeView#CardTree::item:hover, QTreeView#CardTree::it
     background: transparent; border: none; padding: 0; min-height: 0;
 }}
 QTreeView#CardTree::branch {{ background: transparent; border: none; }}
+QTableView#CardTable {{ background: transparent; border: none; outline: none; }}
+QTableView#CardTable::item, QTableView#CardTable::item:hover, QTableView#CardTable::item:selected {{
+    background: transparent; border: none; padding: 0; color: {t.text};
+}}
 QTreeView#EntryList {{
     background-color: {t.surface}; border: 1px solid {t.border}; border-radius: 8px; padding: 4px;
     outline: none;

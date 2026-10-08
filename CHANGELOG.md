@@ -2,6 +2,31 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Ajouté
+- **Règles d'ingress complètes** (menu d'un nom d'hôte ou d'un tunnel, vue Cloudflare) : ajouter une règle avec
+  chemin sur un nom d'hôte déjà publié (`/api` vers un autre service, même DNS, même protection Access), monter ou
+  descendre une règle, choisir la règle finale du tunnel (404, 503 ou un service).
+- **Réglages d'une application Access** (« Réglages… ») : nom, durée de session (de « expire aussitôt » à 1 mois),
+  visibilité dans le lanceur, redirection directe vers le fournisseur d'identité.
+- **Journal des accès** (« Journal des accès… ») : dernières connexions aux applications (utilisateur ou service
+  token, autorisé ou refusé, pays, IP), filtrables par application. Demande la permission « Access: Audit Logs :
+  Read » sur le jeton, que CMA nomme s'il manque.
+- **Surveillance même CMA fermé** (Windows, Paramètres › Général › Cloudflare) : une tâche planifiée lance
+  `cma tunnels --notify` toutes les 15 minutes et affiche une notification Windows si un tunnel tombe. Retirée à
+  la désinstallation.
+
+### Modifié
+- Applications Access et service tokens **en cartes**, comme les tunnels : type, nombre de politiques (« Aucune
+  politique » en alerte), échéance en couleur, « Dans CMA ».
+- La version portable lit sa phrase de passe mémorisée (DPAPI) en ligne de commande : `cma tunnels` n'a plus à la
+  demander.
+
+### Corrigé
+- Republier un nom d'hôte remplaçait sa règle d'ingress (et perdait ses options d'origine) au lieu de la mettre à
+  jour, et aurait retiré une règle avec chemin du même nom d'hôte.
+
 ## [2.6.0] - 2026-10-08
 
 ### Ajouté
