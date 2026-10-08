@@ -1,6 +1,6 @@
 # Plan du projet
 
-État au 2026-10-08, version **2.7.0** (P6 : administration Cloudflare plus fine) ; P7 réalisé, non publié. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+État au 2026-10-08, version **2.8.0** (P7 : DNS vérifié, journal d'audit, vue Cloudflare découpée). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -237,7 +237,7 @@ aux réglages d'application, sur les ressources jetables de la recette ; lancé 
 
 ### P7 — DNS vérifié, journal d'audit, vue Cloudflare découpée (2.8)
 
-**État au 2026-10-08 : les trois points sont réalisés** (section « Non publié » du CHANGELOG). Vérifié en lecture
+**État au 2026-10-08 : les trois points sont réalisés**, publiés en 2.8.0. Vérifié en lecture
 sur le vrai compte : 24 noms d'hôte, 1 zone (une seule lecture du DNS), tous corrects ; journal des 30 derniers
 jours lu avec le paramètre `since`. `cloud/view.py` passe de 1 408 lignes (avant P6) à 970.
 

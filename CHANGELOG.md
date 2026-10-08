@@ -2,7 +2,7 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
-## [Non publié]
+## [2.8.0] - 2026-10-08
 
 ### Ajouté
 - **DNS des noms d'hôte publiés vérifié** à chaque lecture du compte : pastille « DNS manquant », « DNS vers un
