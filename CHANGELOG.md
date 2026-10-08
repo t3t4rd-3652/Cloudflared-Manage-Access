@@ -2,6 +2,22 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Modifié
+- **Accès Cloudflare, Service tokens et Serveurs SSH redessinés** dans le style de la vue Cloudflare :
+  - liste en cartes : pictogramme du service teinté par l'état, état en toutes lettres, adresse ou Client ID ;
+    groupes en intertitres repliables (ils restent repliés d'une mise à jour à l'autre), objets sans groupe en tête ;
+  - en-tête de l'objet en carte : nom et état, nom public → adresse locale (ou `utilisateur@hôte`, ou Client ID),
+    contexte (service, authentification, groupe ; passage par Cloudflare ; profils qui utilisent le token) ;
+    les actions passent sous le texte quand la fenêtre est étroite ;
+  - formulaires en sections (Application, Accès, Authentification, Réseau…), champs liés côte à côte
+    (adresse et port, hôte et port SSH, groupe et type de service) ;
+  - échéance d'un service token en pastille, et en couleur dans la liste quand elle approche.
+
+### Corrigé
+- Erreur possible à la fermeture de la fenêtre quand un message (bandeau) venait de disparaître.
+
 ## [2.3.0] - 2026-10-07
 
 ### Ajouté

@@ -12,13 +12,11 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
-    QFormLayout,
     QHBoxLayout,
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QRadioButton,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -27,7 +25,7 @@ from cma.core.models import Config, SshAuthMode, SshProfile
 from cma.core.ssh.keys import KeySource, list_keys
 from cma.i18n import tr
 from cma.ui.dialogs.misc import KeysDialog, KnownHostsDialog
-from cma.ui.views.common import confirm
+from cma.ui.views.common import FormCard, card_page, confirm, side_by_side
 from cma.ui.widgets import (
     FieldError,
     add_shortcut,
@@ -35,7 +33,6 @@ from cma.ui.widgets import (
     label,
     primary_button,
     set_flag,
-    title,
     with_error,
 )
 
@@ -52,23 +49,12 @@ class SettingsTab(QWidget):
         self._loading = False
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea()
-        scroll.setObjectName("PageScroll")
-        scroll.setWidgetResizable(True)
-        host = QWidget()
-        host_layout = QHBoxLayout(host)
-        host_layout.setContentsMargins(0, 12, 16, 12)
-        column = QWidget()
-        column.setMaximumWidth(720)
-        layout = QVBoxLayout(column)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        scroll, layout = card_page()
         self.errors = {
             name: FieldError() for name in ("name", "host", "port", "user", "key_path", "via", "jump")
         }
-        form = QFormLayout()
-        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        server = FormCard(tr("Serveur"))
+        form = server.form
         self.name = QLineEdit()
         self.group = QComboBox()
         self.group.setEditable(True)
@@ -81,18 +67,24 @@ class SettingsTab(QWidget):
         self.port = QLineEdit()
         self.port.setMaximumWidth(120)
         self.user = QLineEdit()
-        form.addRow(tr("Nom"), with_error(self.name, self.errors["name"]))
-        form.addRow(tr("Groupe"), self.group)
-        form.addRow(self.favorite)
-        form.addRow(tr("Hôte"), with_error(self.host, self.errors["host"]))
-        form.addRow(tr("Port SSH"), with_error(self.port, self.errors["port"]))
+        form.addRow(
+            side_by_side(
+                (tr("Nom"), with_error(self.name, self.errors["name"]), 3),
+                (tr("Groupe"), self.group, 2),
+            )
+        )
+        form.addRow(
+            side_by_side(
+                (tr("Hôte"), with_error(self.host, self.errors["host"]), 4),
+                (tr("Port SSH"), with_error(self.port, self.errors["port"]), 1),
+            )
+        )
         form.addRow(tr("Utilisateur"), with_error(self.user, self.errors["user"]))
-        layout.addLayout(form)
+        form.addRow(self.favorite)
+        layout.addWidget(server)
 
-        layout.addWidget(title(tr("Authentification"), "SectionTitle"))
-        auth_form = QFormLayout()
-        auth_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
-        auth_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        auth_card = FormCard(tr("Authentification"))
+        auth_form = auth_card.form
         self.auth_password = QRadioButton(tr("Mot de passe"))
         self.auth_key = QRadioButton(tr("Clé SSH"))
         self.auth_agent = QRadioButton(tr("Agent SSH"))
@@ -120,21 +112,15 @@ class SettingsTab(QWidget):
         key_row.addWidget(manage)
         key_row.addWidget(self.deploy)
         auth_form.addRow(tr("Clé"), with_error(key_host, self.errors["key_path"]))
-        layout.addLayout(auth_form)
+        layout.addWidget(auth_card)
 
-        layout.addWidget(title(tr("Passage"), "SectionTitle"))
-        layout.addWidget(
-            label(
-                tr(
-                    "Pour un serveur SSH publié par Cloudflare Access : le tunnel du profil choisi est ouvert d'abord, puis le SSH passe par lui."
-                ),
-                "muted",
-                wrap=True,
-            )
+        passage = FormCard(
+            tr("Passage"),
+            tr(
+                "Pour un serveur SSH publié par Cloudflare Access : le tunnel du profil choisi est ouvert d'abord, puis le SSH passe par lui."
+            ),
         )
-        via_form = QFormLayout()
-        via_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
-        via_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        via_form = passage.form
         self.via = QComboBox()
         via_form.addRow(tr("Profil Cloudflare"), with_error(self.via, self.errors["via"]))
         self.jump = QComboBox()
@@ -144,19 +130,18 @@ class SettingsTab(QWidget):
             )
         )
         via_form.addRow(tr("Rebond SSH (ProxyJump)"), with_error(self.jump, self.errors["jump"]))
-        layout.addLayout(via_form)
-        layout.addWidget(title(tr("Notes"), "SectionTitle"))
+        layout.addWidget(passage)
+        notes = FormCard(tr("Notes"))
         self.notes = QPlainTextEdit()
         self.notes.setAccessibleName(tr("Notes"))
         self.notes.setMinimumHeight(80)
         self.notes.setMaximumHeight(120)
-        layout.addWidget(self.notes)
+        notes.form.addRow(self.notes)
         known = button(tr("Empreintes des serveurs…"), "fingerprint")
         known.clicked.connect(lambda: KnownHostsDialog(self, self.panel.ctx).exec())
-        layout.addWidget(known, 0, Qt.AlignmentFlag.AlignLeft)
+        notes.body.addWidget(known, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(notes)
         layout.addStretch()
-        host_layout.addWidget(column, 1)
-        scroll.setWidget(host)
         outer.addWidget(scroll, 1)
         footer = QHBoxLayout()
         footer.setContentsMargins(0, 8, 16, 0)

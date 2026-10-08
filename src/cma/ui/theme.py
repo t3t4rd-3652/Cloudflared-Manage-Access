@@ -256,7 +256,8 @@ def stylesheet(t: Tokens, ui_font: str = "Segoe UI", mono: str = "Cascadia Mono"
         f'QFrame[role="banner"][status="{name}"] QLabel {{ color: {t.text}; background-color: transparent; }}\n'
         f'QFrame[role="banner"][status="{name}"] QLabel[role="bannerTitle"] {{ color: {fg}; }}\n'
         f'QLabel[role="stateText"][status="{name}"] {{ color: {fg}; font-weight: 600; }}\n'
-        f'QFrame[role="session"][status="{name}"] QFrame[role="marker"] {{ background-color: {fg}; }}'
+        f'QFrame[role="session"][status="{name}"] QFrame[role="marker"] {{ background-color: {fg}; }}\n'
+        f'QLabel[role="iconTile"][status="{name}"] {{ background-color: {bg}; }}'
         for name, (fg, bg) in {
             "success": (t.success, t.success_bg),
             "warning": (t.warning, t.warning_bg),
@@ -389,6 +390,15 @@ QTreeView#CardTree::item, QTreeView#CardTree::item:hover, QTreeView#CardTree::it
     background: transparent; border: none; padding: 0; min-height: 0;
 }}
 QTreeView#CardTree::branch {{ background: transparent; border: none; }}
+QTreeView#EntryList {{
+    background-color: {t.surface}; border: 1px solid {t.border}; border-radius: 8px; padding: 4px;
+    outline: none;
+}}
+QTreeView#EntryList::item, QTreeView#EntryList::item:hover, QTreeView#EntryList::item:selected {{
+    background: transparent; border: none; padding: 0; min-height: 0;
+}}
+QTreeView#EntryList::branch {{ background: transparent; border: none; }}
+QLabel[role="iconTile"] {{ border-radius: 12px; background-color: {t.selected}; }}
 QListView#Navigation {{ background-color: transparent; border: none; outline: none; }}
 QListView#Navigation::item {{
     min-height: 36px; padding: 2px 10px; margin: 1px 8px; border-radius: 6px;

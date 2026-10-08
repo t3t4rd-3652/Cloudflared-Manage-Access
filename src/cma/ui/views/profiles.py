@@ -13,20 +13,17 @@ from collections.abc import Callable
 from typing import Any
 
 from pydantic import ValidationError
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
-    QFormLayout,
     QFrame,
     QHBoxLayout,
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QRadioButton,
-    QScrollArea,
     QSplitter,
     QStackedWidget,
     QTabWidget,
@@ -42,13 +39,24 @@ from cma.ui.dialogs.diagnose import open_diagnosis
 from cma.ui.dialogs.misc import show_text
 from cma.ui.dialogs.transfer import run_export, run_import
 from cma.ui.icons import set_icon
-from cma.ui.theme import current_tokens, state_colors
-from cma.ui.views.common import Action, ListEntry, ProfileList, ask_unsaved, confirm
+from cma.ui.theme import STATUS_OF_STATE
+from cma.ui.views.common import (
+    SERVICE_ICONS,
+    Action,
+    FormCard,
+    ListEntry,
+    ObjectHeader,
+    ProfileList,
+    ask_unsaved,
+    card_page,
+    confirm,
+    page_header,
+    side_by_side,
+)
 from cma.ui.widgets import (
     EmptyState,
     FieldError,
     PortField,
-    StatusPill,
     add_shortcut,
     button,
     label,
@@ -56,7 +64,6 @@ from cma.ui.widgets import (
     set_flag,
     set_role,
     set_status,
-    title,
     with_error,
 )
 
@@ -85,30 +92,6 @@ SECTION_OF_FIELD = {
 }
 
 
-def section_page(max_width: int = 720) -> tuple[QScrollArea, QFormLayout, QVBoxLayout]:
-    """Page d'onglet défilante : formulaire à libellés au-dessus des champs, largeur bornée (§4.0, éditeur E)."""
-    scroll = QScrollArea()
-    scroll.setObjectName("PageScroll")
-    scroll.setWidgetResizable(True)
-    host = QWidget()
-    outer = QHBoxLayout(host)
-    outer.setContentsMargins(16, 16, 16, 16)
-    column = QWidget()
-    column.setMaximumWidth(max_width)
-    body = QVBoxLayout(column)
-    body.setContentsMargins(0, 0, 0, 0)
-    body.setSpacing(8)
-    form = QFormLayout()
-    form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
-    form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-    form.setVerticalSpacing(6)
-    body.addLayout(form)
-    outer.addWidget(column, 1)
-    outer.addStretch(0)
-    scroll.setWidget(host)
-    return scroll, form, body
-
-
 class CloudflareEditor(QWidget):
     def __init__(self, ctx: GuiContext, view: CloudflareProfilesView) -> None:
         super().__init__()
@@ -121,15 +104,12 @@ class CloudflareEditor(QWidget):
         self.errors = {name: FieldError() for name in FIELDS}
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 0, 0, 0)
-        outer.setSpacing(8)
+        outer.setSpacing(10)
 
-        # En-tête fixe : nom, état, actions.
-        header = QHBoxLayout()
-        header.setSpacing(8)
-        self.heading = title("", "ObjectTitle")
-        self.pill = StatusPill()
-        header.addWidget(self.heading, 1)
-        header.addWidget(self.pill, 0, Qt.AlignmentFlag.AlignVCenter)
+        # En-tête fixe, en carte : service, nom, état, adresse publiée → adresse locale, actions.
+        self.header = ObjectHeader("cloud")
+        self.heading = self.header.title
+        self.pill = self.header.pill
         self.test_button = button(
             tr("Tester"), "shield-check", tooltip=tr("Vérifier que Cloudflare Access accepte le token")
         )
@@ -147,8 +127,8 @@ class CloudflareEditor(QWidget):
         self.connect_button = primary_button(tr("Connecter"), "player-play-filled")
         self.connect_button.clicked.connect(self._toggle_connection)
         for widget in (self.test_button, self.login_button, self.ssh_config_button, self.connect_button):
-            header.addWidget(widget, 0, Qt.AlignmentFlag.AlignTop)
-        outer.addLayout(header)
+            self.header.add_action(widget)
+        outer.addWidget(self.header)
 
         self.session_hint = QFrame()
         self.session_hint.setProperty("role", "banner")
@@ -167,8 +147,10 @@ class CloudflareEditor(QWidget):
         self.tabs.setProperty("role", "plain")
         outer.addWidget(self.tabs, 1)
 
-        # Connexion
-        page, form, body = section_page()
+        # Connexion : l'application (nom, groupe, service), puis l'accès (nom public → adresse locale).
+        page, body = card_page()
+        application = FormCard(tr("Application"))
+        form = application.form
         self.name = QLineEdit()
         self.group = QComboBox()
         self.group.setEditable(True)
@@ -187,30 +169,35 @@ class CloudflareEditor(QWidget):
         self.local_host.setPlaceholderText("127.0.0.1")
         self.local_port = PortField(self._suggest_port, lambda: self.local_host.text().strip() or "127.0.0.1")
         form.addRow(tr("Nom"), with_error(self.name, self.errors["name"]))
-        form.addRow(tr("Groupe"), with_error(self.group, self.errors["group"]))
-        form.addRow(self.favorite)
-        form.addRow(tr("Type de service"), self.service)
+        form.addRow(
+            side_by_side(
+                (tr("Groupe"), with_error(self.group, self.errors["group"]), 3),
+                (tr("Type de service"), self.service, 2),
+            )
+        )
         self.service_user_row = with_error(self.service_user, self.errors["service_user"])
         form.addRow(tr("Utilisateur"), self.service_user_row)
-        hostname_help = label(
-            tr("Le nom public protégé par Cloudflare Access, sans protocole ni chemin."), "muted", wrap=True
-        )
-        hostname_box = QWidget()
-        hostname_layout = QVBoxLayout(hostname_box)
-        hostname_layout.setContentsMargins(0, 0, 0, 0)
-        hostname_layout.setSpacing(2)
-        hostname_layout.addWidget(with_error(self.hostname, self.errors["hostname"]))
-        hostname_layout.addWidget(hostname_help)
-        form.addRow(tr("Nom d'hôte"), hostname_box)
-        self.hostname.setAccessibleDescription(hostname_help.text())
-        form.addRow(tr("Adresse locale"), with_error(self.local_host, self.errors["local_host"]))
-        form.addRow(tr("Port local"), with_error(self.local_port, self.errors["local_port"]))
+        form.addRow(self.favorite)
         self.general_form = form
+        body.addWidget(application)
+        hostname_help = tr("Le nom public protégé par Cloudflare Access, sans protocole ni chemin.")
+        access = FormCard(tr("Accès"), hostname_help)
+        access.form.addRow(tr("Nom d'hôte"), with_error(self.hostname, self.errors["hostname"]))
+        self.hostname.setAccessibleDescription(hostname_help)
+        access.form.addRow(
+            side_by_side(
+                (tr("Adresse locale"), with_error(self.local_host, self.errors["local_host"]), 2),
+                (tr("Port local"), with_error(self.local_port, self.errors["local_port"]), 3),
+            )
+        )
+        body.addWidget(access)
         body.addStretch()
         self.tabs.addTab(page, tr("Connexion"))
 
         # Authentification
-        page, auth, body = section_page()
+        page, body = card_page()
+        auth_card = FormCard(tr("Authentification"))
+        auth = auth_card.form
         self.auth_browser = QRadioButton(tr("Navigateur"))
         self.auth_token = QRadioButton(tr("Service token"))
         self.auth_group = QButtonGroup(self)
@@ -252,12 +239,14 @@ class CloudflareEditor(QWidget):
         auth.addRow(tr("Service token"), self.token_host)
         self.token_help = label(tr("Le secret reste dans le coffre de cet ordinateur."), "muted", wrap=True)
         auth.addRow(self.token_help)
+        body.addWidget(auth_card)
         body.addStretch()
         self.tabs.addTab(page, tr("Authentification"))
 
         # Avancé
-        page, network, body = section_page()
-        body.insertWidget(0, title(tr("Réseau"), "SectionTitle"))
+        page, body = card_page()
+        network_card = FormCard(tr("Réseau"))
+        network = network_card.form
         self.proxy = QLineEdit()
         self.proxy.setPlaceholderText("proxy.entreprise.fr:3128")
         self.headers = QPlainTextEdit()
@@ -267,16 +256,19 @@ class CloudflareEditor(QWidget):
         network.addRow(label(tr("Facultatif. hôte:port ou http://hôte:port."), "muted", wrap=True))
         network.addRow(tr("En-têtes"), with_error(self.headers, self.errors["headers"]))
         network.addRow(label(tr("Un en-tête par ligne : Nom: valeur."), "muted", wrap=True))
-        body.addWidget(title(tr("Comportement"), "SectionTitle"))
+        body.addWidget(network_card)
+        behaviour = FormCard(tr("Comportement"))
         self.auto_start = QCheckBox(tr("Démarrer à l'ouverture de CMA"))
         self.auto_reconnect = QCheckBox(tr("Reconnecter si cloudflared s'arrête"))
-        body.addWidget(self.auto_start)
-        body.addWidget(self.auto_reconnect)
-        body.addWidget(title(tr("Notes"), "SectionTitle"))
+        behaviour.form.addRow(self.auto_start)
+        behaviour.form.addRow(self.auto_reconnect)
+        body.addWidget(behaviour)
+        notes = FormCard(tr("Notes"))
         self.notes = QPlainTextEdit()
         self.notes.setAccessibleName(tr("Notes"))
         self.notes.setMinimumHeight(90)
-        body.addWidget(self.notes)
+        notes.form.addRow(self.notes)
+        body.addWidget(notes)
         body.addStretch()
         self.tabs.addTab(page, tr("Avancé"))
         self._tab_titles = [tr("Connexion"), tr("Authentification"), tr("Avancé")]
@@ -513,9 +505,26 @@ class CloudflareEditor(QWidget):
             "text" if active else "on_accent",
         )
         self.pill.set_state(self.session.state if self.session is not None else SessionState.STOPPED)
+        self._update_header(active)
         if not active:
             self._saved_while_active = False
         self.session_hint.setVisible(active and self._saved_while_active)
+
+    def _update_header(self, active: bool) -> None:
+        """Pictogramme du service teinté par l'état, et ce qui est enregistré : nom public → adresse locale."""
+        profile = self.profile
+        if profile is None:
+            return
+        tone = STATUS_OF_STATE[self.session.state] if active and self.session is not None else None
+        self.header.set_icon(SERVICE_ICONS.get(profile.service_type, "cloud"), tone)
+        port = self.session.local_port if active and self.session is not None else profile.local_port
+        self.header.subtitle.setText(f"{profile.hostname or '—'}  →  {profile.local_host}:{port or '?'}")
+        token = self.ctx.config().token(profile.token_id) if profile.auth == AuthMode.SERVICE_TOKEN else None
+        context = [profile.service_type.label]
+        context.append(f"{tr('Service token')} : {token.name}" if token is not None else tr("Navigateur"))
+        if profile.group:
+            context.append(f"{tr('Groupe')} : {profile.group}")
+        self.header.context.setText(" · ".join(context))
 
     def set_session(self, info: SessionInfo | None) -> None:
         self.session = info
@@ -664,8 +673,12 @@ class CloudflareProfilesView(QWidget):
         self._current: str | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 16)
-        layout.setSpacing(12)
-        layout.addWidget(title(tr("Accès Cloudflare")))
+        layout.setSpacing(4)
+        page_header(
+            layout,
+            tr("Accès Cloudflare"),
+            tr("Applications protégées par Cloudflare Access, ouvertes sur un port de ce poste."),
+        )
         splitter = QSplitter()
         splitter.setHandleWidth(8)
         splitter.setChildrenCollapsible(False)
@@ -705,7 +718,7 @@ class CloudflareProfilesView(QWidget):
         self.stack.addWidget(self.editor)
         splitter.addWidget(self.stack)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([248, 767])
+        splitter.setSizes([280, 760])
         layout.addWidget(splitter, 1)
         add_shortcut(self, QKeySequence.StandardKey.New, self.new_profile)
         add_shortcut(self, QKeySequence.StandardKey.Find, self.list.focus_search)
@@ -763,21 +776,20 @@ class CloudflareProfilesView(QWidget):
 
     def _entries(self) -> list[ListEntry]:
         config = self.ctx.config()
-        tokens = current_tokens()
         entries: list[ListEntry] = []
         for profile in config.cloudflare_profiles:
             session = self._session_for(profile.id)
             active = session is not None and session.state.active
-            color = state_colors(session.state, tokens)[0] if session is not None and active else None
             entries.append(
                 ListEntry(
                     profile.id,
                     profile.name,
                     profile.group,
                     profile.favorite,
-                    color,
-                    profile.hostname,
+                    STATUS_OF_STATE[session.state] if session is not None and active else None,
+                    profile.hostname or "—",
                     session.state.label if session is not None and active else "",
+                    SERVICE_ICONS.get(profile.service_type, "cloud"),
                 )
             )
         return entries

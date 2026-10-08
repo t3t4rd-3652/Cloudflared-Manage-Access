@@ -8,13 +8,11 @@ from pydantic import ValidationError
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
-    QFormLayout,
     QHBoxLayout,
     QLineEdit,
     QListWidget,
     QPlainTextEdit,
     QPushButton,
-    QScrollArea,
     QSplitter,
     QStackedWidget,
     QVBoxLayout,
@@ -27,7 +25,16 @@ from cma.i18n import tr
 from cma.ui.context import GuiContext
 from cma.ui.dialogs.transfer import run_export, run_import
 from cma.ui.format import short_datetime, token_expiry
-from cma.ui.views.common import ListEntry, ProfileList, ask_unsaved, confirm
+from cma.ui.views.common import (
+    FormCard,
+    ListEntry,
+    ObjectHeader,
+    ProfileList,
+    ask_unsaved,
+    card_page,
+    confirm,
+    page_header,
+)
 from cma.ui.widgets import (
     EmptyState,
     FieldError,
@@ -38,7 +45,6 @@ from cma.ui.widgets import (
     label,
     primary_button,
     set_role,
-    title,
     with_error,
 )
 
@@ -53,27 +59,16 @@ class TokenEditor(QWidget):
         self._loading = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 0, 0, 0)
-        layout.setSpacing(8)
-        header = QHBoxLayout()
-        self.heading = title("", "ObjectTitle")
-        header.addWidget(self.heading, 1)
-        layout.addLayout(header)
-        self.vault_text = label("", "muted", wrap=True)
-        layout.addWidget(self.vault_text)
-        scroll = QScrollArea()
-        scroll.setObjectName("PageScroll")
-        scroll.setWidgetResizable(True)
-        host = QWidget()
-        host_layout = QHBoxLayout(host)
-        host_layout.setContentsMargins(0, 8, 16, 8)
-        column = QWidget()
-        column.setMaximumWidth(720)
-        body = QVBoxLayout(column)
-        body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(8)
-        form = QFormLayout()
-        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        layout.setSpacing(10)
+        # En-tête en carte : nom, échéance, Client ID ; le contexte dit où est le secret.
+        self.header = ObjectHeader("key")
+        self.heading = self.header.title
+        self.header.pill.hide()
+        layout.addWidget(self.header)
+        scroll, body = card_page()
+        identity = FormCard(tr("Identifiants"))
+        self.vault_text = identity.description
+        form = identity.form
         self.name_error = FieldError()
         self.client_error = FieldError()
         self.name = QLineEdit()
@@ -91,16 +86,15 @@ class TokenEditor(QWidget):
         form.addRow(tr("Secret"), self.secret)
         form.addRow(self.created)
         form.addRow(self.expiry)
-        form.addRow(tr("Notes"), self.notes)
-        body.addLayout(form)
-        self.users_title = title(tr("Profils qui l'utilisent"), "SectionTitle")
-        body.addWidget(self.users_title)
+        body.addWidget(identity)
+        usage = FormCard(tr("Profils qui l'utilisent"))
+        self.users_title = usage.heading
         self.users = QListWidget()
         self.users.setAccessibleName(tr("Profils qui l'utilisent"))
         self.users.setMaximumHeight(180)
         self.users.itemDoubleClicked.connect(lambda item: self._open_usage(item))
         self.users.itemActivated.connect(lambda item: self._open_usage(item))
-        body.addWidget(self.users)
+        usage.form.addRow(self.users)
         self.open_usage = button(tr("Ouvrir le profil"), "external-link")
         self.open_usage.clicked.connect(lambda: self._open_usage(self.users.currentItem()))
         self.users.currentItemChanged.connect(
@@ -108,10 +102,13 @@ class TokenEditor(QWidget):
                 current is not None and bool(current.data(256))
             )
         )
-        body.addWidget(self.open_usage, 0, Qt.AlignmentFlag.AlignLeft)
+        usage.body.addWidget(self.open_usage, 0, Qt.AlignmentFlag.AlignLeft)
+        body.addWidget(usage)
+        notes = FormCard(tr("Notes"))
+        notes.form.addRow(self.notes)
+        self.notes.setAccessibleName(tr("Notes"))
+        body.addWidget(notes)
         body.addStretch()
-        host_layout.addWidget(column, 1)
-        scroll.setWidget(host)
         layout.addWidget(scroll, 1)
         footer = QHBoxLayout()
         self.dirty_label = label("", "muted")
@@ -163,6 +160,12 @@ class TokenEditor(QWidget):
         text, role = token_expiry(token.expires_at)
         self.expiry.setText(text)
         set_role(self.expiry, role)
+        tone = {"error": "danger", "warning": "warning"}.get(role)
+        self.header.set_tone(tone)
+        self.header.subtitle.setText(token.client_id)
+        self.header.pill.setVisible(token.expires_at is not None)
+        if token.expires_at is not None:
+            self.header.pill.set_status(text, tone or "success", "!" if tone else "✓")
         self.secret.set_subject(token.name)
         self.vault_text.setText(self._vault_description())
         clear_items(self.users)
@@ -179,6 +182,9 @@ class TokenEditor(QWidget):
         else:
             self.users_title.setText(tr("Utilisé par {n} profils").format(n=count))
         self.open_usage.setEnabled(False)
+        usage = self.users_title.text() if count else tr("Aucun profil n'utilise ce token.")
+        self.header.context.setText(usage)
+        self.header.arrange()
         self.name_error.show_error(None)
         self.client_error.show_error(None)
         self._loading = False
@@ -247,6 +253,7 @@ class TokenEditor(QWidget):
         self._secret_loaded = secret
         self.token = candidate
         self.heading.setText(candidate.name)
+        self.header.subtitle.setText(candidate.client_id)
         self._changed()
         self.ctx.notify("success", tr("Token « {name} » enregistré.").format(name=candidate.name))
         return True
@@ -259,9 +266,11 @@ class TokensView(QWidget):
         self._current: str | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 16)
-        layout.addWidget(title(tr("Service tokens")))
-        layout.addWidget(label(tr("Identifiants enregistrés sur cet ordinateur"), "muted"))
+        layout.setSpacing(4)
+        page_header(layout, tr("Service tokens"), tr("Identifiants enregistrés sur cet ordinateur"))
         splitter = QSplitter()
+        splitter.setHandleWidth(8)
+        splitter.setChildrenCollapsible(False)
         self.list = ProfileList(
             tr("Rechercher un token"),
             [
@@ -295,21 +304,28 @@ class TokensView(QWidget):
         self.stack.addWidget(self.editor)
         splitter.addWidget(self.stack)
         splitter.setStretchFactor(1, 1)
+        splitter.setSizes([280, 760])
         layout.addWidget(splitter, 1)
         ctx.bridge.config_changed.connect(self.reload)
         self.reload()
 
     def reload(self) -> None:
         config = self.ctx.config()
-        entries = [
-            ListEntry(
-                t.id,
-                t.name,
-                detail=f"{t.client_id} · "
-                + tr("{n} profil(s)").format(n=len(config.profiles_using_token(t.id))),
+        entries = []
+        for t in config.tokens:
+            text, role = token_expiry(t.expires_at)
+            tone = {"error": "danger", "warning": "warning"}.get(role)
+            entries.append(
+                ListEntry(
+                    t.id,
+                    t.name,
+                    tone=tone,
+                    detail=f"{t.client_id} · "
+                    + tr("{n} profil(s)").format(n=len(config.profiles_using_token(t.id))),
+                    status_text=text if tone else "",
+                    icon="key",
+                )
             )
-            for t in config.tokens
-        ]
         self.list.set_entries(entries)
         if self._current is not None:
             token = config.token(self._current)

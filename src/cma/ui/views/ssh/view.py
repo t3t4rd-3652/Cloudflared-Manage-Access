@@ -11,10 +11,8 @@ from __future__ import annotations
 import contextlib
 from datetime import datetime
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
-    QHBoxLayout,
     QSplitter,
     QStackedWidget,
     QTabWidget,
@@ -32,21 +30,25 @@ from cma.ui.dialogs.misc import KeysDialog
 from cma.ui.dialogs.redirect import RedirectDialog
 from cma.ui.dialogs.transfer import run_export, run_import
 from cma.ui.icons import set_icon
-from cma.ui.theme import current_tokens
-from cma.ui.views.common import Action, ListEntry, ProfileList, ask_unsaved, confirm
+from cma.ui.views.common import (
+    Action,
+    ListEntry,
+    ObjectHeader,
+    ProfileList,
+    ask_unsaved,
+    confirm,
+    page_header,
+)
 from cma.ui.views.ssh.files_tab import FilesTab
 from cma.ui.views.ssh.forwards_tab import ForwardsTab
 from cma.ui.views.ssh.ports_tab import PortsTab
 from cma.ui.views.ssh.settings_tab import SettingsTab
 from cma.ui.widgets import (
     EmptyState,
-    StatusPill,
     add_shortcut,
     button,
-    label,
     primary_button,
     set_role,
-    title,
 )
 
 TABS = ("ports", "forwards", "files", "config")
@@ -60,28 +62,17 @@ class SshProfilePanel(QWidget):
         self.profile: SshProfile | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 0, 0, 0)
-        layout.setSpacing(8)
-        header = QHBoxLayout()
-        header.setSpacing(12)
-        names = QVBoxLayout()
-        names.setSpacing(2)
-        first = QHBoxLayout()
-        first.setSpacing(8)
-        self.heading = title("", "ObjectTitle")
-        self.pill = StatusPill()
-        first.addWidget(self.heading)
-        first.addWidget(self.pill, 0, Qt.AlignmentFlag.AlignVCenter)
-        first.addStretch()
-        names.addLayout(first)
-        self.target = label("", "mono", selectable=True)
-        self.route = label("", "muted")
-        names.addWidget(self.target)
-        names.addWidget(self.route)
-        header.addLayout(names, 1)
+        layout.setSpacing(10)
+        # En-tête en carte : la liaison SSH du serveur seulement (les redirections ont chacune leur état).
+        self.header = ObjectHeader("server")
+        self.heading = self.header.title
+        self.pill = self.header.pill
+        self.target = self.header.subtitle
+        self.route = self.header.context
         self.connect_button = primary_button(tr("Connecter"), "plug-connected")
         self.connect_button.clicked.connect(self._toggle_connection)
-        header.addWidget(self.connect_button, 0, Qt.AlignmentFlag.AlignTop)
-        layout.addLayout(header)
+        self.header.add_action(self.connect_button)
+        layout.addWidget(self.header)
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.tabs.setProperty("role", "plain")
@@ -142,6 +133,7 @@ class SshProfilePanel(QWidget):
         }
         text, status, symbol = labels.get(state.state if state else "", (tr("Déconnecté"), "neutral", "■"))
         self.pill.set_status(text, status, symbol)
+        self.header.set_tone(None if status == "neutral" else status)
         self.pill.setToolTip(state.message if state and state.message else "")
         connected = state is not None and state.state in ("connected", "connecting")
         self.connect_button.setText(tr("Déconnecter") if connected else tr("Connecter"))
@@ -224,15 +216,13 @@ class SshView(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 16)
         layout.setSpacing(4)
-        layout.addWidget(title(tr("Serveurs SSH")))
-        layout.addWidget(
-            label(
-                tr("Découvrez les ports d'un serveur et ouvrez-les sur ce poste par des redirections."),
-                "muted",
-            )
+        page_header(
+            layout,
+            tr("Serveurs SSH"),
+            tr("Découvrez les ports d'un serveur et ouvrez-les sur ce poste par des redirections."),
         )
-        layout.addSpacing(12)
         splitter = QSplitter()
+        splitter.setHandleWidth(8)
         splitter.setChildrenCollapsible(False)
         self.list = ProfileList(
             tr("Rechercher un serveur (Ctrl+F)"),
@@ -273,7 +263,7 @@ class SshView(QWidget):
         self.stack.addWidget(self.panel)
         splitter.addWidget(self.stack)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([248, 760])
+        splitter.setSizes([280, 760])
         layout.addWidget(splitter, 1)
         add_shortcut(self, QKeySequence.StandardKey.New, self.new_profile)
         add_shortcut(self, QKeySequence.StandardKey.Find, self.list.focus_search)
@@ -284,26 +274,29 @@ class SshView(QWidget):
         self.reload()
 
     def _entries(self) -> list[ListEntry]:
-        tokens = current_tokens()
         texts = {
             "connected": tr("connecté"),
             "connecting": tr("connexion en cours"),
             "error": tr("en erreur"),
         }
+        tones = {"connected": "success", "connecting": "info", "error": "danger"}
+        config = self.ctx.config()
         entries = []
-        for profile in self.ctx.config().ssh_profiles:
+        for profile in config.ssh_profiles:
             state = self.ssh_states.get(profile.id)
             key = state.state if state else ""
-            color = {"connected": tokens.success, "connecting": tokens.info, "error": tokens.danger}.get(key)
+            via = config.cloudflare_profile(profile.via_cloudflare_profile)
+            host = via.hostname if via is not None and not profile.host else profile.host
             entries.append(
                 ListEntry(
                     profile.id,
                     profile.name,
                     profile.group,
                     profile.favorite,
-                    color,
-                    f"{profile.user}@{profile.host}",
+                    tones.get(key),
+                    f"{profile.user or '?'}@{host or '?'}",
                     texts.get(key, ""),
+                    "cloud" if via is not None else "server",
                 )
             )
         return entries

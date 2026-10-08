@@ -337,7 +337,12 @@ class BannerStack(QWidget):
         return banner
 
     def _update_visibility(self) -> None:
-        QTimer.singleShot(0, lambda: self.setVisible(bool(self.banners())))
+        # Le minuteur est rattaché à la zone : détruite entre-temps (fermeture de la fenêtre), il ne part pas.
+        # Une lambda seule partait quand même et lisait une mise en page déjà libérée.
+        QTimer.singleShot(0, self, self._refresh_visibility)
+
+    def _refresh_visibility(self) -> None:
+        self.setVisible(bool(self.banners()))
 
 
 class EmptyState(QFrame):

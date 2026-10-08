@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from cma.core.events import SshConnectionChanged
-from cma.core.models import CloudflareProfile, Config, SavedForward, ServiceType, SshProfile
+from cma.core.models import CloudflareProfile, Config, SavedForward, SshProfile
 from cma.core.sessions import SessionInfo, SessionKind, SessionState
 from cma.i18n import tr
 from cma.ui.actions import QuickAction, quick_actions, run_action
@@ -41,6 +41,7 @@ from cma.ui.dialogs.workspaces import WorkspacesDialog, launch_favorites, launch
 from cma.ui.format import human_bytes, since
 from cma.ui.icons import set_glyph, set_icon
 from cma.ui.theme import ICON_OF_STATE, STATUS_OF_STATE, SYMBOL_OF_STATE
+from cma.ui.views.common import SERVICE_ICONS
 from cma.ui.widgets import (
     EmptyState,
     StatusPill,
@@ -59,17 +60,6 @@ from cma.ui.widgets import (
 RUNNING = (SessionState.STARTING, SessionState.LISTENING, SessionState.DEGRADED, SessionState.RECONNECTING)
 TO_CHECK = (SessionState.DEGRADED, SessionState.RECONNECTING, SessionState.ERROR)
 MAX_ATTEMPTS = 10
-
-SERVICE_ICONS = {
-    ServiceType.SSH: "terminal-2",
-    ServiceType.RDP: "device-desktop",
-    ServiceType.MONGODB: "database",
-    ServiceType.POSTGRESQL: "database",
-    ServiceType.MYSQL: "database",
-    ServiceType.REDIS: "database",
-    ServiceType.HTTP: "world",
-    ServiceType.HTTPS: "world",
-}
 
 
 def plural(n: int, one: str, many: str) -> str:

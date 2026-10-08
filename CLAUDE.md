@@ -96,6 +96,10 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   `config.json`, masqués dans les journaux. Coffre système (keyring) ou fichier chiffré en mode portable.
 - **Démarrage** : asyncssh et cryptography sont importés à la demande (`cma.core.ssh._lazy`) puis préchargés après
   l'affichage ; le budget CI est de 6 s.
+- **Listes en cartes des vues liste–détail** (`EntryTree`, `EntryDelegate`, `ObjectHeader`, `FormCard` dans
+  `ui/views/common.py`) : même principe que les tunnels, le délégué lit le `ListEntry` rangé dans `ENTRY_ROLE` ;
+  le texte des éléments (`★ nom`, `Groupe (2)`) reste celui d'avant pour l'accessibilité et les tests. Les champs
+  côte à côte (`side_by_side`) sont de petites `QFormLayout` : `apply_accessible_names` les nomme sans aide.
 - **Tunnels en cartes** (`TunnelTree` et `TunnelDelegate` dans `ui/views/cloud/cards.py`) : le `QTreeWidget` reste le
   modèle de données et de sélection (menu contextuel, import, retrait et tests s'appuient dessus) ; seul le rendu
   change. Les colonnes 1 et 2 sont masquées mais gardent service et état pour l'accessibilité et les tests.
@@ -138,6 +142,9 @@ Qt et PySide :
 - Dans un délégué, l'index peut être un `QPersistentModelIndex` sans `siblingAtColumn` pour pyright :
   passer par `index.model().index(row, column, index.parent())`.
 - `tr()` exige un texte littéral (le test d'i18n extrait les chaînes par analyse statique).
+- Un `QLabel` à retour à la ligne annonce une largeur minimale élevée : dans un en-tête, il bloque le rétrécissement
+  de toute la fenêtre. Lui donner une petite `setMinimumWidth` explicite.
+- Un attribut `self.actions` sur un QWidget masque la méthode `actions()` de Qt (pyright le signale).
 
 Tests et CI :
 
