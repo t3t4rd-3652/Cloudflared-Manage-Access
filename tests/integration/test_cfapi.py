@@ -653,3 +653,43 @@ async def test_access_requests_log(cf, api, admin):
     cf.state.audit_allowed = True
     await admin.connect(TOKEN)
     assert len(await admin.access_requests()) == 2
+
+
+async def test_overview_checks_and_fixes_the_dns(cf, admin):
+    """La lecture du compte vérifie le DNS des noms publiés ; « Corriger » crée ou redirige le CNAME, sans jamais
+    remplacer un enregistrement A."""
+    await admin.connect(TOKEN)
+    account = (await admin.connect())[0]
+    cf.state.dns["z1"] = [
+        {
+            "id": "r1",
+            "type": "CNAME",
+            "name": "ssh.exemple.fr",
+            "content": "t1.cfargotunnel.com",
+            "proxied": True,
+        },
+        {
+            "id": "r2",
+            "type": "CNAME",
+            "name": "rdp.exemple.fr",
+            "content": "t2.cfargotunnel.com",
+            "proxied": True,
+        },
+        {"id": "r3", "type": "A", "name": "grafana.exemple.fr", "content": "192.0.2.1", "proxied": True},
+    ]
+    overview = await admin.overview(account)
+    states = {host: (check.state, check.detail) for host, check in overview.dns.items()}
+    assert states == {
+        "ssh.exemple.fr": ("ok", ""),
+        "rdp.exemple.fr": ("other_tunnel", "labo"),
+        "grafana.exemple.fr": ("other_record", "A"),
+    }
+    tunnel = overview.tunnels[0].tunnel
+    await admin.fix_dns(tunnel, "rdp.exemple.fr")
+    with pytest.raises(CloudflareApiError, match="enregistrement DNS A"):
+        await admin.fix_dns(tunnel, "grafana.exemple.fr")
+    with pytest.raises(CloudflareApiError, match="Aucune zone"):
+        await admin.fix_dns(tunnel, "x.autre.org")
+    overview = await admin.overview(account)
+    assert overview.dns["rdp.exemple.fr"].state == "ok"
+    assert overview.dns["grafana.exemple.fr"].state == "other_record"

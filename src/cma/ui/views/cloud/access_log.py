@@ -1,13 +1,26 @@
-"""Journal des accès Access : dernières connexions aux applications, filtrables par application."""
+"""Journal des accès Access : connexions des 30 derniers jours, filtrables par période et par application,
+exportables en CSV."""
 
 from __future__ import annotations
 
-from datetime import datetime
+import csv
+import io
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import QComboBox, QDialog, QHBoxLayout, QTableWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QHBoxLayout,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from cma.core.cfapi import AccessApp, AccessRequest
+from cma.core.fsutil import atomic_write_text
 from cma.i18n import tr
 from cma.ui.icons import app_icon
 from cma.ui.states import plural
@@ -33,6 +46,63 @@ def request_user(request: AccessRequest, token_names: dict[str, str] | None = No
         return request.user
     connection = request.connection.lower()
     return tr("Service token") if "service" in connection or "nonidentity" in connection else "—"
+
+
+def request_moment(request: AccessRequest) -> datetime | None:
+    try:
+        moment = datetime.fromisoformat(request.created_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+
+
+def within(request: AccessRequest, period: timedelta | None, now: datetime | None = None) -> bool:
+    """La connexion date-t-elle de moins de `period` (toujours vrai sans période ou sans date lisible) ?"""
+    moment = request_moment(request)
+    if period is None or moment is None:
+        return True
+    return moment >= (now or datetime.now(UTC)) - period
+
+
+def access_csv(requests: list[AccessRequest], token_names: dict[str, str] | None = None) -> str:
+    """Le journal en CSV pour un tableur : séparateur « ; », dates ISO en UTC (triables), une ligne par connexion."""
+    out = io.StringIO()
+    writer = csv.writer(out, delimiter=";", lineterminator="\r\n")
+    writer.writerow(
+        [
+            tr("Date"),
+            tr("Utilisateur"),
+            tr("Application"),
+            tr("Domaine"),
+            tr("Résultat"),
+            tr("Pays"),
+            tr("Adresse IP"),
+            tr("Connexion"),
+        ]
+    )
+    for request in requests:
+        writer.writerow(
+            [
+                request.created_at,
+                request_user(request, token_names),
+                request.app_name,
+                request.app_domain,
+                tr("Autorisé") if request.allowed else tr("Refusé"),
+                request.country,
+                request.ip,
+                request.connection,
+            ]
+        )
+    return out.getvalue()
+
+
+def ask_csv_path(parent: QWidget) -> Path | None:
+    """Fonction de module : les tests la remplacent pour ne pas ouvrir de boîte modale."""
+    name = f"journal-acces-{datetime.now():%Y%m%d}.csv"
+    path, _filter = QFileDialog.getSaveFileName(
+        parent, tr("Exporter le journal des accès"), str(Path.home() / name), "CSV (*.csv)"
+    )
+    return Path(path) if path else None
 
 
 def matches(request: AccessRequest, app: AccessApp | None) -> bool:
@@ -64,7 +134,10 @@ class AccessLogDialog(QDialog):
         layout.addWidget(title(tr("Journal des accès"), "SectionTitle"))
         layout.addWidget(
             label(
-                tr("Dernières connexions aux applications Access, les plus récentes en premier."),
+                tr(
+                    "Connexions aux applications Access des 30 derniers jours (au plus 1 000), les plus récentes en "
+                    "premier."
+                ),
                 "muted",
                 wrap=True,
             )
@@ -80,6 +153,13 @@ class AccessLogDialog(QDialog):
                 max(0, self.app_filter.findText(f"{selected.name} ({selected.domain})"))
             )
         row.addWidget(self.app_filter, 1)
+        self.period = QComboBox()
+        self.period.setAccessibleName(tr("Période"))
+        self.period.addItem(tr("24 dernières heures"), timedelta(days=1))
+        self.period.addItem(tr("7 derniers jours"), timedelta(days=7))
+        self.period.addItem(tr("30 derniers jours"), timedelta(days=30))
+        self.period.setCurrentIndex(1)
+        row.addWidget(self.period)
         self.summary = label("", "muted")
         row.addWidget(self.summary)
         layout.addLayout(row)
@@ -91,17 +171,42 @@ class AccessLogDialog(QDialog):
             self.table.horizontalHeader().resizeSection(column, width)
         layout.addWidget(self.table, 1)
         footer = QHBoxLayout()
-        footer.addStretch()
+        self.export_button = button(tr("Exporter en CSV…"), "file-export")
+        self.export_button.clicked.connect(self.export_csv)
+        footer.addWidget(self.export_button)
+        self.export_note = label("", "muted")
+        footer.addWidget(self.export_note, 1)
         close = button(tr("Fermer"))
         close.clicked.connect(self.accept)
         footer.addWidget(close)
         layout.addLayout(footer)
         self.app_filter.currentIndexChanged.connect(lambda _i: self._fill())
+        self.period.currentIndexChanged.connect(lambda _i: self._fill())
         self._fill()
 
     def shown(self) -> list[AccessRequest]:
         app = self.app_filter.currentData()
-        return [r for r in self.requests if matches(r, app if isinstance(app, AccessApp) else None)]
+        period = self.period.currentData()
+        return [
+            r
+            for r in self.requests
+            if matches(r, app if isinstance(app, AccessApp) else None)
+            and within(r, period if isinstance(period, timedelta) else None)
+        ]
+
+    def export_csv(self) -> None:
+        """Exporte ce qui est affiché (application et période choisies), en UTF-8 avec BOM pour Excel."""
+        path = ask_csv_path(self)
+        if path is None:
+            return
+        rows = self.shown()
+        try:
+            atomic_write_text(path, "\ufeff" + access_csv(rows, self.token_names))
+        except OSError as exc:
+            self.export_note.setText(tr("Export impossible : {error}").format(error=exc))
+            return
+        exported = plural(len(rows), tr("{n} connexion exportée"), tr("{n} connexions exportées"))
+        self.export_note.setText(f"{exported} : {path.name}")
 
     def _fill(self) -> None:
         rows = self.shown()

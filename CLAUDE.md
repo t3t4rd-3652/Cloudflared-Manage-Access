@@ -129,6 +129,14 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
 - **États affichés** (`cma.ui.states`) : libellé, teinte, symbole et actions d'une session, d'une liaison SSH ou
   d'un favori viennent de là (les tables `STATUS_OF_STATE`… y sont, `cma.ui.theme` les réexporte). Ne pas en
   refaire une copie dans une vue : c'est ce qui avait fait diverger la zone de notification et le tableau de bord.
+- **DNS des noms d'hôte** (`cma.core.dnscheck`, appelé par `CloudflareAdmin.overview`) : une lecture par zone
+  utilisée ; une zone illisible donne « unknown », jamais une alerte. « Corriger » passe par `ensure_cname`, qui
+  refuse de remplacer un A ou un AAAA : ne pas l'assouplir.
+- **Vue Cloudflare découpée** : `cloud/apps_tab.py` (`AppsTab`) et `cloud/tokens_tab.py` (`TokensTab`) portent leurs
+  onglets ; la vue garde les anciens noms par délégation (`view.apps`, `view.allow_token`…). Les tests remplacent les
+  boîtes dans le module de l'onglet (`apps_module.ask_allow`, `tokens_module.confirm`…), pas dans `view`.
+- **Dates de test relatives** : tout ce qui filtre par période (journal des accès) se teste avec des dates calculées
+  depuis maintenant (`_ago` du faux serveur) ; une date fixe ferait échouer le test quelques semaines plus tard.
 - **Règles d'ingress** : une règle est identifiée par (nom d'hôte, chemin) (`cfapi._same_rule`). Republier met la
   règle à jour sur place (position, `originRequest`, `id` gardés) ; retirer ne supprime le CNAME que si plus aucune
   règle n'utilise le nom d'hôte. La règle finale (sans nom d'hôte) reste toujours la dernière.

@@ -2,6 +2,19 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Ajouté
+- **DNS des noms d'hôte publiés vérifié** à chaque lecture du compte : pastille « DNS manquant », « DNS vers un
+  autre tunnel », « DNS non proxifié » ou « DNS : A » sur la ligne du nom d'hôte, compte sur la tuile « Noms
+  d'hôte », et « Corriger le DNS… » (CNAME vers ce tunnel, proxifié) quand CMA peut le faire sans risque. Un
+  enregistrement A ou AAAA n'est jamais remplacé d'office.
+- **Journal des accès pour un audit** : 30 derniers jours (jusqu'à 1 000 connexions), période choisie (24 h, 7 j,
+  30 j) et export CSV lisible par Excel (« ; », UTF-8 avec BOM).
+
+### Modifié
+- L'onglet Applications Access a son propre module (`cloud/apps_tab.py`), comme l'onglet Service tokens.
+
 ## [2.7.0] - 2026-10-08
 
 ### Ajouté

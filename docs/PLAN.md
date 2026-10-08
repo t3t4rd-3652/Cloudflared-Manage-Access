@@ -1,7 +1,6 @@
 # Plan du projet
 
-État au 2026-10-08, version **2.7.0** (P6 : administration Cloudflare plus fine). Il ne reste que des
-tâches du propriétaire (voir « Ce qui reste en suspens »). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+État au 2026-10-08, version **2.7.0** (P6 : administration Cloudflare plus fine) ; P7 réalisé, non publié. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -235,6 +234,26 @@ avec un champ `id` ; journal des accès refusé (403) faute de la permission « 
 
 Recette : `scripts/cloudflare_recette.py --ecriture` étendu aux règles avec chemin, à l'ordre, à la règle finale et
 aux réglages d'application, sur les ressources jetables de la recette ; lancé par le propriétaire.
+
+### P7 — DNS vérifié, journal d'audit, vue Cloudflare découpée (2.8)
+
+**État au 2026-10-08 : les trois points sont réalisés** (section « Non publié » du CHANGELOG). Vérifié en lecture
+sur le vrai compte : 24 noms d'hôte, 1 zone (une seule lecture du DNS), tous corrects ; journal des 30 derniers
+jours lu avec le paramètre `since`. `cloud/view.py` passe de 1 408 lignes (avant P6) à 970.
+
+1. **DNS des noms d'hôte publiés.** Panne classique : CNAME absent, ou qui vise un autre tunnel. CMA le crée à la
+   publication mais ne le vérifiait plus ensuite.
+   - Cœur : `cma.core.dnscheck`, fonction pure qui classe chaque nom d'hôte publié d'après les enregistrements de
+     sa zone : correct, absent, vers un autre tunnel (nommé s'il est du compte), non proxifié, autre enregistrement
+     (A, AAAA…), zone absente du compte. Lecture : un appel par zone (enregistrements du nom), pendant la lecture du
+     compte ; un refus de lecture du DNS laisse l'état « inconnu », sans alerte.
+   - Interface : pastille « DNS manquant », « DNS vers un autre tunnel »… sur la ligne du nom d'hôte, compte des
+     problèmes sur la tuile « Noms d'hôte », et « Corriger le DNS… » (CNAME vers ce tunnel, proxifié) avec une
+     confirmation qui dit ce qui change. Un enregistrement A ou AAAA n'est jamais remplacé d'office.
+2. **Journal des accès pour un audit** : 30 derniers jours (jusqu'à 1 000 connexions), période choisie (24 h, 7 j,
+   30 j) et export CSV (séparateur « ; » et UTF-8 avec BOM, lisible tel quel par Excel en français).
+3. **Dette** : l'onglet Applications Access sort de `cloud/view.py` dans `cloud/apps_tab.py`, comme l'onglet
+   Service tokens.
 
 ### Dette technique à surveiller
 

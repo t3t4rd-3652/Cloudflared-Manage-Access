@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from cma.core.cfapi import (
@@ -29,6 +30,7 @@ from cma.core.cfapi import (
     guess_service_from_ingress,
 )
 from cma.core.config_store import ConfigStore
+from cma.core.dnscheck import DnsCheck, check_all, zone_of
 from cma.core.expiry import parse_expiry
 from cma.core.models import (
     AuthMode,
@@ -67,6 +69,8 @@ class Overview:
     apps: list[AccessApp] = field(default_factory=list[AccessApp])
     tokens: list[RemoteServiceToken] = field(default_factory=list[RemoteServiceToken])
     zones: list[Zone] = field(default_factory=list[Zone])
+    # État du DNS de chaque nom d'hôte publié (clé : nom d'hôte en minuscules).
+    dns: dict[str, DnsCheck] = field(default_factory=dict[str, DnsCheck])
 
 
 @dataclass(frozen=True)
@@ -194,17 +198,50 @@ class CloudflareAdmin:
             tunnels = [
                 TunnelView(t, *api.tunnel_ingress(account.id, t.id)) for t in api.list_tunnels(account.id)
             ]
+            zones = api.list_zones(account.id)
             return Overview(
                 account=account,
                 tunnels=tunnels,
                 apps=api.list_access_apps(account.id),
                 tokens=api.list_service_tokens(account.id),
-                zones=api.list_zones(account.id),
+                zones=zones,
+                dns=self._dns_checks(api, tunnels, zones),
             )
 
         overview = await asyncio.to_thread(load)
         self.sync_expirations(overview.tokens)
         return overview
+
+    @staticmethod
+    def _dns_checks(api: CloudflareApi, tunnels: list[TunnelView], zones: list[Zone]) -> dict[str, DnsCheck]:
+        """Vérifie le DNS des noms d'hôte publiés : une lecture par zone utilisée. Une zone illisible (permission,
+        réseau) donne « inconnu » pour ses noms, sans faire échouer la lecture du compte."""
+        rules = [(view.tunnel, rule.hostname) for view in tunnels for rule in view.hostnames]
+        used = {zone.id for _t, host in rules if (zone := zone_of(host, zones)) is not None}
+        records: dict[str, list[dict[str, Any]] | None] = {}
+        for zone_id in used:
+            try:
+                records[zone_id] = api.zone_records(zone_id)
+            except CloudflareApiError:
+                records[zone_id] = None
+        names = {view.tunnel.id: view.tunnel.name for view in tunnels}
+        return check_all(rules, zones, records, names)
+
+    async def fix_dns(self, tunnel: Tunnel, hostname: str) -> None:
+        """CNAME de `hostname` vers ce tunnel, proxifié (créé ou corrigé). Un enregistrement A ou AAAA bloque :
+        `ensure_cname` refuse de le remplacer."""
+        api = self.api()
+        account = self.account_id()
+
+        def run() -> None:
+            zone = api.zone_for_hostname(account, hostname)
+            if zone is None:
+                raise CloudflareApiError(
+                    tr("Aucune zone du compte ne contient {host}.").format(host=hostname)
+                )
+            api.ensure_cname(zone, hostname, tunnel.cname_target)
+
+        await asyncio.to_thread(run)
 
     async def create_tunnel(self, name: str) -> NewTunnel:
         """Crée le tunnel puis lit le jeton de son connecteur (masqué dans les journaux dès sa réception)."""
@@ -469,9 +506,11 @@ class CloudflareAdmin:
 
         return await asyncio.to_thread(run)
 
-    async def access_requests(self, limit: int = 200) -> list[AccessRequest]:
+    async def access_requests(self, limit: int = 1000, days: int = 30) -> list[AccessRequest]:
+        """Connexions des `days` derniers jours (au plus `limit`) : la boîte du journal choisit ensuite sa période."""
         api = self.api()
-        return await asyncio.to_thread(api.access_requests, self.account_id(), limit)
+        since = (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return await asyncio.to_thread(api.access_requests, self.account_id(), limit, since)
 
     async def app_settings(self, app: AccessApp) -> AppSettings:
         api = self.api()

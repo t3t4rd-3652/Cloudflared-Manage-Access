@@ -521,6 +521,10 @@ class CloudflareApi:
         """Cloudflare refuse tant que le tunnel a des connexions actives."""
         self._result("DELETE", f"/accounts/{account_id}/cfd_tunnel/{tunnel_id}")
 
+    def zone_records(self, zone_id: str) -> list[dict[str, Any]]:
+        """Tous les enregistrements DNS de la zone (vérification des noms d'hôte publiés : une lecture par zone)."""
+        return self._paged(f"/zones/{zone_id}/dns_records", per_page=500)
+
     def ensure_cname(self, zone: Zone, hostname: str, target: str) -> None:
         existing = self._paged(f"/zones/{zone.id}/dns_records", {"name": hostname})
         body = {
@@ -660,17 +664,19 @@ class CloudflareApi:
         body["policies"] = [{"id": pid, "precedence": rank} for rank, pid in enumerate(policy_ids, start=1)]
         self._result("PUT", f"/accounts/{account_id}/access/apps/{app_id}", body=body)
 
-    def access_requests(self, account_id: str, limit: int = 200) -> list[AccessRequest]:
-        """Dernières connexions aux applications Access, de la plus récente à la plus ancienne. Un refus 403 dit
-        quelle permission ajouter au jeton (elle n'est pas dans la liste de base)."""
+    def access_requests(
+        self, account_id: str, limit: int = 200, since: str | None = None
+    ) -> list[AccessRequest]:
+        """Dernières connexions aux applications Access, de la plus récente à la plus ancienne, depuis `since` (date
+        ISO 8601, facultative). Un refus 403 dit quelle permission ajouter au jeton (elle n'est pas dans la liste de
+        base)."""
+        params: dict[str, Any] = {"limit": limit, "direction": "desc"}
+        if since:
+            params["since"] = since
         try:
             rows = cast(
                 list[dict[str, Any]],
-                self._result(
-                    "GET",
-                    f"/accounts/{account_id}/access/logs/access_requests",
-                    params={"limit": limit, "direction": "desc"},
-                )
+                self._result("GET", f"/accounts/{account_id}/access/logs/access_requests", params=params)
                 or [],
             )
         except CloudflareApiError as exc:

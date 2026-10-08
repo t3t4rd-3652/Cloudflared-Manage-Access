@@ -26,6 +26,7 @@ class AccountStats:
     unprotected: int  # noms d'hôte publiés qu'aucune application Access ne protège
     tokens: int
     tokens_in_cma: int  # service tokens du compte déjà rangés dans CMA (même Client ID)
+    dns_problems: int = 0  # noms d'hôte publiés dont le DNS ne mène pas (ou plus) au tunnel
 
 
 def account_stats(overview: Overview, local_client_ids: set[str]) -> AccountStats:
@@ -39,4 +40,5 @@ def account_stats(overview: Overview, local_client_ids: set[str]) -> AccountStat
         unprotected=len(published - protected_hosts(overview.apps)),
         tokens=len(overview.tokens),
         tokens_in_cma=sum(1 for token in overview.tokens if token.client_id in local_client_ids),
+        dns_problems=sum(1 for check in overview.dns.values() if not check.ok),
     )

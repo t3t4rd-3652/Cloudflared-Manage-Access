@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
+import cma.ui.views.cloud.apps_tab as apps_module
 import cma.ui.views.cloud.helpers as cloud_helpers
 import cma.ui.views.cloud.tokens_tab as tokens_module
 import cma.ui.views.cloud.view as cloud_module
@@ -99,12 +101,12 @@ def test_cloud_view_full_flow(qtbot, gui, cf, monkeypatch):
 
     # Autorisation du token sur l'application Access existante.
     view.apps.selectRow(0)
-    monkeypatch.setattr(cloud_module, "ask_allow", lambda _p, _app, tokens: tokens[0])
+    monkeypatch.setattr(apps_module, "ask_allow", lambda _p, _app, tokens: tokens[0])
     view.allow_token()
     qtbot.waitUntil(lambda: bool(cf.state.account_policies), timeout=10000)
 
     # Protection d'un nouveau nom d'hôte.
-    monkeypatch.setattr(cloud_module, "ask_protect", lambda *_a: "DB.exemple.fr")
+    monkeypatch.setattr(apps_module, "ask_protect", lambda *_a: "DB.exemple.fr")
     view.protect_hostname()
     qtbot.waitUntil(lambda: view.apps.rowCount() == 2, timeout=10000)
 
@@ -248,7 +250,7 @@ def test_cloud_view_manages_shared_access_policies(qtbot, gui, cf, monkeypatch):
     assert view.policies_button.isEnabled() and view.delete_app_button.isEnabled()
 
     opened: list[PoliciesDialog] = []
-    monkeypatch.setattr(cloud_module, "show_policies", opened.append)
+    monkeypatch.setattr(apps_module, "show_policies", opened.append)
     view.manage_policies()
     qtbot.waitUntil(lambda: bool(opened), timeout=10000)
     dialog = opened[0]
@@ -311,7 +313,7 @@ def test_cloud_view_account_policies_and_cleanup(qtbot, gui, cf, monkeypatch):
     )
     ctx, view = connected_view(qtbot, gui, cf)
     opened: list[AccountPoliciesDialog] = []
-    monkeypatch.setattr(cloud_module, "show_policies", opened.append)
+    monkeypatch.setattr(apps_module, "show_policies", opened.append)
     view.manage_account_policies()
     qtbot.waitUntil(lambda: bool(opened), timeout=10000)
     dialog = opened[0]
@@ -329,6 +331,7 @@ def test_cloud_view_account_policies_and_cleanup(qtbot, gui, cf, monkeypatch):
     # Ménage : renommer et supprimer un tunnel arrêté, supprimer une application et un token.
     monkeypatch.setattr(cloud_module, "confirm", lambda *_a: True)
     monkeypatch.setattr(tokens_module, "confirm", lambda *_a: True)
+    monkeypatch.setattr(apps_module, "confirm", lambda *_a: True)
     labo = view.tree.topLevelItem(1).data(0, cloud_module.TUNNEL_ROLE)
     monkeypatch.setattr(cloud_module, "ask_tunnel_name", lambda _p, _existing, current: current + "-2")
     view.rename_tunnel(labo)
@@ -695,7 +698,7 @@ def test_app_settings_from_the_apps_tab(qtbot, gui, cf, monkeypatch):
         shown.append(settings)
         return replaced(settings, name="Renommée", session_duration="15m")
 
-    monkeypatch.setattr(cloud_module, "ask_app_settings", answer)
+    monkeypatch.setattr(apps_module, "ask_app_settings", answer)
     view.edit_app_settings()
     stored = next(a for a in cf.state.apps if a["id"] == app.id)
     qtbot.waitUntil(lambda: stored.get("name") == "Renommée", timeout=10000)
@@ -726,6 +729,9 @@ def test_access_log(qtbot, gui, cf, monkeypatch):
     from cma.core.cfapi import AccessApp, AccessRequest
     from cma.ui.views.cloud.access_log import AccessLogDialog, request_time, request_user
 
+    def recent(minutes: int) -> str:
+        return (datetime.now(UTC) - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     ctx, window = gui
     ctx.core.manager.cloudflare.base_url = cf.base_url
     window.show_view("cloud")
@@ -735,7 +741,7 @@ def test_access_log(qtbot, gui, cf, monkeypatch):
     qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
     opened: list[tuple[int, object]] = []
     monkeypatch.setattr(
-        cloud_module,
+        apps_module,
         "show_access_log",
         lambda _p, requests, _apps, selected, _names: opened.append((len(requests), selected)),
     )
@@ -752,9 +758,9 @@ def test_access_log(qtbot, gui, cf, monkeypatch):
 
     # La boîte : filtre par application (identifiant, sinon nom d'hôte), refus comptés.
     requests = [
-        AccessRequest("2026-10-08T09:12:00Z", "alice@exemple.fr", "ssh.exemple.fr", "uid-ssh", True, "login"),
+        AccessRequest(recent(5), "alice@exemple.fr", "ssh.exemple.fr", "uid-ssh", True, "login"),
         AccessRequest(
-            "2026-10-08T09:10:00Z",
+            recent(7),
             "robot.access",
             "grafana.exemple.fr",
             "",
@@ -788,3 +794,96 @@ def test_access_log(qtbot, gui, cf, monkeypatch):
         request_user(AccessRequest("", "x.access", "", "", True, "", connection="nonidentity")) == "x.access"
     )
     assert request_user(AccessRequest("", "", "", "", True, "", connection="nonidentity")) == "Service token"
+
+
+def test_dns_checks_in_the_tunnels_tab(qtbot, gui, cf, monkeypatch):
+    """Pastille et tuile pour un DNS à corriger ; « Corriger le DNS… » crée le CNAME vers le tunnel."""
+    ctx, window = gui
+    ctx.core.manager.cloudflare.base_url = cf.base_url
+    cf.state.dns["z1"] = [
+        {
+            "id": "r1",
+            "type": "CNAME",
+            "name": "ssh.exemple.fr",
+            "content": "t1.cfargotunnel.com",
+            "proxied": True,
+        },
+        {
+            "id": "r2",
+            "type": "CNAME",
+            "name": "rdp.exemple.fr",
+            "content": "t1.cfargotunnel.com",
+            "proxied": True,
+        },
+    ]  # grafana.exemple.fr n'a aucun enregistrement
+    window.show_view("cloud")
+    view = window.cloud
+    view.token_field.set_text(TOKEN)
+    view.connect_account()
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+    assert view.stat_hostnames.detail.text() == "1 DNS à corriger"
+    bureau = view.tree.topLevelItem(0)
+    rows = {bureau.child(i).data(0, cloud_module.RULE_ROLE).hostname: bureau.child(i) for i in range(3)}
+    grafana = rows["grafana.exemple.fr"]
+    assert grafana.data(0, cloud_module.DNS_ROLE).state == "missing"
+    assert "DNS manquant" in grafana.data(0, cloud_module.Qt.ItemDataRole.AccessibleTextRole)
+    assert "Corriger le DNS…" not in [a.text() for a in view.tree_menu(rows["ssh.exemple.fr"]).actions()]
+    fix = next(a for a in view.tree_menu(grafana).actions() if a.text() == "Corriger le DNS…")
+    told: list[str] = []
+    monkeypatch.setattr(cloud_module, "confirm", lambda _p, _h, text, *_a: told.append(text) or True)
+    fix.trigger()
+    qtbot.waitUntil(lambda: any(r["name"] == "grafana.exemple.fr" for r in cf.state.dns["z1"]), timeout=10000)
+    assert "ne mène nulle part" in told[0] and "visera ce tunnel (bureau)" in told[0]
+    qtbot.waitUntil(lambda: view.stat_hostnames.detail.text() == "2 domaines", timeout=10000)
+
+
+def test_access_log_period_and_csv(qtbot, tmp_path, monkeypatch):
+    import csv
+
+    from cma.core.cfapi import AccessApp, AccessRequest
+    from cma.ui.views.cloud import access_log
+
+    def ago(**delta: float) -> str:
+        return (datetime.now(UTC) - timedelta(**delta)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    requests = [
+        AccessRequest(
+            ago(hours=2), "alice@exemple.fr", "ssh.exemple.fr", "u1", True, "login", "FR", "203.0.113.5"
+        ),
+        AccessRequest(
+            ago(days=3), "robot.access", "ssh.exemple.fr", "u1", False, "login", connection="nonidentity"
+        ),
+        AccessRequest(
+            ago(days=20), "bob@exemple.fr", "ssh.exemple.fr", "u1", True, "login", app_name="SSH; prod"
+        ),
+        AccessRequest("illisible", "carol@exemple.fr", "ssh.exemple.fr", "u1", True, "login"),
+    ]
+    dialog = access_log.AccessLogDialog(
+        None, requests, [AccessApp("a", "SSH", "ssh.exemple.fr", "self_hosted")]
+    )
+    qtbot.addWidget(dialog)
+    # 7 jours par défaut ; une date illisible n'est jamais écartée.
+    assert [r.user for r in dialog.shown()] == ["alice@exemple.fr", "robot.access", "carol@exemple.fr"]
+    dialog.period.setCurrentIndex(0)
+    assert [r.user for r in dialog.shown()] == ["alice@exemple.fr", "carol@exemple.fr"]
+    dialog.period.setCurrentIndex(2)
+    assert len(dialog.shown()) == 4 and dialog.table.rowCount() == 4
+
+    # Export de ce qui est affiché : BOM, « ; », une ligne par connexion, le « ; » d'un nom bien protégé.
+    target = tmp_path / "journal.csv"
+    monkeypatch.setattr(access_log, "ask_csv_path", lambda _p: target)
+    dialog.token_names = {"robot.access": "Robot"}
+    dialog.export_csv()
+    raw = target.read_bytes()
+    assert raw.startswith(b"\xef\xbb\xbf")
+    rows = list(csv.reader(raw.decode("utf-8-sig").splitlines(), delimiter=";"))
+    assert rows[0][:3] == ["Date", "Utilisateur", "Application"] and len(rows) == 5
+    assert rows[2][1] == "Service token « Robot »" and rows[2][4] == "Refusé"
+    assert rows[3][2] == "SSH; prod"
+    assert dialog.export_note.text() == "4 connexions exportées : journal.csv"
+    monkeypatch.setattr(access_log, "ask_csv_path", lambda _p: None)
+    dialog.export_csv()  # annulé : rien ne change
+    assert dialog.export_note.text() == "4 connexions exportées : journal.csv"
+    monkeypatch.setattr(access_log, "ask_csv_path", lambda _p: tmp_path)  # un dossier : écriture impossible
+    dialog.export_csv()
+    assert dialog.export_note.text().startswith("Export impossible")

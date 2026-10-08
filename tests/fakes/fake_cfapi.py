@@ -12,10 +12,16 @@ import re
 import threading
 import uuid
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 TOKEN = "jeton-api-de-test"
+
+
+def _ago(**delta: float) -> str:
+    """Date ISO de l'API, relative à maintenant : le journal filtre par période, une date fixe vieillirait."""
+    return (datetime.now(UTC) - timedelta(**delta)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @dataclass
@@ -52,7 +58,7 @@ class FakeCloudflare:
     access_requests: list[dict[str, Any]] = field(
         default_factory=lambda: [
             {
-                "created_at": "2026-10-08T09:12:00Z",
+                "created_at": _ago(minutes=5),
                 "user_email": "alice@exemple.fr",
                 "app_domain": "ssh.exemple.fr",
                 "app_uid": "uid-ssh",
@@ -64,7 +70,7 @@ class FakeCloudflare:
             {
                 # Forme relevée sur un vrai compte : un service token est journalisé par son Client ID,
                 # avec la connexion « nonidentity ».
-                "created_at": "2026-10-08T09:10:00Z",
+                "created_at": _ago(minutes=7),
                 "user_email": "robot.access",
                 "app_domain": "grafana.exemple.fr",
                 "app_name": "Grafana",
@@ -290,7 +296,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not state.audit_allowed:
                 return self._error(403, 10000, "Authentication error")
             limit = int(query.get("limit", ["50"])[0])
-            return self._send(200, _ok(state.access_requests[:limit]))
+            since = query.get("since", [""])[0]
+            rows = [r for r in state.access_requests if str(r.get("created_at", "")) >= since]
+            return self._send(200, _ok(rows[:limit]))
         if m := re.fullmatch(r"/accounts/(\w+)/access/apps/(\w+)", path):
             app = next((a for a in state.apps if a["id"] == m.group(2)), None)
             if app is None:
