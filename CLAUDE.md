@@ -64,6 +64,10 @@ Depuis Windows, l'environnement est `.venv` (uv n'est pas forcément dans le PAT
 5. Mettre à jour une copie installée : désinstaller en silence (`unins000.exe /VERYSILENT /SUPPRESSMSGBOXES
    /NORESTART`), puis lancer le nouvel installeur avec les mêmes options. Les données (`%APPDATA%\CloudflaredManager`)
    ne sont pas touchées. Ne jamais fermer ou réinstaller une copie en service sans l'accord de l'utilisateur.
+   La désinstallation retire la tâche planifiée « Surveillance des tunnels » : vérifier avant
+   (`schtasks /Query /TN "Cloudflared Manage Access\Surveillance des tunnels"`) et la recréer après si elle existait.
+6. Suivre la release sans l'API : l'API GitHub anonyme est limitée à 60 requêtes par heure, vite épuisées par une
+   boucle d'attente. `curl -sfL …/releases/download/vX.Y.Z/SHA256SUMS.txt` répond dès que la release est publiée.
 
 La CI (`ci.yml`) tourne à chaque push : lint et typage, tests Windows, Linux et macOS avec couverture, vrai
 cloudflared (Windows et Linux), audit pip-audit, scripts serveur (shellcheck, bats sous Debian, Ubuntu, Alpine),
