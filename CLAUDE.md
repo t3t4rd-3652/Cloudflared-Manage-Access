@@ -68,7 +68,9 @@ Depuis Windows, l'environnement est `.venv` (uv n'est pas forcément dans le PAT
 La CI (`ci.yml`) tourne à chaque push : lint et typage, tests Windows et Linux avec couverture, vrai
 cloudflared (Windows et Linux), audit pip-audit, scripts serveur (shellcheck, bats sous Debian, Ubuntu, Alpine),
 temps de démarrage (fenêtre prête en moins de 6 s), captures à 100, 125 et 150 % comparées au dernier main.
-Les journaux des jobs ne sont lisibles qu'aux administrateurs ; l'API publique donne l'état des jobs et des étapes.
+Les journaux des jobs ne sont lisibles qu'aux administrateurs ; l'API publique donne l'état des jobs et des étapes,
+et les annotations : un échec de tests y est résumé (lignes `FAILED`, total, couverture) par l'étape « Résumé de
+l'échec en annotations » (`check-runs` du commit, puis `annotations_url` du job).
 
 ## Historique des étapes
 
@@ -174,6 +176,10 @@ Réseau et bibliothèques :
   les politiques qui le citent. Les erreurs de l'API ne se découvrent souvent qu'avec la recette sur un vrai compte.
 
 - `asyncssh.ChannelListenError` n'hérite pas de `asyncssh.Error` : l'attraper explicitement.
+- Un socket Unix a un chemin limité (104 octets sous macOS, 108 sous Linux) : `ipc_address` se replie sur
+  `XDG_RUNTIME_DIR` ou le dossier temporaire. Le dossier temporaire de macOS est long (`/var/folders/…`).
+- Pyright, pour une plateforme donnée, juge inaccessible le code après `if sys.platform == …: return` : un
+  import qui n'y sert que là est « inutilisé ». Le mettre dans une fonction à part.
 - Une `SSLError` peut ne pas avoir d'attribut `reason` : `getattr(error, "reason", None)`.
 
 Outils de la session (Windows) :

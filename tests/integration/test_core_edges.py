@@ -215,3 +215,28 @@ async def test_forward_retries_then_gives_up_on_network_errors(paths, secrets, b
         await asyncio.sleep(0.05)
     assert "Abandon après 2 tentatives" in session.message
     await session.stop()
+
+
+def test_ipc_socket_falls_back_to_a_short_path_when_too_long(monkeypatch, tmp_path):
+    """Sous macOS, le chemin d'un socket Unix est limité à 104 octets : un dossier de données profond (celui des
+    tests, ou ~/Library/Application Support) le dépasse. Le socket va alors dans le dossier propre à l'utilisateur."""
+    import cma.core.instance as instance
+    from cma.paths import AppPaths
+
+    monkeypatch.setattr(instance.sys, "platform", "darwin")
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    monkeypatch.setattr(instance.tempfile, "gettempdir", lambda: str(tmp_path / "t"))
+    short = AppPaths(tmp_path / "d")
+    if len(str(short.data_dir / "cma.sock")) < 104:
+        assert ipc_address(short) == str(short.data_dir / "cma.sock")
+    deep = AppPaths(tmp_path / ("x" * 60) / ("y" * 60))
+    address = ipc_address(deep)
+    assert address.startswith(str(tmp_path / "t")) and address.endswith(".sock") and "cma-" in address
+    assert address == ipc_address(AppPaths(tmp_path / ("x" * 60) / ("y" * 60)))  # même dossier, même socket
+    assert address != ipc_address(AppPaths(tmp_path / ("x" * 60) / ("z" * 60)))
+    # Sous Linux, XDG_RUNTIME_DIR (privé, 0700) passe avant le dossier temporaire.
+    monkeypatch.setattr(instance.sys, "platform", "linux")
+    runtime = tmp_path / "run"
+    runtime.mkdir()
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+    assert ipc_address(deep).startswith(str(runtime))

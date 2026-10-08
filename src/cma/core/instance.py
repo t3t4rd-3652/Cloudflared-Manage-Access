@@ -11,8 +11,10 @@ import contextlib
 import getpass
 import hashlib
 import logging
+import os
 import secrets as pysecrets
 import sys
+import tempfile
 import threading
 from collections.abc import Callable
 from multiprocessing.connection import Client, Listener
@@ -68,10 +70,24 @@ class InstanceLock:
 
 
 def ipc_address(paths: AppPaths) -> str:
+    digest = hashlib.sha256(f"{getpass.getuser()}|{paths.data_dir}".encode()).hexdigest()
     if sys.platform == "win32":
-        digest = hashlib.sha256(f"{getpass.getuser()}|{paths.data_dir}".encode()).hexdigest()
         return rf"\\.\pipe\cloudflared-manage-access-{digest[:16]}"
-    return str(paths.data_dir / "cma.sock")
+    address = paths.data_dir / "cma.sock"
+    # Longueur maximale du chemin d'un socket Unix, octet nul compris : 104 sous macOS, 108 sous Linux.
+    limit = 104 if sys.platform == "darwin" else 108
+    if len(os.fsencode(address)) < limit:
+        return str(address)
+    # Chemin trop long pour un socket Unix (dossier de données profond ; sous macOS, ~/Library/Application Support
+    # suffit parfois) : socket dans le dossier propre à l'utilisateur (XDG_RUNTIME_DIR, sinon le dossier temporaire,
+    # privé sous macOS), nommé d'après le dossier de données. La clé partagée reste dans le dossier de données.
+    return str(user_runtime_dir() / f"cma-{digest[:16]}.sock")
+
+
+def user_runtime_dir() -> Path:
+    """Dossier propre à l'utilisateur pour un socket : XDG_RUNTIME_DIR (Linux, 0700), sinon le dossier temporaire."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "")
+    return Path(runtime) if runtime and Path(runtime).is_dir() else Path(tempfile.gettempdir())
 
 
 def ipc_authkey(paths: AppPaths) -> bytes:

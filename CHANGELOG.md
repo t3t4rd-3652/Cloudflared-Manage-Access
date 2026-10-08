@@ -18,6 +18,11 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
   son exécutable. Sans effet tant que CMA n'est pas signé.
 - Tests en parallèle (environ 45 s au lieu de 3 min 30) et tests sous macOS en CI.
 
+### Corrigé
+- macOS et Linux : le canal entre deux lancements de CMA (`cma connect`, ouverture d'une seconde fenêtre)
+  échouait quand le chemin du dossier de données dépassait la limite d'un socket Unix (104 octets sous macOS).
+  Le socket passe alors dans le dossier propre à l'utilisateur. Trouvé par les nouveaux tests macOS.
+
 ## [2.4.0] - 2026-10-08
 
 ### Modifié
