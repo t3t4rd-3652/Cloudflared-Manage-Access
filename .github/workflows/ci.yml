@@ -66,6 +66,15 @@ jobs:
           -W ignore::pytest.PytestUnraisableExceptionWarning
           --cov=cma --cov-report=term --cov-report=xml --cov-fail-under=80
           2>&1 | tee pytest-${{ matrix.os }}.log
+      - name: Résumé de l'échec en annotations
+        # Les annotations se lisent par l'API publique, contrairement au journal du job et aux artefacts.
+        if: failure()
+        shell: bash
+        run: |
+          grep -E "^(FAILED|ERROR) |Fatal Python error|Required test coverage|[0-9]+ (passed|failed)" \
+            pytest-${{ matrix.os }}.log | tail -n 30 | while IFS= read -r line; do
+            echo "::error title=pytest (${{ matrix.os }})::${line}"
+          done
       - name: Journal des tests (en cas d'échec)
         if: failure()
         uses: actions/upload-artifact@v7
