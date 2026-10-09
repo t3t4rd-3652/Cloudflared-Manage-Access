@@ -445,7 +445,10 @@ graphique `UptimeChart` (barres par jour, courbe du temps de réponse, détail a
 
 ### P19 — Automatisation en ligne de commande (2.11)
 
-Statut : À FAIRE
+Statut : FAIT
+
+Réalisé : `cma review [--json] [--all]` (les constats ignorés dans l'interface le restent), `cma alerts test`,
+README. Testés contre le faux serveur et un serveur HTTP local.
 
 - **Objectif** : ce que fait l'interface pour la sécurité et les alertes, faisable depuis un script ou un
   planificateur.
@@ -512,8 +515,8 @@ Statut : À FAIRE
 | P15 | FAIT | c6a10e3 | 504 ✓ | 2026-10-09 |
 | P16 | FAIT | 595f332 | 505 ✓ | 2026-10-09 |
 | P17 | FAIT | faa2f2e | 506 ✓ | 2026-10-09 |
-| P18 | EN COURS | — | — | — |
-| P19 | À FAIRE | — | — | — |
+| P18 | FAIT | 4fc1068 | 511 ✓ | 2026-10-09 |
+| P19 | EN COURS | — | — | — |
 | P20 | À FAIRE | — | — | — |
 | P21 | À FAIRE | — | — | — |
 | P22 | À FAIRE | — | — | — |

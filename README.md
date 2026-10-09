@@ -173,6 +173,9 @@ cma quit                     ferme l'application
 cma tunnels [--json]         état des tunnels du compte Cloudflare (code 2 si l'un est en panne)
 cma tunnels --services       teste aussi les services publiés depuis Internet
 cma snapshot                 instantané de la configuration Cloudflare, comparé au précédent (code 2 si changé)
+cma review [--json] [--all]  bilan de sécurité du compte (code 2 si un constat élevé n'est pas ignoré)
+cma availability [--days 30] disponibilité des tunnels et services relevés (code 2 si un incident est en cours)
+cma alerts test              envoie un test à chaque canal d'alerte actif (code 1 si l'un échoue)
 cma doctor                   crée un rapport de diagnostic (zip, sans secrets)
 ```
 

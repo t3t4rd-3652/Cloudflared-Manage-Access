@@ -77,6 +77,17 @@ def build_parser() -> argparse.ArgumentParser:
             "(code 2 si quelque chose a changé)"
         ),
     )
+    review = sub.add_parser(
+        "review",
+        help=tr(
+            "bilan de sécurité du compte Cloudflare (code 2 si un constat de gravité élevée n'est pas ignoré)"
+        ),
+    )
+    review.add_argument("--json", action="store_true")
+    review.add_argument("--all", action="store_true", help=tr("montrer aussi les constats ignorés"))
+    alerts = sub.add_parser("alerts", help=tr("canaux d'alerte"))
+    alerts_sub = alerts.add_subparsers(dest="alerts_command", metavar="ACTION")
+    alerts_sub.add_parser("test", help=tr("envoyer un test à chaque canal actif (code 1 si l'un échoue)"))
     availability = sub.add_parser(
         "availability",
         help=tr("disponibilité des tunnels et services relevés (code 2 si un incident est en cours)"),
@@ -282,6 +293,97 @@ def _record_and_alert(
     send_events(events, config, secrets)
 
 
+def _admin(paths: AppPaths, secrets: SecretStore | None, base_url: str | None) -> Any:
+    from cma.core.cfadmin import CloudflareAdmin
+    from cma.core.cfapi import API_BASE
+    from cma.core.config_store import ConfigStore
+    from cma.core.secrets import open_secret_store
+
+    store = ConfigStore(paths)
+    store.load()
+    vault = secrets or portable_secret_store(paths) or open_secret_store()
+    return CloudflareAdmin(store, vault, lambda _port, _taken: None, base_url=base_url or API_BASE)
+
+
+def show_review(
+    paths: AppPaths,
+    *,
+    as_json: bool = False,
+    include_ignored: bool = False,
+    secrets: SecretStore | None = None,
+    base_url: str | None = None,
+) -> int:
+    """Bilan de sécurité du compte choisi dans CMA. Code 0 : rien d'élevé ; 2 : au moins un constat élevé non
+    ignoré ; 1 : lecture impossible. Les constats ignorés dans l'interface le restent ici."""
+    from cma.core.cfapi import CloudflareApiError
+    from cma.core.security import severity_label
+
+    admin = _admin(paths, secrets, base_url)
+    try:
+        findings = asyncio.run(admin.security_review())
+    except (CloudflareApiError, OSError) as exc:
+        print(tr("Erreur : {error}").format(error=exc), file=sys.stderr)
+        return 1
+    ignored = set(admin.store.snapshot().settings.ignored_findings)
+    shown = [f for f in findings if include_ignored or f.ident not in ignored]
+    if as_json:
+        rows = [
+            {
+                "severity": f.severity,
+                "kind": f.kind,
+                "title": f.title(),
+                "target": f.target,
+                "fix": f.fix or None,
+                "ignored": f.ident in ignored,
+                "detail": f.detail(),
+            }
+            for f in shown
+        ]
+        print(json.dumps(rows, indent=2, ensure_ascii=False))
+    elif not shown:
+        print(tr("Aucun constat : rien à signaler sur ce compte."))
+    else:
+        for finding in shown:
+            mark = tr("(ignoré)") if finding.ident in ignored else ""
+            print(
+                f"{severity_label(finding.severity):<8} {finding.title()} : {finding.target} {mark}".rstrip()
+            )
+    high = [f for f in findings if f.severity == "high" and f.ident not in ignored]
+    return 2 if high else 0
+
+
+def send_test_alerts(paths: AppPaths, *, secrets: SecretStore | None = None) -> int:
+    """Un test vers chaque canal actif. Code 0 si tous l'ont accepté ; 1 sinon (ou sans canal)."""
+    from cma.core.alerts import Alert, AlertError, send_alert
+    from cma.core.config_store import ConfigStore
+    from cma.core.monitoring import channels
+    from cma.core.secrets import open_secret_store
+
+    store = ConfigStore(paths)
+    store.load()
+    vault = secrets or portable_secret_store(paths) or open_secret_store()
+    targets = channels(store.snapshot(), vault)
+    if not targets:
+        print(
+            tr("Aucun canal d'alerte actif : ajoutez-en un dans Paramètres › Général › Alertes."),
+            file=sys.stderr,
+        )
+        return 1
+    alert = Alert(
+        tr("CMA — test d'alerte"), tr("Ce canal recevra les pannes et les retours de vos services."), "info"
+    )
+    failed = 0
+    for name, kind, url, _recoveries in targets:
+        try:
+            send_alert(kind, url, alert)
+        except AlertError as exc:
+            failed += 1
+            print(f"✗ {name} : {exc}")
+        else:
+            print(f"✓ {name}")
+    return 1 if failed else 0
+
+
 def show_availability(paths: AppPaths, *, days: int = 30, as_json: bool = False) -> int:
     """Disponibilité lue dans le journal tenu par la surveillance. Code 2 si un incident est encore ouvert."""
     from cma.core.availability import AvailabilityLog
@@ -416,6 +518,15 @@ def run(args: argparse.Namespace) -> int:
 
     if command == "tunnels":
         return show_tunnels(paths, as_json=args.json, notify=args.notify, services=args.services)
+
+    if command == "review":
+        return show_review(paths, as_json=args.json, include_ignored=args.all)
+
+    if command == "alerts":
+        if args.alerts_command != "test":
+            print(tr("Action attendue : cma alerts test"), file=sys.stderr)
+            return 1
+        return send_test_alerts(paths)
 
     if command == "availability":
         return show_availability(paths, days=args.days, as_json=args.json)

@@ -251,3 +251,61 @@ async def test_watch_uses_its_own_token(cf, admin, store):
     assert len(await admin.tunnel_states()) == 2
     store.update(lambda c: setattr(c.settings, "watch_token_id", "disparu"))
     assert admin.watch_api()._token == TOKEN
+
+
+async def test_cli_review_and_alerts(cf, admin, paths, secrets, store, capsys):
+    import asyncio
+    import http.server
+    import json
+    import threading
+
+    from cma.cli import send_test_alerts, show_review
+    from cma.core.models import AlertChannel
+
+    def review(**kwargs) -> int:
+        return show_review(paths, secrets=secrets, base_url=cf.base_url, **kwargs)
+
+    assert await asyncio.to_thread(review) == 1  # sans jeton
+    capsys.readouterr()
+    await admin.connect(TOKEN)
+    assert await asyncio.to_thread(review) == 2  # rdp et grafana publiés sans Access
+    out = capsys.readouterr().out
+    assert "Élevée   Nom d'hôte publié sans Access : rdp.exemple.fr" in out
+    # Ignorés dans l'interface : plus rien d'élevé ; --all les montre, marqués.
+    store.update(
+        lambda c: setattr(
+            c.settings, "ignored_findings", ["unprotected:rdp.exemple.fr", "unprotected:grafana.exemple.fr"]
+        )
+    )
+    assert await asyncio.to_thread(review) == 0
+    assert "rdp.exemple.fr" not in capsys.readouterr().out
+    assert await asyncio.to_thread(review, as_json=True, include_ignored=True) == 0
+    rows = json.loads(capsys.readouterr().out)
+    assert {r["target"] for r in rows if r["ignored"]} == {"rdp.exemple.fr", "grafana.exemple.fr"}
+
+    # Alertes : aucun canal, puis un canal qui répond et un qui refuse.
+    assert send_test_alerts(paths, secrets=secrets) == 1
+    assert "Aucun canal d'alerte actif" in capsys.readouterr().err
+    received: list[str] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            received.append(self.path)
+            self.send_response(200 if self.path == "/ok" else 500)
+            self.end_headers()
+
+        def log_message(self, *_a: object) -> None:
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    good, bad = AlertChannel(name="Bon", kind="webhook"), AlertChannel(name="Mauvais", kind="slack")
+    secrets.set(f"alert:{good.id}", base + "/ok")
+    secrets.set(f"alert:{bad.id}", base + "/ko")
+    store.update(lambda c: setattr(c.settings, "alert_channels", [good, bad]))
+    assert await asyncio.to_thread(send_test_alerts, paths, secrets=secrets) == 1
+    out = capsys.readouterr().out
+    assert "✓ Bon" in out and "✗ Mauvais : Le canal a refusé l'alerte (500)." in out
+    assert received == ["/ok", "/ko"]
+    server.shutdown()
