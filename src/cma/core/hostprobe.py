@@ -49,6 +49,38 @@ class HostProbe:
             "origin_down": "warning",
         }.get(self.state, "error")
 
+    def advice(self) -> str:
+        """Ce qu'il faut faire, quand le résultat le demande ; vide sinon."""
+        texts = {
+            "not_found": tr(
+                "Le nom n'existe pas dans le DNS public : « Corriger le DNS… » crée le CNAME vers le tunnel, ou "
+                "vérifiez que la zone est bien servie par Cloudflare."
+            ),
+            "no_connector": tr(
+                "Aucun cloudflared n'est relié au tunnel : relancez le service cloudflared sur le serveur "
+                "(« État des connecteurs… » dans le menu du tunnel)."
+            ),
+            "origin_down": tr(
+                "cloudflared tourne, mais le service vers lequel il renvoie ne répond pas : vérifiez que ce service "
+                "est démarré sur le serveur et que l'adresse de la règle (« Modifier le service… ») est la bonne."
+            ),
+            "refused": tr(
+                "Le service token n'est autorisé par aucune politique de l'application : « Autoriser un service "
+                "token… » dans l'onglet Applications."
+            ),
+            "challenge": tr(
+                "Un réglage de sécurité de la zone (Bot Fight Mode, mode « I'm Under Attack » ou règle WAF avec "
+                "défi) demande une vérification de navigateur. Un navigateur la passe ; un script ou une machine "
+                "munie d'un service token est bloqué. Réglage dans le tableau de bord Cloudflare : Sécurité › Bots "
+                "et Sécurité › WAF. Une règle WAF ou Super Bot Fight Mode admet une exception par nom d'hôte ; "
+                "Bot Fight Mode, non. CMA ne modifie pas ces réglages."
+            ),
+            "unreachable": tr(
+                "Aucune réponse : vérifiez la connexion de ce poste, puis l'état du nom dans le tableau de bord."
+            ),
+        }
+        return texts.get(self.state, "")
+
     def summary(self, hostname: str) -> str:
         texts = {
             "not_found": tr("{host} : nom introuvable dans le DNS public."),

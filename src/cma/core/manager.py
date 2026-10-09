@@ -604,6 +604,22 @@ class SessionManager:
             return await self.start_forward(session.profile_id, session.forward)
         return await self.start_cloudflare(session.profile_id)
 
+    async def resume_after_network(self) -> int:
+        """Retour du réseau ou sortie de veille : les sessions en attente de reconnexion réessaient aussitôt, celles
+        abandonnées après trop d'échecs sont relancées. Renvoie le nombre de sessions concernées."""
+        count = 0
+        for session in list(self.sessions.values()):
+            if session.state == SessionState.RECONNECTING and session.wake():
+                count += 1
+            elif session.state == SessionState.ERROR and session.gave_up:
+                try:
+                    await self.restart(session.id)
+                except ManagerError as exc:
+                    self.bus.publish(Notification("error", session.name, str(exc)))
+                    continue
+                count += 1
+        return count
+
     async def stop_profile(self, profile_id: str) -> None:
         for session in list(self.sessions.values()):
             if session.profile_id == profile_id:

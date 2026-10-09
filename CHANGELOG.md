@@ -2,6 +2,23 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Ajouté
+- **Surveillance des services publiés** : toutes les 15 minutes, chaque nom d'hôte HTTP d'un tunnel en service est
+  demandé depuis Internet (avec le service token du profil CMA s'il y en a un). Notification quand un service ne
+  répond plus (502, 504), qu'un tunnel n'a plus de connecteur (1033) ou qu'un nom disparaît du DNS, puis à son
+  retour ; « Cloudflare · N ! » dans la navigation et la zone de notification. Réglage dans Paramètres › Général
+  › Cloudflare ; la tâche planifiée (CMA fermé) teste aussi les services. `cma tunnels --services` en ligne de
+  commande.
+- **État du service sur les cartes** de la vue Cloudflare (« Répond », « Service injoignable », « Aucun
+  connecteur »…), avec le conseil et l'heure du test en info-bulle ; **« Tester tous les noms d'hôte »** ouvre un
+  tableau récapitulatif, pannes en premier.
+- **Reprise après la veille et un retour du réseau** : les connexions en attente de reconnexion repartent aussitôt,
+  celles abandonnées après une longue coupure sont relancées.
+- **Conseils** pour chaque résultat d'un test depuis Internet, dont la vérification de navigateur de Cloudflare
+  (Bot Fight Mode, « I'm Under Attack », règle WAF) et ce qu'elle implique pour une machine munie d'un service token.
+
 ## [2.9.0] - 2026-10-09
 
 ### Ajouté

@@ -417,3 +417,26 @@ async def test_launch_items_edge_cases(manager, store):
         await manager.start_favorites()
     with pytest.raises(ManagerError):
         await manager.probe_session("absent")
+
+
+async def test_resume_after_network(manager, store):
+    """Retour du réseau : une session en attente de reconnexion repart aussitôt, une session abandonnée après trop
+    d'échecs est relancée ; une session en service n'est pas touchée."""
+    FAKE_ENV["FAKE_CF_MODE"] = "crash"
+    FAKE_ENV["FAKE_CF_CRASH_AFTER"] = "0.3"
+    waiting = add(store, CloudflareProfile(name="Attente", hostname="a.ex.fr", local_port=free_port()))
+    info = await manager.start_cloudflare(waiting.id)
+    session = await wait_state(manager, info.id, {SessionState.RECONNECTING})
+    session.backoff.failures = 5  # le prochain délai serait de 32 s
+    FAKE_ENV["FAKE_CF_MODE"] = "ok"
+    given_up = add(store, CloudflareProfile(name="Abandon", hostname="b.ex.fr", local_port=free_port()))
+    abandoned = await manager.start_cloudflare(given_up.id)
+    stale = await wait_state(manager, abandoned.id, {SessionState.LISTENING})
+    stale.gave_up = True
+    stale.set_state(SessionState.ERROR, "Abandon après 10 tentatives.")
+
+    assert await manager.resume_after_network() == 2
+    assert session.backoff.failures <= 1  # délais repartis de zéro
+    relaunched = manager.active_session_for(given_up.id)
+    assert relaunched is not None and relaunched.id != abandoned.id
+    await wait_state(manager, relaunched.id, {SessionState.LISTENING})

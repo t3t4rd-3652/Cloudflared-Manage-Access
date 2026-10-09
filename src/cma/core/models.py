@@ -413,6 +413,8 @@ class Settings(Model):
     lock_after_minutes: int = Field(default=0, ge=0, le=1440)
     # Relevé périodique de l'état des tunnels du compte Cloudflare (avec un jeton d'API), alerte s'ils tombent.
     watch_tunnels: bool = True
+    # Test périodique, depuis Internet, des noms d'hôte HTTP publiés par les tunnels en service.
+    watch_services: bool = True
     cloudflare_account_id: str | None = None
 
     @field_validator("language", mode="before")

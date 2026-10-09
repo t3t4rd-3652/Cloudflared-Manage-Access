@@ -48,7 +48,8 @@ from cma.core.cfapi import (
 )
 from cma.core.dnscheck import DnsCheck
 from cma.core.hostprobe import HostProbe, probe_hostname_async
-from cma.core.models import AuthMode, CloudflareProfile
+from cma.core.models import CloudflareProfile
+from cma.core.servicewatch import ServiceResult, ServiceTarget, probe_token, targets_of
 from cma.i18n import tr
 from cma.ui.context import GuiContext
 from cma.ui.format import last_read
@@ -60,6 +61,7 @@ from cma.ui.views.cloud.cards import (
     PROFILE_ROLE,
     PROTECTED_ROLE,
     RULE_ROLE,
+    SERVICE_ROLE,
     TUNNEL_ROLE,
     StatTile,
     TunnelTree,
@@ -78,6 +80,7 @@ from cma.ui.views.cloud.helpers import (
     plural,
     tunnel_state,
 )
+from cma.ui.views.cloud.services import service_tooltip, show_service_tests
 from cma.ui.views.cloud.summary import account_stats, protected_hosts
 from cma.ui.views.cloud.tokens_tab import TokensTab
 from cma.ui.views.cloud.tunnel_create import ask_tunnel_name, show_new_tunnel
@@ -356,6 +359,13 @@ class CloudView(QWidget):
         for widget in (self.publish_button, self.import_button, self.unpublish_button):
             row.addWidget(widget)
         row.addStretch()
+        self.test_all_button = button(
+            tr("Tester tous les noms d'hôte"),
+            "world",
+            tooltip=tr("Demander chaque nom d'hôte publié depuis Internet, comme un visiteur"),
+        )
+        self.test_all_button.clicked.connect(self.test_all_hostnames)
+        row.addWidget(self.test_all_button)
         create = button(tr("Créer un tunnel…"), "plus")
         create.clicked.connect(self.create_tunnel)
         row.addWidget(create)
@@ -585,6 +595,7 @@ class CloudView(QWidget):
                 if in_cma:
                     notes.append(tr("profil présent dans CMA"))
                 child.setToolTip(0, f"{rule.hostname}{rule.path}  →  {rule.service}")
+                self._set_service_result(child, self.ctx.services.result(rule.hostname, rule.path))
                 child.setToolTip(1, rule.service)
                 child.setData(0, TUNNEL_ROLE, view.tunnel)
                 child.setData(0, RULE_ROLE, rule)
@@ -621,6 +632,9 @@ class CloudView(QWidget):
         tunnel = item.data(0, TUNNEL_ROLE) if item is not None else None
         usable = self.overview is not None and bool(self.overview.tunnels) and bool(self.overview.zones)
         self.publish_button.setEnabled(usable)
+        self.test_all_button.setEnabled(
+            self.overview is not None and any(v.hostnames for v in self.overview.tunnels)
+        )
         self.unpublish_button.setEnabled(isinstance(rule, IngressRule))
         if isinstance(rule, IngressRule):
             scope = tr("Importer {host} comme profil").format(host=rule.hostname)
@@ -779,28 +793,77 @@ class CloudView(QWidget):
         self.ctx.run(self.admin.fix_dns(tunnel, host), done, self._error)
 
     def _probe_token(self, hostname: str) -> tuple[str, str] | None:
-        """(Client ID, secret) du service token du profil CMA de ce nom d'hôte, s'il en a un et que son secret est
-        dans le coffre : la requête de test passe alors Access et atteint le tunnel."""
-        config = self.ctx.config()
-        for profile in config.cloudflare_profiles:
-            if profile.hostname.lower() != hostname.lower() or profile.auth != AuthMode.SERVICE_TOKEN:
-                continue
-            token = config.token(profile.token_id)
-            secret = self.ctx.core.secrets.get(token.secret_key) if token is not None else None
-            if token is not None and secret:
-                return token.client_id, secret
-        return None
+        return probe_token(self.ctx.config(), self.ctx.core.secrets, hostname)
+
+    def _set_service_result(self, item: QTreeWidgetItem, result: ServiceResult | None) -> None:
+        item.setData(0, SERVICE_ROLE, result)
+        rule = item.data(0, RULE_ROLE)
+        if isinstance(rule, IngressRule):
+            base = f"{rule.hostname}{rule.path}  →  {rule.service}"
+            item.setToolTip(0, base + ("\n\n" + service_tooltip(result) if result is not None else ""))
+
+    def show_service_results(self) -> None:
+        """Reporte les derniers tests (surveillance ou test manuel) sur les cartes, sans relire le compte."""
+        for row in range(self.tree.topLevelItemCount()):
+            parent = self.tree.topLevelItem(row)
+            for index in range(parent.childCount() if parent is not None else 0):
+                child = parent.child(index) if parent is not None else None
+                rule = child.data(0, RULE_ROLE) if child is not None else None
+                if child is not None and isinstance(rule, IngressRule):
+                    self._set_service_result(child, self.ctx.services.result(rule.hostname, rule.path))
+        self.tree.viewport().update()
+
+    def _target(self, rule: IngressRule) -> ServiceTarget:
+        owner = next(
+            (v.tunnel for v in (self.overview.tunnels if self.overview else []) if rule in v.hostnames), None
+        )
+        return ServiceTarget(
+            rule.hostname, rule.path, rule.service, owner.id if owner else "", owner.name if owner else ""
+        )
+
+    def test_all_hostnames(self) -> None:
+        """Tous les noms d'hôte publiés, testés depuis Internet ; le tableau des résultats s'ouvre ensuite."""
+        if self.overview is None:
+            return
+        targets = targets_of(
+            ((v.tunnel, v.hostnames) for v in self.overview.tunnels), web_only=False, active_only=False
+        )
+        if not targets:
+            return
+        self.test_all_button.setEnabled(False)
+        self.status.setText(
+            plural(
+                len(targets),
+                tr("Test de {n} nom d'hôte depuis Internet…"),
+                tr("Test de {n} noms d'hôte depuis Internet…"),
+            )
+        )
+
+        def done(results: list[tuple[ServiceTarget, HostProbe]]) -> None:
+            self._show_summary()
+            self._update_tunnel_actions()
+            self.ctx.services.record(results)
+            self.show_service_results()
+            show_service_tests(self, results)
+
+        def failed(error: BaseException) -> None:
+            self._update_tunnel_actions()
+            self._error(error)
+
+        self.ctx.run(self.admin.probe_services(targets), done, failed)
 
     def test_from_internet(self, rule: IngressRule) -> None:
         """Ce qu'obtient un visiteur : DNS public, Access, tunnel, service. Un service non HTTP (SSH, RDP, TCP)
         ne se teste ainsi que jusqu'à Access ; la connexion complète se teste avec une session."""
-        web = rule.service.lower().startswith(("http://", "https://"))
+        target = self._target(rule)
+        web = target.web
         token = self._probe_token(rule.hostname) if web else None
-        path = rule.path if rule.path.startswith("/") else "/"
         self.status.setText(tr("Test de {host} depuis Internet…").format(host=rule.hostname + rule.path))
 
         def done(result: HostProbe) -> None:
             self._show_summary()
+            self.ctx.services.record([(target, result)])
+            self.show_service_results()
             text = result.summary(rule.hostname + rule.path)
             if not web:
                 text += " " + tr(
@@ -811,7 +874,9 @@ class CloudView(QWidget):
                 text += " " + tr("Test fait avec le service token du profil CMA.")
             self.ctx.notify(result.tone, text)
 
-        self.ctx.run(probe_hostname_async(rule.hostname, token=token, path=path), done, self._error)
+        self.ctx.run(
+            probe_hostname_async(rule.hostname, token=token, path=target.probe_path), done, self._error
+        )
 
     def move_rule(self, tunnel: Tunnel, rule: IngressRule, offset: int) -> None:
         self.ctx.run(self.admin.move_rule(tunnel, rule, offset), lambda _p: self.refresh(), self._error)

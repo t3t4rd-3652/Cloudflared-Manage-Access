@@ -33,6 +33,7 @@ from cma.core.cfapi import (
 from cma.core.config_store import ConfigStore
 from cma.core.dnscheck import DnsCheck, check_all, zone_of
 from cma.core.expiry import parse_expiry
+from cma.core.hostprobe import HostProbe
 from cma.core.models import (
     AuthMode,
     CloudflareProfile,
@@ -45,6 +46,7 @@ from cma.core.models import (
 from cma.core.policies import AccessGroup, AccessPolicy, PolicyRule
 from cma.core.redact import register_secret
 from cma.core.secrets import SecretStore
+from cma.core.servicewatch import ServiceTarget, probe_targets, probe_token, targets_of
 from cma.i18n import tr
 
 # Appels simultanés pour lire un compte : assez pour un compte ordinaire, sans assaillir l'API.
@@ -274,6 +276,29 @@ class CloudflareAdmin:
         """Tunnels du compte choisi avec leur état, en une seule requête (relevé de la surveillance)."""
         api = self.api()
         return await asyncio.to_thread(api.list_tunnels, self.account_id())
+
+    async def service_targets(self, *, web_only: bool = True) -> list[ServiceTarget]:
+        """Noms d'hôte publiés par les tunnels en service : la liste des tunnels, puis leurs règles en même temps."""
+        api = self.api()
+        account = self.account_id()
+
+        def load() -> list[ServiceTarget]:
+            tunnels = [t for t in api.list_tunnels(account) if t.status in ("healthy", "degraded")]
+            with ThreadPoolExecutor(max_workers=OVERVIEW_WORKERS, thread_name_prefix="cma-cf") as pool:
+                calls = [pool.submit(api.tunnel_ingress, account, t.id) for t in tunnels]
+                rules = [call.result()[0] for call in calls]
+            return targets_of(zip(tunnels, rules, strict=True), web_only=web_only)
+
+        return await asyncio.to_thread(load)
+
+    async def probe_services(self, targets: list[ServiceTarget]) -> list[tuple[ServiceTarget, HostProbe]]:
+        """Teste chaque nom depuis Internet, avec le service token du profil CMA quand il y en a un."""
+        config = self.store.snapshot()
+        return await probe_targets(targets, lambda host: probe_token(config, self.secrets, host))
+
+    async def check_services(self) -> list[tuple[ServiceTarget, HostProbe]]:
+        """Relevé de la surveillance des services : noms HTTP des tunnels en service, tous testés."""
+        return await self.probe_services(await self.service_targets())
 
     async def connectors(self, tunnel: Tunnel) -> list[Connector]:
         api = self.api()

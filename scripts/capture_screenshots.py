@@ -208,6 +208,18 @@ def show_demo_cloud(view) -> None:
         tokens=[RemoteServiceToken("r1", "Production", "8f3c2a1b.access", "2027-09-29T00:00:00Z")],
         zones=[Zone("z1", "exemple.fr"), Zone("z2", "lab.exemple.fr")],
     )
+    # Dernier relevé de la surveillance des services : un service en panne derrière un tunnel dégradé.
+    from cma.core.hostprobe import HostProbe
+    from cma.core.servicewatch import ServiceTarget
+
+    view.ctx.services.record(
+        [
+            (
+                ServiceTarget("grafana.lab.exemple.fr", "", "http://localhost:3000", "t2", "labo"),
+                HostProbe("origin_down", 502),
+            )
+        ]
+    )
     view.stack.setCurrentIndex(1)
     view.account.clear()
     view.account.addItem(account.name, account)

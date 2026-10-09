@@ -242,6 +242,18 @@ class SettingsView(QWidget):
         self.watch_tunnels = QCheckBox(tr("Surveiller les tunnels du compte et prévenir s'ils tombent"))
         self.watch_tunnels.toggled.connect(lambda checked: self._set("watch_tunnels", checked))
         form.addRow(self.watch_tunnels)
+        self.watch_services = QCheckBox(
+            tr("Tester aussi les services publiés depuis Internet (toutes les 15 minutes)")
+        )
+        self.watch_services.setToolTip(
+            tr(
+                "Chaque nom d'hôte HTTP d'un tunnel en service est demandé comme le ferait un visiteur : une "
+                "notification si le service ne répond plus (502, 504), si le tunnel n'a plus de connecteur (1033) "
+                "ou si le nom disparaît du DNS."
+            )
+        )
+        self.watch_services.toggled.connect(lambda checked: self._set("watch_services", checked))
+        form.addRow(self.watch_services)
         # Quand CMA est fermé : tâche planifiée Windows (`tunnels --notify` toutes les 15 minutes). Son état est lu
         # une fois ici, pas à chaque changement de configuration (schtasks est lent à lancer).
         self.watch_closed = QCheckBox(
@@ -393,6 +405,7 @@ class SettingsView(QWidget):
         self.confirm_exit.setChecked(settings.confirm_exit)
         self.check_updates.setChecked(settings.check_updates)
         self.watch_tunnels.setChecked(settings.watch_tunnels)
+        self.watch_services.setChecked(settings.watch_services)
         self.start_with_system.setChecked(autostart.supported() and autostart.is_enabled())
         self.port_min.setValue(settings.auto_port_min)
         self.port_max.setValue(settings.auto_port_max)

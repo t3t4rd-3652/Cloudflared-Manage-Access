@@ -164,7 +164,10 @@ class Session(ABC):
         self._reconnect_at: float | None = None
         self._task: asyncio.Task[None] | None = None
         self._stop_event: asyncio.Event | None = None
+        self._wake_event: asyncio.Event | None = None
         self._stopping = False
+        # Abandon après trop d'échecs de suite (réseau coupé le plus souvent) : la reprise du réseau relance.
+        self.gave_up = False
 
     # --- État ----------------------------------------------------------------------
 
@@ -288,9 +291,34 @@ class Session(ABC):
             return True
         return False
 
+    def wake(self) -> bool:
+        """Écourte l'attente d'une reconnexion (retour du réseau, sortie de veille) et repart des délais courts.
+        False si la session n'attendait pas."""
+        if self._state != SessionState.RECONNECTING or self._wake_event is None:
+            return False
+        self.backoff.reset()
+        self._wake_event.set()
+        return True
+
+    async def _sleep_or_wake(self, delay: float) -> bool:
+        """Comme `sleep_unless_stopped`, mais `wake()` met fin à l'attente."""
+        if self._stop_event is None:
+            await asyncio.sleep(delay)
+            return not self._stopping
+        wake = self._wake_event = asyncio.Event()
+        waiters = [asyncio.ensure_future(self._stop_event.wait()), asyncio.ensure_future(wake.wait())]
+        try:
+            await asyncio.wait(waiters, timeout=delay, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for waiter in waiters:
+                waiter.cancel()
+            self._wake_event = None
+        return not self._stopping
+
     async def wait_before_retry(self, reason: str) -> bool:
         """Passe en reconnexion et attend le prochain délai. False si on abandonne ou si l'arrêt est demandé."""
         if self.backoff.exhausted:
+            self.gave_up = True
             self.set_state(
                 SessionState.ERROR,
                 tr("{reason} Abandon après {n} tentatives.").format(reason=reason, n=self.backoff.failures),
@@ -302,4 +330,4 @@ class Session(ABC):
         self.log(
             "WARNING", tr("{reason} Nouvelle tentative dans {delay:g} s.").format(reason=reason, delay=delay)
         )
-        return await self.sleep_unless_stopped(delay)
+        return await self._sleep_or_wake(delay)

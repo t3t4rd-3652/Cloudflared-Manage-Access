@@ -27,7 +27,9 @@ from cma import APP_NAME, __version__
 from cma.core.cfapi import Tunnel
 from cma.core.events import Notification
 from cma.core.expiry import TokenExpiry, expiring_tokens
+from cma.core.hostprobe import HostProbe
 from cma.core.secrets import EncryptedFileSecretStore
+from cma.core.servicewatch import ServiceChange, ServiceResult, ServiceTarget, troubled_services_summary
 from cma.core.sessions import SessionInfo, SessionKind, SessionState
 from cma.core.tunnelwatch import TunnelChange, TunnelWatch, troubled_summary
 from cma.i18n import tr
@@ -50,6 +52,7 @@ from cma.ui.views.profiles import CloudflareProfilesView
 from cma.ui.views.settings import SettingsView
 from cma.ui.views.ssh import SshView
 from cma.ui.views.tokens import TokensView
+from cma.ui.wake import WakeWatcher
 from cma.ui.widgets import BannerStack, add_shortcut, label
 
 # Clés internes inchangées (vue mémorisée dans la configuration) ; libellés de la refonte.
@@ -89,12 +92,15 @@ def explain_tray(parent: QWidget, text: str) -> None:
 log = logging.getLogger(__name__)
 
 TUNNEL_WATCH_MS = 5 * 60 * 1000  # relevé de l'état des tunnels du compte
+SERVICE_WATCH_MS = 15 * 60 * 1000  # test des services publiés depuis Internet
 
 
 class MainWindow(QMainWindow):
     quit_requested = Signal()
     # Tunnels dégradés ou hors ligne au dernier relevé de la surveillance (liste vide : tout va bien).
     tunnels_troubled = Signal(list)
+    # Services publiés en panne au dernier test (list[ServiceResult]).
+    services_troubled = Signal(list)
 
     def __init__(self, ctx: GuiContext) -> None:
         super().__init__()
@@ -229,6 +235,18 @@ class MainWindow(QMainWindow):
         self._tunnel_timer.timeout.connect(self.check_tunnels)
         self._tunnel_timer.start()
         QTimer.singleShot(20_000, self.check_tunnels)
+        # Services publiés : test complet peu après, puis toutes les 15 minutes.
+        self._service_check_running = False
+        self._service_account: str | None = None
+        self._service_timer = QTimer(self)
+        self._service_timer.setInterval(SERVICE_WATCH_MS)
+        self._service_timer.timeout.connect(self.check_services)
+        self._service_timer.start()
+        QTimer.singleShot(60_000, self.check_services)
+        # Sortie de veille, retour du réseau : les connexions en attente repartent sans attendre leur délai.
+        self.wake = WakeWatcher(self)
+        self.wake.resumed.connect(self.resume_sessions)
+        QTimer.singleShot(3_000, self.wake.watch_network)
         ctx.theme.changed.connect(self._refresh_nav_icons)
 
         status = self.statusBar()
@@ -537,15 +555,74 @@ class MainWindow(QMainWindow):
         self.ctx.run(admin.tunnel_states(), done, failed)
         return True
 
+    def check_services(self) -> bool:
+        """Teste depuis Internet les noms d'hôte HTTP des tunnels en service ; False quand il n'y a rien à faire."""
+        settings = self.ctx.config().settings
+        admin = self.ctx.manager.cloudflare
+        account = settings.cloudflare_account_id
+        watch = self.ctx.services
+        if self._service_check_running or not settings.watch_services or not account or not admin.has_token():
+            if watch.troubled and not self._service_check_running:
+                watch.forget()
+                self._show_troubled_tunnels()
+            return False
+        if account != self._service_account:
+            watch.forget()
+            self._service_account = account
+        self._service_check_running = True
+
+        def done(results: list[tuple[ServiceTarget, HostProbe]]) -> None:
+            self._service_check_running = False
+            if self.ctx.config().settings.cloudflare_account_id != account:
+                return
+            self.report_service_changes(watch.update(results))
+            self._show_troubled_tunnels()
+            self.cloud.show_service_results()
+
+        def failed(error: BaseException) -> None:
+            self._service_check_running = False
+            log.info("Surveillance des services : relevé impossible (%s)", error)
+
+        self.ctx.run(admin.check_services(), done, failed)
+        return True
+
+    def resume_sessions(self, reason: str) -> None:
+        """Relance les sessions en attente ou abandonnées, et refait les relevés du compte (après la veille, ils
+        datent)."""
+
+        def done(count: int) -> None:
+            if count:
+                text = (
+                    tr("Sortie de veille : {n} connexion(s) relancée(s).")
+                    if reason == "sleep"
+                    else tr("Réseau revenu : {n} connexion(s) relancée(s).")
+                )
+                self.notify("info", text.format(n=count))
+
+        self.ctx.run(self.ctx.manager.resume_after_network(), done)
+        QTimer.singleShot(15_000, self.check_tunnels)
+
+    def report_service_changes(self, changes: list[ServiceChange]) -> None:
+        for change in changes:
+            action = None if change.recovered else (tr("Voir…"), lambda: self.open_tunnel(None))
+            self.notify(change.level, change.message(), action=action)
+
     def _show_troubled_tunnels(self) -> None:
-        """« Cloudflare · 1 ! » dans la navigation tant qu'un tunnel est en panne ; la zone de notification suit."""
+        """« Cloudflare · 1 ! » dans la navigation tant qu'un tunnel ou un service publié est en panne ; la zone de
+        notification suit."""
         troubled = self.tunnel_watch.troubled
+        services: list[ServiceResult] = self.ctx.services.troubled
         item = self._nav_items.get("cloud")
         if item is not None:
             base = str(item.data(Qt.ItemDataRole.UserRole + 1)[0])
-            item.setText(f"{base} · {len(troubled)} !" if troubled else base)
-            item.setToolTip(troubled_summary(troubled) or base)
+            count = len(troubled) + len(services)
+            item.setText(f"{base} · {count} !" if count else base)
+            parts = [
+                text for text in (troubled_summary(troubled), troubled_services_summary(services)) if text
+            ]
+            item.setToolTip(" · ".join(parts) or base)
         self.tunnels_troubled.emit(troubled)
+        self.services_troubled.emit(services)
 
     def report_tunnel_changes(self, changes: list[TunnelChange]) -> None:
         for change in changes:
@@ -556,12 +633,12 @@ class MainWindow(QMainWindow):
             )
             self.notify(change.level, change.message(), action=action)
 
-    def open_tunnel(self, tunnel: Tunnel, *, diagnose: bool = False) -> None:
+    def open_tunnel(self, tunnel: Tunnel | None, *, diagnose: bool = False) -> None:
         """Vue Cloudflare, onglet Tunnels, relue ; avec `diagnose`, l'état des connecteurs du tunnel s'ouvre."""
         self.show_view("cloud")
         self.cloud.tabs.setCurrentIndex(0)
         self.cloud.refresh()
-        if diagnose:
+        if diagnose and tunnel is not None:
             self.cloud.check_connectors(tunnel)
 
     def open_cloud_tokens(self) -> None:

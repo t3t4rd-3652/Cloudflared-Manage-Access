@@ -14,6 +14,7 @@ from cma.core.config_store import ConfigReadOnlyError, ConfigStore
 from cma.core.engine import Engine
 from cma.core.manager import SessionManager
 from cma.core.models import Config
+from cma.core.servicewatch import ServiceWatch
 from cma.i18n import tr
 from cma.paths import AppPaths
 from cma.ui import state as ui_state
@@ -43,6 +44,8 @@ class GuiContext:
     theme: ThemeManager
     prompter: GuiPrompter
     _notifier: Notifier | None = field(default=None, repr=False)
+    # Derniers tests des services publiés : la fenêtre principale les relève, la vue Cloudflare les affiche.
+    services: ServiceWatch = field(default_factory=ServiceWatch, repr=False)
     debug: bool = False
 
     def __post_init__(self) -> None:

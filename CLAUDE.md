@@ -163,6 +163,13 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
 - **Test depuis Internet** (`cma.core.hostprobe`) : la requête ne suit pas les redirections (une redirection vers
   `cloudflareaccess.com` signifie Access). Sur le vrai compte, les 403 sans navigateur venaient de la protection
   contre les robots (`cf-mitigated: challenge`), pas d'Access ni du service : ne pas les lire comme un refus.
+- **Surveillance des services** (`cma.core.servicewatch`, relevé dans `MainWindow.check_services`, résultats
+  partagés par `GuiContext.services`) : seuls 502/504, 1033 et « nom introuvable » alertent ; la page Access et la
+  vérification de navigateur sont normales. « unreachable » ne change pas l'état connu. Les noms des tunnels
+  inactifs ou hors ligne ne sont pas testés (la surveillance des tunnels en parle déjà).
+- **Reprise après la veille** (`cma.ui.wake.WakeWatcher`) : saut de l'horloge murale entre deux tics de 30 s, et
+  `QNetworkInformation` pour le réseau. `Session.wake()` écourte l'attente d'une reconnexion ; une session
+  abandonnée (`gave_up`) est relancée par `SessionManager.resume_after_network`.
 - **Boîtes modales et tests** : chaque boîte ouverte par la vue Cloudflare passe par une fonction de module
   (`ask_*`, `show_*`) que les tests remplacent ; `exec()` bloquerait le test jusqu'au délai de 180 s.
 

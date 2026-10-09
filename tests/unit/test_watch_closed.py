@@ -156,3 +156,38 @@ def test_portable_vault_uses_the_remembered_passphrase(monkeypatch, tmp_path):
     monkeypatch.setattr(cli.getpass, "getpass", lambda _p: "phrase-longue")
     assert isinstance(cli.portable_secret_store(paths), EncryptedFileSecretStore)
     assert Path(paths.encrypted_secrets_file).exists()
+
+
+def test_scheduled_check_also_reports_services(monkeypatch, tmp_path):
+    """Tâche planifiée : un service en panne derrière un tunnel en ligne est signalé si le réglage le demande, et un
+    test des services impossible ne fait pas échouer le relevé des tunnels."""
+    from cma.core.cfapi import CloudflareApiError, Tunnel
+    from cma.core.hostprobe import HostProbe
+    from cma.core.servicewatch import ServiceTarget
+
+    paths = AppPaths(tmp_path / "data")
+    paths.ensure()
+    shown: list[str] = []
+    monkeypatch.setattr(
+        "cma.platform.notify.system_notification", lambda _t, text: shown.append(text) or True
+    )
+
+    async def states(_self) -> list[Tunnel]:
+        return [Tunnel("t1", "bureau", "healthy")]
+
+    target = ServiceTarget("app.exemple.fr", "", "http://localhost:3000", "t1", "bureau")
+    outcome: dict[str, object] = {"value": [(target, HostProbe("origin_down", 502))]}
+
+    async def services(_self) -> list[tuple[ServiceTarget, HostProbe]]:
+        if isinstance(outcome["value"], Exception):
+            raise outcome["value"]
+        return outcome["value"]  # type: ignore[return-value]
+
+    monkeypatch.setattr("cma.core.cfadmin.CloudflareAdmin.tunnel_states", states)
+    monkeypatch.setattr("cma.core.cfadmin.CloudflareAdmin.check_services", services)
+    monkeypatch.setattr(cli, "send_command", lambda *_a, **_k: None)
+    assert cli.show_tunnels(paths, as_json=False, notify=True, secrets=MemorySecretStore()) == 2
+    assert shown == ["app.exemple.fr ne répond plus — ouvrez CMA pour le diagnostic."]
+    outcome["value"] = CloudflareApiError("zone illisible")
+    assert cli.show_tunnels(paths, as_json=False, notify=True, secrets=MemorySecretStore()) == 0
+    assert len(shown) == 1

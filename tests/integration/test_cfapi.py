@@ -715,3 +715,56 @@ async def test_overview_calls_run_in_parallel(cf, admin, monkeypatch):
         monkeypatch.setattr(CloudflareApi, name, waiting)
     overview = await admin.overview(account)
     assert len(overview.tunnels) == 2 and overview.zones
+
+
+async def test_service_targets_and_checks(cf, admin, monkeypatch):
+    """Surveillance des services : noms HTTP des tunnels en service, testés avec le token du profil CMA."""
+    from cma.core.hostprobe import HostProbe
+
+    await admin.connect(TOKEN)
+    cf.state.configs["t2"]["ingress"].insert(0, {"hostname": "app.lab.exemple.fr", "service": "http://x:1"})
+    targets = await admin.service_targets()
+    assert [(t.label, t.tunnel_name) for t in targets] == [
+        ("grafana.exemple.fr", "bureau")
+    ]  # « labo » est hors ligne
+    assert [t.label for t in await admin.service_targets(web_only=False)] == [
+        "ssh.exemple.fr",
+        "rdp.exemple.fr",
+        "grafana.exemple.fr",
+    ]
+    seen: list[tuple[str, object]] = []
+
+    async def probe(hostname: str, *, token: object, path: str) -> HostProbe:
+        seen.append((hostname, token))
+        return HostProbe("origin_down", 502)
+
+    monkeypatch.setattr("cma.core.servicewatch.probe_hostname_async", probe)
+    results = await admin.check_services()
+    assert [(t.hostname, p.state) for t, p in results] == [("grafana.exemple.fr", "origin_down")]
+    assert seen == [("grafana.exemple.fr", None)]
+
+
+async def test_cli_tunnels_with_services(cf, admin, paths, secrets, capsys, monkeypatch):
+    import asyncio
+    import json
+
+    from cma.cli import show_tunnels
+    from cma.core.hostprobe import HostProbe
+
+    async def probe(hostname: str, **_kwargs: object) -> HostProbe:
+        return HostProbe("origin_down", 502)
+
+    monkeypatch.setattr("cma.core.servicewatch.probe_hostname_async", probe)
+    await admin.connect(TOKEN)
+    cf.state.tunnels[1]["status"] = "healthy"
+
+    def run(**kwargs) -> int:
+        return show_tunnels(paths, secrets=secrets, base_url=cf.base_url, services=True, **kwargs)
+
+    assert await asyncio.to_thread(run, as_json=False) == 2  # tunnels en ligne, mais un service en panne
+    out = capsys.readouterr().out
+    assert "! grafana.exemple.fr : le tunnel répond, mais pas le service derrière lui (erreur 502)." in out
+    assert await asyncio.to_thread(run, as_json=True) == 2
+    data = json.loads(capsys.readouterr().out)
+    assert [t["status"] for t in data["tunnels"]] == ["healthy", "healthy"]
+    assert data["services"][0]["hostname"] == "grafana.exemple.fr" and data["services"][0]["status"] == 502

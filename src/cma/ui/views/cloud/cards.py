@@ -47,6 +47,7 @@ from cma.i18n import tr
 from cma.ui.icons import icon, set_glyph
 from cma.ui.theme import current_tokens, mono_font, status_colors
 from cma.ui.views.cloud.helpers import app_type_label, expiry_label, expiry_status, plural, tunnel_state
+from cma.ui.views.cloud.services import service_badge
 from cma.ui.widgets import label
 
 TUNNEL_ROLE = 256
@@ -55,6 +56,7 @@ PROTECTED_ROLE = 258
 PROFILE_ROLE = 259
 TOKEN_ROLE = 260  # tableau des service tokens du compte
 DNS_ROLE = 262  # état du DNS d'un nom d'hôte publié (DnsCheck)
+SERVICE_ROLE = 263  # dernier test du nom d'hôte depuis Internet (ServiceResult)
 
 # Géométrie des cartes de tunnel.
 CARD_GAP = 12
@@ -313,6 +315,8 @@ class TunnelDelegate(QStyledItemDelegate):
         dns = index.data(DNS_ROLE)
         if isinstance(dns, DnsCheck) and not dns.ok:
             badges.append((dns.label(), "world-www", "danger" if dns.fixable else "warning"))
+        if (probe_badge := service_badge(index.data(SERVICE_ROLE))) is not None:
+            badges.append(probe_badge)
         if index.data(PROFILE_ROLE):
             badges.append((tr("Profil CMA"), "circle-check", "info"))
         if index.data(PROTECTED_ROLE):

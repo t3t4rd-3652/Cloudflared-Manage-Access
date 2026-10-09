@@ -1,6 +1,6 @@
 # Plan du projet
 
-État au 2026-10-09, version **2.9.0** (P8 : lecture du compte en parallèle, test depuis Internet, historique des notifications). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+État au 2026-10-09, version **2.9.0** (P8 : lecture du compte en parallèle, test depuis Internet, historique des notifications) ; P9 à P12 en cours. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -278,6 +278,58 @@ reconnus.
 3. **Historique des notifications** : les bandeaux d'information disparaissent après 5 s. Les 100 dernières
    notifications de la session (heure, niveau, texte, action encore possible) se retrouvent depuis la barre d'état,
    avec le nombre d'alertes non lues.
+
+### P9 — Ne plus découvrir les pannes par hasard (2.10)
+
+Le test depuis Internet de la 2.9 a trouvé, sur le vrai compte, quatre noms d'hôte qui renvoyaient 502 sans que rien
+ne l'ait signalé : CMA surveillait les tunnels, pas les services derrière eux.
+
+**État au 2026-10-09 : les quatre points sont réalisés** (section « Non publié » du CHANGELOG) : `cma.core.servicewatch`,
+`cma.ui.wake`, `cloud/services.py`. Un nom sans réponse du tout (« unreachable ») garde son état précédent : c'est le
+plus souvent le réseau du poste, et tous les noms tomberaient ensemble.
+
+1. **Surveillance des services publiés** : la surveillance des tunnels teste aussi les noms d'hôte HTTP (toutes les
+   15 minutes, avec le service token du profil CMA s'il y en a un). Alerte au passage à « service injoignable »
+   (502, 504), « aucun connecteur » (1033) ou « nom introuvable », annonce du retour ; la page Access et la
+   vérification de navigateur sont des états normaux. La tâche planifiée (CMA fermé) fait de même.
+2. **État du service dans la vue Cloudflare** : chaque carte de nom d'hôte montre le résultat de son dernier test ;
+   « Tester tous les noms d'hôte » donne un tableau récapitulatif.
+3. **Reprise après la veille et un changement de réseau** : au réveil ou au retour du réseau, les sessions en
+   attente de reconnexion réessaient aussitôt, et celles abandonnées après une coupure réseau sont réarmées.
+4. **Vérification de navigateur expliquée** : ce qu'elle implique pour une machine munie d'un service token, et où
+   la régler dans Cloudflare. CMA ne touche pas à ce réglage de sécurité.
+
+### P10 — Compte Cloudflare plus complet (2.11)
+
+1. **Routes de réseau privé des tunnels** (WARP) : lister, ajouter et retirer les plages d'adresses (CIDR) et les
+   réseaux virtuels routés par un tunnel.
+2. **Instantané de la configuration** : tunnels, règles, applications Access, politiques, DNS des noms publiés et
+   métadonnées des tokens (aucun secret) exportés en JSON ; la comparaison de deux instantanés dit ce qui a changé
+   (par exemple une politique modifiée dans le tableau de bord). Pas de restauration automatique.
+3. **Permissions du jeton** : pour chaque fonction de CMA, la permission nécessaire et si elle fonctionne (appel
+   en lecture), au même endroit.
+4. **Trafic par nom d'hôte** : requêtes et erreurs 5xx des dernières 24 heures sur chaque carte (permission
+   d'analyse à confirmer sur le vrai compte).
+5. **Journal d'audit du compte** : qui a modifié quel tunnel, quelle application, quelle politique, et quand.
+
+### P11 — Usage quotidien (2.12)
+
+1. **Liens `cma://`** (`cma://connect/<profil>`) depuis un favori, un document ou un ticket, enregistrés par
+   l'installeur pour l'utilisateur courant ; confirmation sauf pour un profil marqué comme sûr.
+2. **Partager un profil** : lien ou fichier `.cma` sans aucun secret, importé en un clic ; le service token se
+   transmet à part.
+3. **Recherche étendue dans la palette** (Ctrl+K) : tunnels, noms d'hôte, applications Access et tokens, avec un
+   saut vers l'objet.
+4. **Plusieurs comptes Cloudflare** : jetons d'API nommés, bascule depuis l'en-tête de la vue.
+
+### P12 — Qualité et documentation (au fil des versions)
+
+1. **Découper les grosses vues** : onglet Tunnels dans `cloud/tunnels_tab.py`, `profiles.py` en liste et éditeur,
+   `settings.py` en une section par module.
+2. **Guide d'utilisation** (`docs/GUIDE.md`) par tâche : ouvrir un accès RDP, publier un service, enquêter sur une
+   502, renouveler un token, avec des captures à jour.
+3. **Finitions** : messages longs repliés dans l'historique des notifications ; tests de bout en bout de la
+   surveillance des services avec le faux serveur.
 
 ### Dette technique à surveiller
 
