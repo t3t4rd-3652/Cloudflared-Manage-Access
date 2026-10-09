@@ -648,6 +648,10 @@ def test_ingress_rules_from_the_tunnel_menu(qtbot, gui, cf, monkeypatch):
     qtbot.waitUntil(
         lambda: cf.state.configs["t1"]["ingress"][-1]["service"] == "http_status:503", timeout=10000
     )
+    # Attendre la relecture qui suit : elle reconstruit l'arbre, et effacerait la sélection faite avant elle.
+    qtbot.waitUntil(
+        lambda: "http_status:503" in view.tree.topLevelItem(0).toolTip(0) and not view._loading, timeout=10000
+    )
 
     # Retirer la règle /api : le nom d'hôte reste publié (son DNS aussi), la confirmation le dit.
     view.tree.topLevelItem(0).child(0).setSelected(True)
