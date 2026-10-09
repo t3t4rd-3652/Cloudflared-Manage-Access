@@ -379,6 +379,9 @@ class Workspace(Model):
     id: str = Field(default_factory=new_id)
     name: Name
     items: list[LaunchItem] = Field(default_factory=list[LaunchItem])
+    # Ouvert au démarrage de CMA ; `unless_network` : sauf sur ce réseau Wi-Fi (par exemple à la maison).
+    on_startup: bool = False
+    unless_network: str = ""
 
 
 class ApiToken(Model):
@@ -534,3 +537,13 @@ def unique_name(base: str, existing: set[str] | list[str]) -> str:
     while f"{base} ({index})".lower() in taken:
         index += 1
     return f"{base} ({index})"
+
+
+def startup_workspaces(config: Config, wifi: str | None) -> list[Workspace]:
+    """Espaces à ouvrir au démarrage, sur le réseau Wi-Fi `wifi` (None : pas de Wi-Fi, ou inconnu)."""
+    current = (wifi or "").strip().lower()
+    return [
+        w
+        for w in config.workspaces
+        if w.on_startup and w.items and not (w.unless_network and w.unless_network.strip().lower() == current)
+    ]

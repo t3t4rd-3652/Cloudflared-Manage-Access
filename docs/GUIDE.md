@@ -32,6 +32,12 @@ Le profil existe déjà dans Cloudflare ? Dans **Cloudflare › Tunnels**, séle
 En cas de souci, **Diagnostiquer…** (menu de la session ou du profil) vérifie cloudflared, le port local, le DNS,
 Access et l'authentification, et dit quoi corriger.
 
+Vous ouvrez les mêmes accès chaque matin ? **Sessions › Espaces de travail…**, cochez **Ouvrir au démarrage de CMA**
+et, si besoin, **Sauf sur le réseau Wi-Fi** de la maison (« Réseau actuel » le remplit).
+
+Vos serveurs SSH sont déjà dans `~/.ssh/config` ? **Serveurs SSH**, menu de la liste › **Importer ~/.ssh/config…** :
+clés, rebonds et passages par cloudflared sont repris.
+
 ## Publier un nouveau service
 
 Il faut un tunnel en ligne (sinon **Créer un tunnel…** donne la commande d'installation de son connecteur) et un

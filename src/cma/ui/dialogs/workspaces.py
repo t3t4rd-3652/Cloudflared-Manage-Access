@@ -10,6 +10,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
 from cma.core.manager import LaunchReport
 from cma.core.models import Config, LaunchItem, Workspace, unique_name
 from cma.i18n import tr
+from cma.platform.network import current_wifi
 from cma.ui.context import GuiContext
 from cma.ui.icons import app_icon
 from cma.ui.views.common import confirm
@@ -127,6 +129,22 @@ class WorkspacesDialog(QDialog):
         self.name.editingFinished.connect(self._rename)
         right.addWidget(label(tr("Nom")))
         right.addWidget(self.name)
+        self.on_startup = QCheckBox(tr("Ouvrir au démarrage de CMA"))
+        self.on_startup.toggled.connect(self._startup_changed)
+        right.addWidget(self.on_startup)
+        network_row = QHBoxLayout()
+        self.unless_network = QLineEdit()
+        self.unless_network.setPlaceholderText(tr("Sauf sur le réseau Wi-Fi… (facultatif)"))
+        self.unless_network.setAccessibleName(tr("Sauf sur le réseau Wi-Fi"))
+        self.unless_network.setToolTip(
+            tr("Par exemple le Wi-Fi de la maison, où les services sont joignables sans passer par CMA.")
+        )
+        self.unless_network.editingFinished.connect(self._network_changed)
+        network_row.addWidget(self.unless_network, 1)
+        self.current_network = button(tr("Réseau actuel"), "world")
+        self.current_network.clicked.connect(self._use_current_network)
+        network_row.addWidget(self.current_network)
+        right.addLayout(network_row)
         right.addWidget(label(tr("Accès à ouvrir")))
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
@@ -182,11 +200,15 @@ class WorkspacesDialog(QDialog):
 
     def _show_current(self) -> None:
         workspace = self.current()
-        for widget in (self.name, self.tree, self.launch_button, self.delete_button):
+        for widget in (self.name, self.tree, self.launch_button, self.delete_button, self.on_startup):
             widget.setEnabled(workspace is not None)
         self._loading = True
         clear_items(self.tree)
         self.name.setText(workspace.name if workspace else "")
+        self.on_startup.setChecked(bool(workspace and workspace.on_startup))
+        self.unless_network.setText(workspace.unless_network if workspace else "")
+        self.unless_network.setEnabled(bool(workspace and workspace.on_startup))
+        self.current_network.setEnabled(bool(workspace and workspace.on_startup))
         if workspace is not None:
             self._fill_tree(workspace)
         self._loading = False
@@ -242,6 +264,29 @@ class WorkspacesDialog(QDialog):
         current = self.list.currentItem()
         if updated is not None and current is not None:
             current.setText(f"{updated.name} ({len(updated.items)})")
+
+    def _startup_changed(self, checked: bool) -> None:
+        workspace = self.current()
+        if self._loading or workspace is None:
+            return
+        self._update(workspace.id, lambda target: setattr(target, "on_startup", checked))
+        self.unless_network.setEnabled(checked)
+        self.current_network.setEnabled(checked)
+
+    def _network_changed(self) -> None:
+        workspace = self.current()
+        if self._loading or workspace is None:
+            return
+        value = self.unless_network.text().strip()
+        self._update(workspace.id, lambda target: setattr(target, "unless_network", value))
+
+    def _use_current_network(self) -> None:
+        network = current_wifi()
+        if network is None:
+            self.ctx.notify("info", tr("Aucun réseau Wi-Fi détecté sur ce poste."))
+            return
+        self.unless_network.setText(network)
+        self._network_changed()
 
     def _rename(self) -> None:
         workspace = self.current()

@@ -42,6 +42,7 @@ from cma.ui.views.common import (
 )
 from cma.ui.views.ssh.files_tab import FilesTab
 from cma.ui.views.ssh.forwards_tab import ForwardsTab
+from cma.ui.views.ssh.import_config import run_ssh_config_import
 from cma.ui.views.ssh.ports_tab import PortsTab
 from cma.ui.views.ssh.settings_tab import SettingsTab
 from cma.ui.widgets import (
@@ -225,6 +226,7 @@ class SshView(QWidget):
             [
                 ("copy", tr("Dupliquer"), self.duplicate),
                 ("file-import", tr("Importer…"), lambda: run_import(ctx, self)),
+                ("terminal-2", tr("Importer ~/.ssh/config…"), lambda: run_ssh_config_import(ctx, self)),
                 (
                     "file-export",
                     tr("Exporter…"),

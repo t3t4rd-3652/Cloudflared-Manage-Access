@@ -56,6 +56,7 @@ from cma.ui.states import (  # noqa: F401 (RUNNING, TO_CHECK, sessions_summary :
 )
 from cma.ui.theme import ICON_OF_STATE, STATUS_OF_STATE
 from cma.ui.views.common import SERVICE_ICONS
+from cma.ui.views.health import HealthCard
 from cma.ui.widgets import (
     EmptyState,
     StatusPill,
@@ -514,6 +515,9 @@ class DashboardView(QWidget):
         header.addWidget(self.connect_button, 0, Qt.AlignmentFlag.AlignTop)
         header.addWidget(self.stop_all_button, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(header)
+        # Santé du compte Cloudflare (pannes, tokens à renouveler) : la fenêtre principale la tient à jour.
+        self.health = HealthCard(lambda: None, lambda: None)
+        layout.addWidget(self.health)
 
         self.scroll_area = QScrollArea()
         self.scroll_area.setObjectName("PageScroll")

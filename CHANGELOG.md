@@ -21,6 +21,13 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
   ou webhook ; pannes et, au choix, retours ; « Envoyer un test ». L'adresse d'un canal est rangée dans le coffre.
 - **Mettre en sourdine** un tunnel ou un nom d'hôte (1 h, 4 h, jusqu'à demain 8 h, 1 semaine) pendant une
   maintenance : toujours relevé, mais ni notification ni alerte ; pastille « Sourdine » sur la carte.
+- **Importer `~/.ssh/config`** (Serveurs SSH, menu de la liste) : hôtes, utilisateurs, ports, clés, rebonds
+  (`ProxyJump`) et passage par cloudflared (`ProxyCommand`), avec un aperçu où les serveurs déjà présents sont
+  décochés.
+- **Carte « Santé du compte »** sur la page Sessions : tunnels et services en panne, service tokens à renouveler,
+  avec « Voir » ; cachée quand tout va bien.
+- **Espace de travail au démarrage** (Espaces de travail) : ouvert au lancement de CMA, au besoin sauf sur un réseau
+  Wi-Fi donné (« Réseau actuel » le remplit).
 
 ### Modifié
 - La tâche planifiée ne prévient plus à chaque passage tant qu'une panne dure : seulement à son début et à son

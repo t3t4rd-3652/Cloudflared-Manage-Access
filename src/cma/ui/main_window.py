@@ -269,6 +269,8 @@ class MainWindow(QMainWindow):
         ctx.theme.changed.connect(self._refresh_nav_icons)
         # Une sourdine posée ou levée change ce qui compte comme une panne à signaler.
         ctx.bridge.config_changed.connect(self._show_troubled_tunnels)
+        self.dashboard.health.open_cloud = lambda: self.open_tunnel(None)
+        self.dashboard.health.open_tokens = self.open_cloud_tokens
 
         status = self.statusBar()
         status.setSizeGripEnabled(False)
@@ -545,6 +547,7 @@ class MainWindow(QMainWindow):
                 expiry_alert(item),
                 action=(tr("Renouveler"), self.open_cloud_tokens),
             )
+        self._show_troubled_tunnels()  # la carte « Santé du compte » montre aussi les tokens à renouveler
         return fresh
 
     def check_tunnels(self) -> bool:
@@ -677,6 +680,7 @@ class MainWindow(QMainWindow):
             item.setToolTip(" · ".join(parts) or base)
         self.tunnels_troubled.emit(troubled)
         self.services_troubled.emit(services)
+        self.dashboard.health.update_state(troubled, services, expiring_tokens(config, datetime.now(UTC)))
 
     def report_tunnel_changes(self, changes: list[TunnelChange]) -> None:
         config = self.ctx.config()

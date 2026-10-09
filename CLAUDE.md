@@ -202,6 +202,8 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   clés `tunnel:<id>` et `service:<nom d'hôte et chemin>`) coupe notifications, alertes et badge, pas le relevé.
   Les fonctions d'envoi ou de test remplaçables (`send_events(sender=…)`, `probe_targets(prober=…)`) se résolvent à
   l'appel : une valeur par défaut figée empêche les tests de les remplacer.
+- **Import de `~/.ssh/config`** (`cma.core.sshconfig`) : le premier réglage d'un bloc l'emporte (comme ssh) ;
+  blocs génériques et `Match` ignorés, `Include` suivi ; un hôte illisible (`%h`) est sauté, pas bloquant.
 - **Boîtes modales et tests** : chaque boîte ouverte par la vue Cloudflare passe par une fonction de module
   (`ask_*`, `show_*`) que les tests remplacent ; `exec()` bloquerait le test jusqu'au délai de 180 s.
 

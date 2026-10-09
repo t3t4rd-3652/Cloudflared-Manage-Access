@@ -102,6 +102,24 @@ class FreezeDetector:
         self._last = now
 
 
+def open_startup_workspaces(ctx: GuiContext) -> None:
+    """Espaces de travail marqués « au démarrage », sauf sur leur réseau Wi-Fi d'exclusion (lu sans bloquer)."""
+    if not any(w.on_startup for w in ctx.config().workspaces):
+        return
+    from cma.core.models import startup_workspaces
+    from cma.platform.network import current_wifi
+    from cma.ui.dialogs.workspaces import launch_workspace
+
+    async def wifi() -> str | None:
+        return await asyncio.to_thread(current_wifi)
+
+    def done(network: str | None) -> None:
+        for workspace in startup_workspaces(ctx.config(), network):
+            launch_workspace(ctx, workspace)
+
+    ctx.run(wifi(), done)
+
+
 def run_gui(args: argparse.Namespace) -> int:
     started = time.monotonic()
     paths = resolve_paths(getattr(args, "data_dir", None))
@@ -241,6 +259,7 @@ def run_gui(args: argparse.Namespace) -> int:
     else:
         runner.run(read_version(binary), lambda v: window.set_cloudflared_status(f"cloudflared {v or '?'}"))
     runner.run(core.manager.start_auto_profiles())
+    open_startup_workspaces(ctx)
     if settings.check_updates:
         window.settings.check_cloudflared_release(quiet=True)
         window.settings.check_cma_update(quiet=True)

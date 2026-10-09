@@ -389,6 +389,10 @@ adaptative) : les anciens connecteurs Office 365 sont retirés par Microsoft.
 
 ### P15 — Prise en main et usage quotidien (2.13)
 
+**État au 2026-10-09 : réalisé** (`cma.core.sshconfig`, `ssh/import_config.py`, `views/health.py`,
+`cma.platform.network`, `models.startup_workspaces`). Le réseau Wi-Fi se lit par `netsh` (Windows) ou `nmcli`
+(Linux) ; sans Wi-Fi, un espace « sauf sur tel réseau » s'ouvre.
+
 1. **Importer `~/.ssh/config`** (hôtes, utilisateurs, ports, clés, `ProxyJump`), avec aperçu.
 2. **Carte « Santé du compte »** sur la page Sessions.
 3. **Espace de travail au démarrage**, éventuellement seulement hors d'un réseau donné.
