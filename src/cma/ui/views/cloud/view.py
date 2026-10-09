@@ -47,7 +47,8 @@ from cma.core.cfapi import (
     Tunnel,
 )
 from cma.core.dnscheck import DnsCheck
-from cma.core.models import CloudflareProfile
+from cma.core.hostprobe import HostProbe, probe_hostname_async
+from cma.core.models import AuthMode, CloudflareProfile
 from cma.i18n import tr
 from cma.ui.context import GuiContext
 from cma.ui.format import last_read
@@ -704,6 +705,7 @@ class CloudView(QWidget):
         if isinstance(rule, IngressRule):
             menu.addAction(tr("Importer comme profil"), self.import_selected)
             menu.addAction(tr("Copier le nom d'hôte"), lambda: copy_to_clipboard(rule.hostname))
+            menu.addAction(tr("Tester depuis Internet"), lambda: self.test_from_internet(rule))
             if rule.service.lower().startswith(("http://", "https://")):
                 menu.addAction(
                     tr("Ouvrir dans le navigateur"),
@@ -775,6 +777,41 @@ class CloudView(QWidget):
             self.refresh()
 
         self.ctx.run(self.admin.fix_dns(tunnel, host), done, self._error)
+
+    def _probe_token(self, hostname: str) -> tuple[str, str] | None:
+        """(Client ID, secret) du service token du profil CMA de ce nom d'hôte, s'il en a un et que son secret est
+        dans le coffre : la requête de test passe alors Access et atteint le tunnel."""
+        config = self.ctx.config()
+        for profile in config.cloudflare_profiles:
+            if profile.hostname.lower() != hostname.lower() or profile.auth != AuthMode.SERVICE_TOKEN:
+                continue
+            token = config.token(profile.token_id)
+            secret = self.ctx.core.secrets.get(token.secret_key) if token is not None else None
+            if token is not None and secret:
+                return token.client_id, secret
+        return None
+
+    def test_from_internet(self, rule: IngressRule) -> None:
+        """Ce qu'obtient un visiteur : DNS public, Access, tunnel, service. Un service non HTTP (SSH, RDP, TCP)
+        ne se teste ainsi que jusqu'à Access ; la connexion complète se teste avec une session."""
+        web = rule.service.lower().startswith(("http://", "https://"))
+        token = self._probe_token(rule.hostname) if web else None
+        path = rule.path if rule.path.startswith("/") else "/"
+        self.status.setText(tr("Test de {host} depuis Internet…").format(host=rule.hostname + rule.path))
+
+        def done(result: HostProbe) -> None:
+            self._show_summary()
+            text = result.summary(rule.hostname + rule.path)
+            if not web:
+                text += " " + tr(
+                    "Service non HTTP : seuls le DNS et Access sont testés ; la connexion complète se teste avec "
+                    "une session (« Tester le service »)."
+                )
+            elif token is not None:
+                text += " " + tr("Test fait avec le service token du profil CMA.")
+            self.ctx.notify(result.tone, text)
+
+        self.ctx.run(probe_hostname_async(rule.hostname, token=token, path=path), done, self._error)
 
     def move_rule(self, tunnel: Tunnel, rule: IngressRule, offset: int) -> None:
         self.ctx.run(self.admin.move_rule(tunnel, rule, offset), lambda _p: self.refresh(), self._error)

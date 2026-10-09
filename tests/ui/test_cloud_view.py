@@ -887,3 +887,45 @@ def test_access_log_period_and_csv(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(access_log, "ask_csv_path", lambda _p: tmp_path)  # un dossier : écriture impossible
     dialog.export_csv()
     assert dialog.export_note.text().startswith("Export impossible")
+
+
+def test_test_from_internet(qtbot, gui, cf, monkeypatch):
+    from cma.core.cfapi import IngressRule
+    from cma.core.hostprobe import HostProbe
+    from cma.core.models import AuthMode, CloudflareProfile, ServiceToken
+
+    ctx, window = gui
+    view = window.cloud
+    calls: list[tuple[str, object]] = []
+
+    async def fake_probe(hostname: str, **kwargs: object) -> HostProbe:
+        calls.append((hostname, kwargs.get("token")))
+        return HostProbe("origin_down", 502)
+
+    monkeypatch.setattr(cloud_module, "probe_hostname_async", fake_probe)
+    notes: list[tuple[str, str]] = []
+    monkeypatch.setattr(ctx, "notify", lambda level, text, **_k: notes.append((level, text)))
+    token = ServiceToken(name="Robot", client_id="robot.access")
+    ctx.core.secrets.set(token.secret_key, "secret-de-test-assez-long-pour-le-masquage")
+    profile = CloudflareProfile(
+        name="Grafana",
+        hostname="grafana.exemple.fr",
+        local_port=31777,
+        auth=AuthMode.SERVICE_TOKEN,
+        token_id=token.id,
+    )
+    ctx.update_config(lambda c: (c.tokens.append(token), c.cloudflare_profiles.append(profile)))
+
+    # Service web avec un profil CMA à service token : la requête passe Access avec ce token.
+    view.test_from_internet(IngressRule("grafana.exemple.fr", "http://localhost:3000"))
+    qtbot.waitUntil(lambda: bool(notes), timeout=5000)
+    assert calls[-1] == ("grafana.exemple.fr", ("robot.access", "secret-de-test-assez-long-pour-le-masquage"))
+    assert notes[-1][0] == "warning" and "pas le service derrière lui (erreur 502)" in notes[-1][1]
+    assert "service token du profil CMA" in notes[-1][1]
+
+    # Service SSH : jamais de token, et la vue dit ce qui n'est pas testé.
+    view.test_from_internet(IngressRule("ssh.exemple.fr", "ssh://localhost:22"))
+    qtbot.waitUntil(lambda: len(notes) == 2, timeout=5000)
+    assert calls[-1] == ("ssh.exemple.fr", None) and "Service non HTTP" in notes[-1][1]
+    menu = [a.text() for a in view.tree_menu(cloud_module.QTreeWidgetItem()).actions()]
+    assert menu == []  # ni tunnel ni règle : menu vide

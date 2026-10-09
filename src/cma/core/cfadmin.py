@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -45,6 +46,9 @@ from cma.core.policies import AccessGroup, AccessPolicy, PolicyRule
 from cma.core.redact import register_secret
 from cma.core.secrets import SecretStore
 from cma.i18n import tr
+
+# Appels simultanés pour lire un compte : assez pour un compte ordinaire, sans assaillir l'API.
+OVERVIEW_WORKERS = 8
 
 _SCHEME_TYPES = {
     "ssh": ServiceType.SSH,
@@ -192,36 +196,46 @@ class CloudflareAdmin:
     # --- Lecture ----------------------------------------------------------------------------------------
 
     async def overview(self, account: Account) -> Overview:
+        """Tout le compte en une lecture. Les appels indépendants partent en même temps : Cloudflare met 0,3 à 1 s
+        à répondre à chacun, et en série la lecture d'un compte ordinaire prenait 7 à 10 s."""
         api = self.api()
 
         def load() -> Overview:
-            tunnels = [
-                TunnelView(t, *api.tunnel_ingress(account.id, t.id)) for t in api.list_tunnels(account.id)
-            ]
-            zones = api.list_zones(account.id)
-            return Overview(
-                account=account,
-                tunnels=tunnels,
-                apps=api.list_access_apps(account.id),
-                tokens=api.list_service_tokens(account.id),
-                zones=zones,
-                dns=self._dns_checks(api, tunnels, zones),
-            )
+            with ThreadPoolExecutor(max_workers=OVERVIEW_WORKERS, thread_name_prefix="cma-cf") as pool:
+                tunnels_call = pool.submit(api.list_tunnels, account.id)
+                apps_call = pool.submit(api.list_access_apps, account.id)
+                tokens_call = pool.submit(api.list_service_tokens, account.id)
+                zones_call = pool.submit(api.list_zones, account.id)
+                listed = tunnels_call.result()
+                ingress = [pool.submit(api.tunnel_ingress, account.id, t.id) for t in listed]
+                tunnels = [TunnelView(t, *call.result()) for t, call in zip(listed, ingress, strict=True)]
+                zones = zones_call.result()
+                return Overview(
+                    account=account,
+                    tunnels=tunnels,
+                    apps=apps_call.result(),
+                    tokens=tokens_call.result(),
+                    zones=zones,
+                    dns=self._dns_checks(api, tunnels, zones, pool),
+                )
 
         overview = await asyncio.to_thread(load)
         self.sync_expirations(overview.tokens)
         return overview
 
     @staticmethod
-    def _dns_checks(api: CloudflareApi, tunnels: list[TunnelView], zones: list[Zone]) -> dict[str, DnsCheck]:
-        """Vérifie le DNS des noms d'hôte publiés : une lecture par zone utilisée. Une zone illisible (permission,
-        réseau) donne « inconnu » pour ses noms, sans faire échouer la lecture du compte."""
+    def _dns_checks(
+        api: CloudflareApi, tunnels: list[TunnelView], zones: list[Zone], pool: ThreadPoolExecutor
+    ) -> dict[str, DnsCheck]:
+        """Vérifie le DNS des noms d'hôte publiés : une lecture par zone utilisée, toutes en même temps. Une zone
+        illisible (permission, réseau) donne « inconnu » pour ses noms, sans faire échouer la lecture du compte."""
         rules = [(view.tunnel, rule.hostname) for view in tunnels for rule in view.hostnames]
         used = {zone.id for _t, host in rules if (zone := zone_of(host, zones)) is not None}
+        calls = {zone_id: pool.submit(api.zone_records, zone_id) for zone_id in used}
         records: dict[str, list[dict[str, Any]] | None] = {}
-        for zone_id in used:
+        for zone_id, call in calls.items():
             try:
-                records[zone_id] = api.zone_records(zone_id)
+                records[zone_id] = call.result()
             except CloudflareApiError:
                 records[zone_id] = None
         names = {view.tunnel.id: view.tunnel.name for view in tunnels}

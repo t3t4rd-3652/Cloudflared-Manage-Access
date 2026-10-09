@@ -693,3 +693,25 @@ async def test_overview_checks_and_fixes_the_dns(cf, admin):
     overview = await admin.overview(account)
     assert overview.dns["rdp.exemple.fr"].state == "ok"
     assert overview.dns["grafana.exemple.fr"].state == "other_record"
+
+
+async def test_overview_calls_run_in_parallel(cf, admin, monkeypatch):
+    """Tunnels, applications, tokens et zones partent en même temps : une barrière à quatre ne se lève que si les
+    quatre appels sont en cours ensemble (en série, elle expirerait)."""
+    import threading
+
+    from cma.core.cfapi import CloudflareApi
+
+    await admin.connect(TOKEN)
+    account = (await admin.connect())[0]
+    barrier = threading.Barrier(4, timeout=10)
+    for name in ("list_tunnels", "list_access_apps", "list_service_tokens", "list_zones"):
+        original = getattr(CloudflareApi, name)
+
+        def waiting(self, *args, _original=original, **kwargs):
+            barrier.wait()
+            return _original(self, *args, **kwargs)
+
+        monkeypatch.setattr(CloudflareApi, name, waiting)
+    overview = await admin.overview(account)
+    assert len(overview.tunnels) == 2 and overview.zones

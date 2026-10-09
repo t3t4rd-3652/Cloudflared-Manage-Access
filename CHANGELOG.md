@@ -2,6 +2,21 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Ajouté
+- **Tester depuis Internet** (menu d'un nom d'hôte publié) : ce qu'obtient un visiteur, du DNS public au service.
+  Nom introuvable, protégé par Access, vérification de navigateur de Cloudflare, tunnel sans connecteur (1033),
+  service injoignable derrière le tunnel (502, 504) ou service qui répond. Avec le service token d'un profil CMA,
+  la requête passe Access ; un service SSH, RDP ou TCP n'est testé que jusqu'à Access.
+- **Historique des notifications** : bouton « Notifications » dans la barre d'état (avec le nombre d'alertes non
+  lues) et « Notifications récentes… » dans la palette. Les 100 dernières de la session, avec leur action
+  (« Journal », « Diagnostiquer… ») encore possible.
+
+### Modifié
+- **Lecture du compte Cloudflare en parallèle** : environ 2 s au lieu de 7 à 10 sur un compte réel (tunnels,
+  applications, service tokens et zones lus en même temps, puis les règles des tunnels et le DNS des zones).
+
 ## [2.8.0] - 2026-10-08
 
 ### Ajouté

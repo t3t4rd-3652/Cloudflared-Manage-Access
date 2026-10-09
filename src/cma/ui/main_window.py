@@ -35,11 +35,13 @@ from cma.ui.a11y import apply_accessible_names
 from cma.ui.context import GuiContext
 from cma.ui.dialogs.diagnose import open_diagnosis
 from cma.ui.dialogs.history import show_history
+from cma.ui.dialogs.notifications import show_notifications
 from cma.ui.dialogs.palette import CommandPalette, PaletteEntry
 from cma.ui.dialogs.workspaces import launch_workspace
 from cma.ui.format import expiry_alert
 from cma.ui.icons import app_icon, set_icon, token_icon
 from cma.ui.lock import IdleWatcher, LockPanel
+from cma.ui.notices import NoticeLog
 from cma.ui.states import RUNNING, TO_CHECK, sessions_summary
 from cma.ui.views.cloud import CloudView
 from cma.ui.views.dashboard import DashboardView
@@ -238,9 +240,17 @@ class MainWindow(QMainWindow):
         self.status_errors.setProperty("role", "link")
         self.status_errors.setCursor(Qt.CursorShape.PointingHandCursor)
         self.status_errors.clicked.connect(lambda: self.show_view("logs"))
+        self.notices = NoticeLog()
+        self.status_notices = QPushButton()
+        self.status_notices.setFlat(True)
+        self.status_notices.setProperty("role", "link")
+        self.status_notices.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.status_notices.clicked.connect(self.open_notifications)
         status.addWidget(self.status_cloudflared, 1)
         status.addPermanentWidget(self.status_sessions)
+        status.addPermanentWidget(self.status_notices)
         status.addPermanentWidget(self.status_errors)
+        self._update_notices()
 
         ctx.set_notifier(self.notify)
         ctx.runner.error.connect(self._on_task_error)
@@ -418,6 +428,7 @@ class MainWindow(QMainWindow):
                 lambda: show_history(self, self.ctx),
                 icon="history",
             ),
+            PaletteEntry(section, tr("Notifications récentes…"), self.open_notifications, icon="bell"),
         ]
         if self.can_lock():
             entries.append(PaletteEntry(section, tr("Verrouiller CMA"), self.lock_now, "Ctrl+L", "lock"))
@@ -611,11 +622,30 @@ class MainWindow(QMainWindow):
         action: tuple[str, Callable[[], None]] | None = None,
         timeout_ms: int | None = None,
     ) -> None:
+        self.notices.add(level, text, action)
+        self._update_notices()
         visible = self.isVisible() and not self.isMinimized()
         if visible or level in ("warning", "error"):
             self.banners.show_message(level, text, action=action, timeout_ms=timeout_ms)
         if not visible and self.tray_notify is not None and self.ctx.config().settings.notifications:
             self.tray_notify(level, APP_NAME, text)
+
+    def _update_notices(self) -> None:
+        """Bouton de la barre d'état : les alertes non lues restent visibles après la disparition du bandeau."""
+        unread = self.notices.unread
+        self.status_notices.setText(
+            tr("Notifications · {n} !").format(n=unread) if unread else tr("Notifications")
+        )
+        self.status_notices.setToolTip(
+            tr("{n} alerte(s) non lue(s)").format(n=unread) if unread else tr("Notifications récentes")
+        )
+        set_icon(self.status_notices, "bell", "warning" if unread else "text")
+
+    def open_notifications(self) -> None:
+        self.notices.mark_read()
+        self._update_notices()
+        show_notifications(self, self.notices)
+        self._update_notices()
 
     def _tray(self, level: str, title: str, text: str) -> None:
         """Notification Windows seule, quand la fenêtre est cachée (transitions persistantes, §4.26)."""

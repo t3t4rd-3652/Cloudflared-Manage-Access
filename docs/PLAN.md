@@ -1,6 +1,6 @@
 # Plan du projet
 
-État au 2026-10-08, version **2.8.0** (P7 : DNS vérifié, journal d'audit, vue Cloudflare découpée). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+État au 2026-10-09, version **2.8.0** (P7 : DNS vérifié, journal d'audit, vue Cloudflare découpée) ; P8 réalisé, non publié. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -254,6 +254,30 @@ jours lu avec le paramètre `since`. `cloud/view.py` passe de 1 408 lignes (avan
    30 j) et export CSV (séparateur « ; » et UTF-8 avec BOM, lisible tel quel par Excel en français).
 3. **Dette** : l'onglet Applications Access sort de `cloud/view.py` dans `cloud/apps_tab.py`, comme l'onglet
    Service tokens.
+
+### P8 — Rapidité, diagnostic de bout en bout, notifications retrouvables (2.9)
+
+Mesuré le 2026-10-09 sur le vrai compte : la lecture du compte prend 7 à 10 s pour 9 appels d'API. La connexion
+coûte 0,1 s (DNS, TCP, TLS) ; le reste est le temps de réponse de Cloudflare, 0,3 à 1 s par appel, faits en série.
+
+**État au 2026-10-09 : les trois points sont réalisés** (section « Non publié » du CHANGELOG). Lecture du compte
+mesurée à 2 s environ au lieu de 7 à 10. Le test depuis Internet, essayé sur les noms du vrai compte, a fait
+apparaître deux réponses absentes du plan : la vérification de navigateur de Cloudflare (403 avec
+`cf-mitigated: challenge`, la page « Just a moment… ») et les noms génériques (`*.exemple.fr`), désormais
+reconnus.
+
+1. **Lecture du compte en parallèle.** Les tunnels d'abord, puis en même temps leurs règles, les applications, les
+   service tokens et les zones ; enfin le DNS des zones utilisées, en même temps. Objectif : la durée de l'appel le
+   plus lent plutôt que la somme. Mesure avant et après sur le vrai compte.
+2. **Tester un nom d'hôte publié depuis Internet** (menu d'un nom d'hôte) : résolution DNS publique, puis requête
+   HTTPS sans suivre les redirections, classée : nom introuvable, protégé par Access (page de connexion : le tunnel
+   n'est pas atteint), tunnel sans connecteur (erreur 1033), le tunnel répond mais pas le service (502, 504), le
+   service répond. Avec un service token de CMA autorisé, la requête passe Access et teste le tunnel et le service.
+   Services non HTTP (SSH, RDP, TCP) : seuls le DNS et Access sont testés, et la vue le dit (la connexion de bout en
+   bout se teste avec une session, « Tester le service »).
+3. **Historique des notifications** : les bandeaux d'information disparaissent après 5 s. Les 100 dernières
+   notifications de la session (heure, niveau, texte, action encore possible) se retrouvent depuis la barre d'état,
+   avec le nombre d'alertes non lues.
 
 ### Dette technique à surveiller
 

@@ -97,6 +97,7 @@ l'échec en annotations » (`check-runs` du commit, puis `annotations_url` du jo
 | 2026-10-08 | P5 : tunnels en panne visibles en permanence, `cma tunnels`, tests macOS bloquants ; logique des vues extraite (`cma.ui.states`, `cloud/summary.py`). Release **2.6.0**. |
 | 2026-10-08 | P6 : règles d'ingress complètes, réglages et journal des accès Access, applications et tokens en cartes, surveillance même CMA fermé (tâche planifiée). Recette en écriture réussie. Release **2.7.0**. |
 | 2026-10-08 | P7 : DNS des noms d'hôte vérifié et corrigeable, journal des accès pour un audit (période, CSV), onglet Applications sorti de `cloud/view.py`. Release **2.8.0**. |
+| 2026-10-09 | P8 : lecture du compte en parallèle (7-10 s → 2 s), test d'un nom d'hôte depuis Internet, historique des notifications. |
 
 Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff-filter=D --name-only`).
 
@@ -157,6 +158,11 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   tunnel arrêté pour de bon). Un relevé en échec est seulement journalisé, jamais notifié toutes les 5 minutes.
 - **Signature des mises à jour** (`updates.signature_policy`) : une copie signée n'accepte qu'une mise à jour
   signée par le même éditeur ; tant que CMA n'est pas signé, non signé reste accepté (l'empreinte suffit).
+- **Lecture du compte en parallèle** (`CloudflareAdmin.overview`, 8 fils) : chaque appel reste synchrone dans
+  `CloudflareApi` ; seul `overview` les répartit. Un appel ajouté à la lecture du compte passe par le même pool.
+- **Test depuis Internet** (`cma.core.hostprobe`) : la requête ne suit pas les redirections (une redirection vers
+  `cloudflareaccess.com` signifie Access). Sur le vrai compte, les 403 sans navigateur venaient de la protection
+  contre les robots (`cf-mitigated: challenge`), pas d'Access ni du service : ne pas les lire comme un refus.
 - **Boîtes modales et tests** : chaque boîte ouverte par la vue Cloudflare passe par une fonction de module
   (`ask_*`, `show_*`) que les tests remplacent ; `exec()` bloquerait le test jusqu'au délai de 180 s.
 
