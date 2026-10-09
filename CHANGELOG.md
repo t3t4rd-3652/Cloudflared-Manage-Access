@@ -2,7 +2,7 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
-## [Non publié]
+## [2.9.0] - 2026-10-09
 
 ### Ajouté
 - **Tester depuis Internet** (menu d'un nom d'hôte publié) : ce qu'obtient un visiteur, du DNS public au service.

@@ -13,7 +13,7 @@ applications protégées par Cloudflare Access (`cloudflared access tcp`) et des
 Elle sait aussi administrer un compte Cloudflare (tunnels, noms d'hôte publiés, applications Access,
 service tokens) avec un jeton d'API.
 
-- Version courante : voir `src/cma/__init__.py` (2.8.0 au 2026-10-08). Historique utilisateur : `CHANGELOG.md`.
+- Version courante : voir `src/cma/__init__.py` (2.9.0 au 2026-10-09). Historique utilisateur : `CHANGELOG.md`.
 - Architecture, threads, cycle de vie des sessions : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - Sécurité et modèle de menace : [docs/SECURITE.md](docs/SECURITE.md). Scripts serveur : [docs/SERVEUR.md](docs/SERVEUR.md).
 - Conventions de code : [CONTRIBUTING.md](CONTRIBUTING.md) (identifiants en anglais, textes et commentaires en
@@ -97,7 +97,7 @@ l'échec en annotations » (`check-runs` du commit, puis `annotations_url` du jo
 | 2026-10-08 | P5 : tunnels en panne visibles en permanence, `cma tunnels`, tests macOS bloquants ; logique des vues extraite (`cma.ui.states`, `cloud/summary.py`). Release **2.6.0**. |
 | 2026-10-08 | P6 : règles d'ingress complètes, réglages et journal des accès Access, applications et tokens en cartes, surveillance même CMA fermé (tâche planifiée). Recette en écriture réussie. Release **2.7.0**. |
 | 2026-10-08 | P7 : DNS des noms d'hôte vérifié et corrigeable, journal des accès pour un audit (période, CSV), onglet Applications sorti de `cloud/view.py`. Release **2.8.0**. |
-| 2026-10-09 | P8 : lecture du compte en parallèle (7-10 s → 2 s), test d'un nom d'hôte depuis Internet, historique des notifications. |
+| 2026-10-09 | P8 : lecture du compte en parallèle (7-10 s → 2 s), test d'un nom d'hôte depuis Internet, historique des notifications. Release **2.9.0**. |
 
 Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff-filter=D --name-only`).
 

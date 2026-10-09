@@ -1,6 +1,6 @@
 # Plan du projet
 
-État au 2026-10-09, version **2.8.0** (P7 : DNS vérifié, journal d'audit, vue Cloudflare découpée) ; P8 réalisé, non publié. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+État au 2026-10-09, version **2.9.0** (P8 : lecture du compte en parallèle, test depuis Internet, historique des notifications). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -260,7 +260,7 @@ jours lu avec le paramètre `since`. `cloud/view.py` passe de 1 408 lignes (avan
 Mesuré le 2026-10-09 sur le vrai compte : la lecture du compte prend 7 à 10 s pour 9 appels d'API. La connexion
 coûte 0,1 s (DNS, TCP, TLS) ; le reste est le temps de réponse de Cloudflare, 0,3 à 1 s par appel, faits en série.
 
-**État au 2026-10-09 : les trois points sont réalisés** (section « Non publié » du CHANGELOG). Lecture du compte
+**État au 2026-10-09 : les trois points sont réalisés**, publiés en 2.9.0. Lecture du compte
 mesurée à 2 s environ au lieu de 7 à 10. Le test depuis Internet, essayé sur les noms du vrai compte, a fait
 apparaître deux réponses absentes du plan : la vérification de navigateur de Cloudflare (403 avec
 `cf-mitigated: challenge`, la page « Just a moment… ») et les noms génériques (`*.exemple.fr`), désormais
