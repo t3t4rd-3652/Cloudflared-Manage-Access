@@ -143,6 +143,14 @@ def build_palette_entries(window: MainWindow) -> list[PaletteEntry]:
             icon="history",
         ),
         PaletteEntry(section, tr("Notifications récentes…"), window.open_notifications, icon="bell"),
+        PaletteEntry(section, tr("Raccourcis clavier…"), window.open_shortcuts, "F1", "keyboard"),
+        PaletteEntry(
+            section,
+            tr("Quoi de neuf dans CMA…"),
+            window.open_whats_new,
+            icon="sparkles",
+            keywords=tr("nouveautés version notes"),
+        ),
     ]
     if window.can_lock():
         entries.append(PaletteEntry(section, tr("Verrouiller CMA"), window.lock_now, "Ctrl+L", "lock"))

@@ -37,6 +37,10 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
 - **Publier sur Cloudflare un port découvert** (Serveurs SSH › Ports, bouton ou menu) : la boîte de publication
   s'ouvre préremplie (service `http://localhost:<port>`, ou le schéma détecté, SSH, RDP ; nom d'hôte d'après le
   conteneur ou le service) et rappelle de choisir le tunnel dont cloudflared tourne sur ce serveur.
+- **Quoi de neuf** : après une mise à jour, les notes des versions installées depuis la dernière ouverture, une seule
+  fois (une notification si CMA démarre dans la zone de notification) ; à tout moment depuis Paramètres › À propos
+  ou la palette.
+- **Raccourcis clavier** (F1, palette, Paramètres › À propos) : tous les raccourcis, avec les touches du système.
 
 ### Modifié
 - La tâche planifiée ne prévient plus à chaque passage tant qu'une panne dure : seulement à son début et à son
@@ -48,6 +52,8 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
 - La surveillance du compte (tunnels, services, journal de disponibilité, alertes) sort de la fenêtre principale
   dans `cma.ui.monitor` (ADR 0001) ; la palette de commandes dans `palette_entries.py`. `main_window.py` passe de
   990 à 730 lignes.
+- Les outils du compte (bilan, disponibilité, journal d'audit, instantanés, permissions) ne sont chargés qu'à leur
+  ouverture : démarrage un peu plus rapide (médiane de 2,3 s à 2,1 s sur le poste de mesure).
 
 ## [2.10.0] - 2026-10-09
 

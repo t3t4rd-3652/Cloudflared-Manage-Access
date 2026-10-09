@@ -7,6 +7,7 @@ import platform
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +66,9 @@ class SettingsView(QWidget):
         self._installed_version: str | None = None
         self._cancel_download = threading.Event()
         self._cma_update: UpdateInfo | None = None
+        # Aide (branchée par la fenêtre principale) : raccourcis clavier et « Quoi de neuf ».
+        self.open_shortcuts: Callable[[], None] | None = None
+        self.open_whats_new: Callable[[], None] | None = None
         # Mises à jour (cloudflared, CMA) : module à part ; anciens noms gardés pour les boutons et la fenêtre.
         self.updates = UpdateActions(self)
         self.check_cloudflared_release = self.updates.check_cloudflared_release
@@ -405,6 +409,15 @@ class SettingsView(QWidget):
         row.addWidget(self.cma_install)
         row.addStretch()
         form.addRow(row)
+        help_row = QHBoxLayout()
+        self.whats_new_button = button(tr("Quoi de neuf…"), "sparkles")
+        self.whats_new_button.clicked.connect(lambda: self.open_whats_new and self.open_whats_new())
+        self.shortcuts_button = button(tr("Raccourcis clavier…"), "keyboard")
+        self.shortcuts_button.clicked.connect(lambda: self.open_shortcuts and self.open_shortcuts())
+        help_row.addWidget(self.whats_new_button)
+        help_row.addWidget(self.shortcuts_button)
+        help_row.addStretch()
+        form.addRow(help_row)
         self.cma_update_label = label("", "muted", wrap=True)
         form.addRow(self.cma_update_label)
         self.cma_progress_bar = QProgressBar()

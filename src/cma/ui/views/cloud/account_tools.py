@@ -6,18 +6,52 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QMenu, QPushButton
 
-from cma.core.audit import AuditEntry
 from cma.core.cfapi import Account
 from cma.i18n import tr
-from cma.ui.views.cloud.audit_log import show_audit_log
-from cma.ui.views.cloud.availability import show_availability
-from cma.ui.views.cloud.permissions import show_permissions
-from cma.ui.views.cloud.security_review import show_security_review
-from cma.ui.views.cloud.snapshots import show_snapshots
 from cma.ui.widgets import button
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+    from cma.core.audit import AuditEntry
+    from cma.core.cfadmin import CloudflareAdmin
+    from cma.ui.context import GuiContext
     from cma.ui.views.cloud.view import CloudView
+
+
+# Chaque boîte n'est importée qu'à son ouverture : ces modules ne pèsent pas sur le démarrage. Les tests remplacent
+# ces fonctions de module.
+def show_audit_log(parent: CloudView, entries: list[AuditEntry]) -> None:
+    from cma.ui.views.cloud.audit_log import show_audit_log as show
+
+    show(parent, entries)
+
+
+def show_availability(parent: CloudView, path: Path) -> None:
+    from cma.ui.views.cloud.availability import show_availability as show
+
+    show(parent, path)
+
+
+def show_permissions(parent: CloudView, ctx: GuiContext, admin: CloudflareAdmin) -> None:
+    from cma.ui.views.cloud.permissions import show_permissions as show
+
+    show(parent, ctx, admin)
+
+
+def show_security_review(
+    parent: CloudView, ctx: GuiContext, admin: CloudflareAdmin, refresh: Callable[[], None]
+) -> None:
+    from cma.ui.views.cloud.security_review import show_security_review as show
+
+    show(parent, ctx, admin, refresh)
+
+
+def show_snapshots(parent: CloudView, ctx: GuiContext, admin: CloudflareAdmin, account: Account) -> None:
+    from cma.ui.views.cloud.snapshots import show_snapshots as show
+
+    show(parent, ctx, admin, account)
 
 
 class AccountTools:

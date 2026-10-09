@@ -472,7 +472,7 @@ Statut : FAIT
 
 ### P21 — Expérience : « Quoi de neuf », raccourcis, démarrage (2.11)
 
-Statut : EN COURS
+Statut : FAIT (démarrage : médiane de 2339 ms à 2105 ms, dont `run_gui` de 1785 ms à 1545 ms, 7 essais)
 
 - **Objectif** : après une mise à jour, savoir ce qui a changé ; retrouver les raccourcis ; démarrer au moins aussi
   vite.
@@ -486,7 +486,7 @@ Statut : EN COURS
 
 ### P22 — Documentation et captures (2.11)
 
-Statut : À FAIRE
+Statut : EN COURS
 
 - **Objectif** : guide, README et captures à jour de P13 à P21.
 - **Tâches** : captures régénérées (carte « Santé du compte », bilan, disponibilité) ; guide (rapports, automatisation,
@@ -517,9 +517,9 @@ Statut : À FAIRE
 | P17 | FAIT | faa2f2e | 506 ✓ | 2026-10-09 |
 | P18 | FAIT | 4fc1068 | 511 ✓ | 2026-10-09 |
 | P19 | FAIT | aa5464c | 512 ✓ | 2026-10-09 |
-| P20 | FAIT | — | 514 ✓ | 2026-10-09 |
-| P21 | EN COURS | — | — | — |
-| P22 | À FAIRE | — | — | — |
+| P20 | FAIT | 7105288 | 514 ✓ | 2026-10-09 |
+| P21 | FAIT | — | 525 ✓ | 2026-10-09 |
+| P22 | EN COURS | — | — | — |
 
-**Prochaine action exacte :** créer `src/cma/core/changelog.py` (P21) : lecture de la section d'une version dans
-`CHANGELOG.md` (embarqué dans les paquets), puis la boîte `src/cma/ui/dialogs/whatsnew.py`.
+**Prochaine action exacte :** `scripts/capture_screenshots.py` (P22) pour les captures de la carte « Santé du
+compte », du bilan de sécurité et du graphique de disponibilité, puis le guide (`docs/GUIDE.md`).

@@ -33,6 +33,8 @@ datas = [
     (str(SRC / "cma" / "resources" / "app-icon.svg"), "cma/resources"),
     (str(ROOT / "server" / "ports-report"), "cma/resources"),
     (str(ROOT / "server" / "ports-report.ps1"), "cma/resources"),
+    # Notes de version de la boîte « Quoi de neuf ».
+    (str(ROOT / "CHANGELOG.md"), "cma/resources"),
 ]
 
 # Modules Qt jamais utilisés : on les écarte pour alléger la distribution.

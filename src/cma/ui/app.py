@@ -223,6 +223,12 @@ def run_gui(args: argparse.Namespace) -> int:
         window.notify("warning", warning)
     if link:
         QTimer.singleShot(500, lambda: window.handle_link(link))
+    # Première installation (rapport de migration ou assistant de démarrage) : « Quoi de neuf » n'a rien à dire.
+    fresh = core.migration is not None or (
+        not settings.onboarding_done
+        and not core.store.snapshot().cloudflare_profiles
+        and not core.store.snapshot().ssh_profiles
+    )
     if core.migration is not None:
         from cma.ui.dialogs.misc import show_migration_report
 
@@ -260,6 +266,13 @@ def run_gui(args: argparse.Namespace) -> int:
         runner.run(read_version(binary), lambda v: window.set_cloudflared_status(f"cloudflared {v or '?'}"))
     runner.run(core.manager.start_auto_profiles())
     open_startup_workspaces(ctx)
+
+    def whats_new() -> None:
+        from cma.ui.dialogs.whatsnew import announce_update, releases_to_announce
+
+        announce_update(window, releases_to_announce(ctx, fresh=fresh))
+
+    QTimer.singleShot(800, whats_new)
     if settings.check_updates:
         window.settings.check_cloudflared_release(quiet=True)
         window.settings.check_cma_update(quiet=True)

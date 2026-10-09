@@ -212,6 +212,7 @@ class MainWindow(QMainWindow):
         add_shortcut(self, QKeySequence("Ctrl+Q"), self.request_quit)
         add_shortcut(self, QKeySequence("Ctrl+K"), self.open_palette)
         add_shortcut(self, QKeySequence("Ctrl+L"), self.lock_now)
+        add_shortcut(self, QKeySequence("F1"), self.open_shortcuts)
         # Verrouillage après inactivité (coffre chiffré seulement) : vérifié toutes les 30 s.
         self._lock_panel: LockPanel | None = None
         self._disabled_shortcuts: list[QShortcut] = []
@@ -251,6 +252,8 @@ class MainWindow(QMainWindow):
         self.dashboard.health.open_cloud = lambda: self.open_tunnel(None)
         self.dashboard.health.open_tokens = self.open_cloud_tokens
         self.ssh.publish_port = self.publish_port
+        self.settings.open_shortcuts = self.open_shortcuts
+        self.settings.open_whats_new = self.open_whats_new
 
         status = self.statusBar()
         status.setSizeGripEnabled(False)
@@ -610,6 +613,16 @@ class MainWindow(QMainWindow):
             tr("{n} alerte(s) non lue(s)").format(n=unread) if unread else tr("Notifications récentes")
         )
         set_icon(self.status_notices, "bell", "warning" if unread else "text")
+
+    def open_shortcuts(self) -> None:
+        from cma.ui.dialogs import shortcuts
+
+        shortcuts.show_shortcuts(self, [self._nav_items[key].text() for key in DESTINATIONS])
+
+    def open_whats_new(self) -> None:
+        from cma.ui.dialogs import whatsnew
+
+        whatsnew.open_whats_new(self, self.ctx.config().settings.language)
 
     def open_notifications(self) -> None:
         self.notices.mark_read()

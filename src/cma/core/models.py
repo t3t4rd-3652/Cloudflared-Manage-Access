@@ -436,6 +436,8 @@ class Settings(Model):
     onboarding_done: bool = False
     v1_files_handled: bool = False
     tray_hint_shown: bool = False
+    # Dernière version ouverte : « Quoi de neuf » est montré une fois quand elle change (mise à jour).
+    last_seen_version: str | None = None
     # Coffre chiffré (version portable ou sans trousseau) : verrouillage de l'interface après inactivité.
     lock_after_minutes: int = Field(default=0, ge=0, le=1440)
     # Relevé périodique de l'état des tunnels du compte Cloudflare (avec un jeton d'API), alerte s'ils tombent.
