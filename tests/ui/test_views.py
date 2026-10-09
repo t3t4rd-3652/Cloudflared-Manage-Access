@@ -71,7 +71,8 @@ def threaded_ssh_server(tmp_path):
     loop = asyncio.new_event_loop()
     thread = threading.Thread(target=loop.run_forever, daemon=True)
     thread.start()
-    info = asyncio.run_coroutine_threadsafe(create_test_server(tmp_path), loop).result(10)
+    # 45 s : sous la charge des tests en parallèle, la génération des clés du serveur dépasse parfois 10 s.
+    info = asyncio.run_coroutine_threadsafe(create_test_server(tmp_path), loop).result(45)
     yield info
     loop.call_soon_threadsafe(info["server"].close)
     loop.call_soon_threadsafe(loop.stop)

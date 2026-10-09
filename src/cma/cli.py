@@ -77,6 +77,12 @@ def build_parser() -> argparse.ArgumentParser:
             "(code 2 si quelque chose a changé)"
         ),
     )
+    availability = sub.add_parser(
+        "availability",
+        help=tr("disponibilité des tunnels et services relevés (code 2 si un incident est en cours)"),
+    )
+    availability.add_argument("--days", type=int, default=30, choices=(1, 7, 30, 90))
+    availability.add_argument("--json", action="store_true")
     sub.add_parser("doctor", help=tr("créer un rapport de diagnostic"))
     sub.add_parser("quit", help=tr("fermer l'application en cours (et toutes ses sessions)"))
     return parser
@@ -276,6 +282,25 @@ def _record_and_alert(
     send_events(events, config, secrets)
 
 
+def show_availability(paths: AppPaths, *, days: int = 30, as_json: bool = False) -> int:
+    """Disponibilité lue dans le journal tenu par la surveillance. Code 2 si un incident est encore ouvert."""
+    from cma.core.availability import AvailabilityLog
+    from cma.core.availability_report import build, report_json
+
+    log = AvailabilityLog(paths.data_dir / "availability.json")
+    rows, incidents = build(log, days)
+    if as_json:
+        print(report_json(rows, incidents, days))
+    elif not rows:
+        print(tr("Aucun relevé : la surveillance remplit ce journal (CMA ouvert, ou la tâche planifiée)."))
+    else:
+        for row in rows:
+            uptime = f"{row.stats.uptime * 100:6.2f} %" if row.stats.uptime is not None else "     — "
+            mean = f"{row.stats.mean_ms:5.0f} ms" if row.stats.mean_ms is not None else "        "
+            print(f"{uptime}  {mean}  {row.incidents:>3}  {row.label}")
+    return 2 if any(i.open for i in incidents) else 0
+
+
 def take_snapshot_cli(
     paths: AppPaths, *, secrets: SecretStore | None = None, base_url: str | None = None
 ) -> int:
@@ -391,6 +416,9 @@ def run(args: argparse.Namespace) -> int:
 
     if command == "tunnels":
         return show_tunnels(paths, as_json=args.json, notify=args.notify, services=args.services)
+
+    if command == "availability":
+        return show_availability(paths, days=args.days, as_json=args.json)
 
     if command == "snapshot":
         return take_snapshot_cli(paths)

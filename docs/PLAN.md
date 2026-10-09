@@ -428,7 +428,11 @@ reprise réseau corrigé au passage (deux sessions pouvaient recevoir le même p
 
 ### P18 — Disponibilité : graphique et rapport (2.11)
 
-Statut : À FAIRE
+Statut : FAIT
+
+Réalisé : `availability.daily` et `report`, `core/availability_report.py` (CSV, HTML autonome échappé, JSON),
+graphique `UptimeChart` (barres par jour, courbe du temps de réponse, détail au survol), « Exporter le rapport… »,
+`cma availability`. Délai de démarrage du serveur SSH de test porté à 45 s (instable sous la charge).
 
 - **Objectif** : voir d'un coup d'œil l'évolution d'un service, et remettre un rapport de disponibilité.
 - **Tâches** : graphique par jour (taux de disponibilité en barres, temps de réponse en courbe) dans la boîte
@@ -507,8 +511,8 @@ Statut : À FAIRE
 | P14 | FAIT | 1d7c59d | 497 ✓ | 2026-10-09 |
 | P15 | FAIT | c6a10e3 | 504 ✓ | 2026-10-09 |
 | P16 | FAIT | 595f332 | 505 ✓ | 2026-10-09 |
-| P17 | EN COURS | — | — | — |
-| P18 | À FAIRE | — | — | — |
+| P17 | FAIT | faa2f2e | 506 ✓ | 2026-10-09 |
+| P18 | EN COURS | — | — | — |
 | P19 | À FAIRE | — | — | — |
 | P20 | À FAIRE | — | — | — |
 | P21 | À FAIRE | — | — | — |

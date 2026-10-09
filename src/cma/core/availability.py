@@ -156,3 +156,69 @@ class AvailabilityLog:
             if (key is None or i.key == key) and (i.open or _parse(i.ended or i.started) >= limit)
         ]
         return sorted(chosen, key=lambda i: i.started, reverse=True)
+
+
+# --- Séries et rapport ----------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DayStats:
+    day: str  # AAAA-MM-JJ (UTC)
+    uptime: float | None  # None : aucun relevé ce jour-là (CMA arrêté, poste éteint), pas une panne
+    mean_ms: float | None
+    checks: int
+
+
+@dataclass(frozen=True)
+class ReportRow:
+    key: str
+    label: str
+    kind: str  # « tunnel » ou « service »
+    stats: Stats
+    incidents: int
+    downtime: timedelta  # durée cumulée des incidents dans la période (bornée à la période)
+
+
+def daily(log: AvailabilityLog, key: str, days: int, now: datetime | None = None) -> list[DayStats]:
+    """Un point par jour, du plus ancien au plus récent, jours sans relevé compris."""
+    end = (now or datetime.now(UTC)).astimezone(UTC)
+    rows = log.days.get(key, {})
+    result: list[DayStats] = []
+    for offset in range(days - 1, -1, -1):
+        day = (end - timedelta(days=offset)).strftime("%Y-%m-%d")
+        counts = rows.get(day)
+        if not counts or not counts[1]:
+            result.append(DayStats(day, None, None, 0))
+            continue
+        result.append(
+            DayStats(day, counts[0] / counts[1], counts[2] / counts[4] if counts[4] else None, int(counts[1]))
+        )
+    return result
+
+
+def report(log: AvailabilityLog, days: int, now: datetime | None = None) -> list[ReportRow]:
+    """Une ligne par tunnel et service relevé, les moins disponibles d'abord."""
+    end = (now or datetime.now(UTC)).astimezone(UTC)
+    start = end - timedelta(days=days)
+    rows: list[ReportRow] = []
+    for key in log.keys():  # noqa: SIM118 (méthode du journal, pas un dictionnaire)
+        incidents = log.history(key, days, end)
+        downtime = timedelta()
+        for incident in incidents:
+            began = max(_parse(incident.started), start)
+            finished = _parse(incident.ended) if incident.ended else end
+            if finished > began:
+                downtime += finished - began
+        rows.append(
+            ReportRow(
+                key,
+                log.label(key),
+                "tunnel" if key.startswith("tunnel:") else "service",
+                log.stats(key, days, end),
+                len(incidents),
+                downtime,
+            )
+        )
+    return sorted(
+        rows, key=lambda r: (r.stats.uptime if r.stats.uptime is not None else 2.0, r.label.lower())
+    )

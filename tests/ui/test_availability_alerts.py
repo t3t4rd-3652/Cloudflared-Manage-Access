@@ -191,3 +191,39 @@ def test_availability_dialog(qtbot, tmp_path):
     from cma.core.availability import Stats
 
     assert percent(Stats(None, None, None, 0)) == "—" and percent(Stats(1.0, None, None, 3)) == "100 %"
+
+
+def test_availability_chart_and_export(qtbot, tmp_path, monkeypatch):
+    import cma.ui.views.cloud.availability as availability_module
+
+    path = tmp_path / "availability.json"
+    log = AvailabilityLog(path)
+    now = datetime.now(UTC)
+    for hours in range(30):
+        log.record_check("service:wiki", "wiki.exemple.fr", hours != 2, 150.0, now - timedelta(hours=hours))
+    log.save()
+    dialog = AvailabilityDialog(None, path)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    assert dialog.chart.isHidden() and "Choisissez" in dialog.chart_title.text()
+    dialog.table.selectRow(0)
+    assert dialog.chart.isVisible() and len(dialog.chart.series) == 30
+    assert "wiki.exemple.fr" in dialog.chart_title.text()
+    assert "jours relevés" in dialog.chart.accessibleDescription()
+    dialog.period.setCurrentIndex(2)
+    assert len(dialog.chart.series) == 90
+    dialog.chart.grab()  # le dessin ne lève rien
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+
+    QTest.mouseMove(dialog.chart, QPoint(dialog.chart.width() - 3, 30))
+
+    html_path = tmp_path / "rapport.html"
+    monkeypatch.setattr(availability_module, "ask_report_path", lambda _p, _d: html_path)
+    dialog.export_report()
+    assert html_path.read_text(encoding="utf-8").startswith("<!doctype html>")
+    assert dialog.export_note.text() == "Rapport enregistré : rapport.html"
+    csv_path = tmp_path / "rapport.csv"
+    monkeypatch.setattr(availability_module, "ask_report_path", lambda _p, _d: csv_path)
+    dialog.export_report()
+    assert csv_path.read_text(encoding="utf-8-sig").startswith("Objet;Type")
