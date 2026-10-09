@@ -74,6 +74,14 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
 - Sous Windows, la signature Authenticode doit être valide et émise pour `O="Cloudflare, Inc."`.
 - Le binaire est installé sous un nom versionné, puis sélectionné dans les paramètres.
 
+## Liens cma:// et profils partagés
+
+- Une page web peut déclencher un lien `cma://connect/…` : CMA demande toujours confirmation avant d'ouvrir la
+  connexion, sauf pour un profil que l'utilisateur a lui-même marqué « Ne plus demander ». Un lien n'ouvre que des
+  profils déjà configurés ; il ne peut ni en créer ni en modifier.
+- Un profil partagé (lien `cma://import` ou fichier `.cma`) ne contient aucun secret : ni secret de service token,
+  ni proxy, ni en-têtes (ils peuvent contenir des identifiants). Son ajout est montré et confirmé avant.
+
 ## Canal local et instance unique
 
 - La ligne de commande parle à l'application par un tube nommé (socket Unix hors Windows), authentifié par une clé aléatoire stockée dans le dossier de données (`ipc.key`).

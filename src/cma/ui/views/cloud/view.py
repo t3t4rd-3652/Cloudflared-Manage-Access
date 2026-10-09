@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMenu,
     QStackedWidget,
     QTabWidget,
@@ -101,6 +102,8 @@ from cma.ui.widgets import (
     primary_button,
     title,
 )
+
+ADD_TOKEN = "__add__"  # noqa: S105 (entrée « Ajouter un jeton… » du choix du jeton, pas un secret)
 
 PERMISSION_GROUPS = (
     (
@@ -222,6 +225,20 @@ class CloudView(QWidget):
         self.connect_button.clicked.connect(lambda: self.connect_account())
         token_row.addWidget(self.connect_button)
         box.addLayout(token_row)
+        name_row = QHBoxLayout()
+        name_row.setContentsMargins(34, 0, 0, 0)
+        self.token_name = QLineEdit()
+        self.token_name.setPlaceholderText(
+            tr("Nom du jeton (facultatif) : « Perso », « Client X »… Par défaut, le nom du compte.")
+        )
+        self.token_name.setAccessibleName(tr("Nom du jeton"))
+        self.token_name.setMaxLength(80)
+        name_row.addWidget(self.token_name, 1)
+        self.cancel_add = button(tr("Revenir au compte"), "arrow-back-up")
+        self.cancel_add.clicked.connect(self._cancel_add_token)
+        self.cancel_add.hide()
+        name_row.addWidget(self.cancel_add)
+        box.addLayout(name_row)
         self.login_error = label("", "error", wrap=True)
         self.login_error.hide()
         box.addWidget(self.login_error)
@@ -285,6 +302,13 @@ class CloudView(QWidget):
         self.permission_hint.hide()
         names.addWidget(self.permission_hint)
         bar.addLayout(names, 1)
+        self.token_choice = QComboBox()
+        self.token_choice.setAccessibleName(tr("Jeton d'API"))
+        self.token_choice.setToolTip(
+            tr("Changer de jeton d'API (autre compte ou autre connexion Cloudflare)")
+        )
+        self.token_choice.activated.connect(self._token_chosen)
+        bar.addWidget(self.token_choice, 0, Qt.AlignmentFlag.AlignVCenter)
         self.account = QComboBox()
         self.account.setAccessibleName(tr("Compte Cloudflare"))
         self.account.setMinimumWidth(220)
@@ -409,6 +433,42 @@ class CloudView(QWidget):
 
     def _show_state(self) -> None:
         self.stack.setCurrentIndex(1 if self.admin.has_token() else 0)
+        self.cancel_add.hide()
+        self._fill_tokens()
+
+    def _fill_tokens(self) -> None:
+        active = self.admin.active_token()
+        with QSignalBlocker(self.token_choice):
+            self.token_choice.clear()
+            for token in self.admin.tokens():
+                self.token_choice.addItem(token.name, token.id)
+                if active is not None and token.id == active.id:
+                    self.token_choice.setCurrentIndex(self.token_choice.count() - 1)
+            self.token_choice.addItem(tr("Ajouter un jeton…"), ADD_TOKEN)
+
+    def _token_chosen(self, _index: int) -> None:
+        chosen = self.token_choice.currentData()
+        active = self.admin.active_token()
+        if chosen == ADD_TOKEN:
+            self._fill_tokens()  # le choix revient sur le jeton actif
+            self.login_error.hide()
+            self.stack.setCurrentIndex(0)
+            self.cancel_add.show()
+            self.token_field.setFocus()
+            return
+        if active is not None and chosen == active.id:
+            return
+        self.admin.switch_token(str(chosen))
+        self.overview = None
+        self.read_at = None
+        self.account.clear()
+        self._fill(None)
+        self.connect_account(use_saved=True)
+
+    def _cancel_add_token(self) -> None:
+        self.token_field.set_text("")
+        self.token_name.clear()
+        self._show_state()
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
@@ -442,6 +502,7 @@ class CloudView(QWidget):
         def done(accounts: list[Account]) -> None:
             self.connect_button.setEnabled(True)
             self.token_field.set_text("")
+            self.token_name.clear()
             self._show_state()
             current = self.ctx.config().settings.cloudflare_account_id
             self.account.clear()
@@ -452,7 +513,7 @@ class CloudView(QWidget):
             self.permission_hint.setVisible(any(a.inferred for a in accounts))
             self.refresh()
 
-        self.ctx.run(self.admin.connect(token), done, self._error)
+        self.ctx.run(self.admin.connect(token, self.token_name.text()), done, self._error)
 
     def forget(self) -> None:
         if not confirm(
@@ -473,6 +534,8 @@ class CloudView(QWidget):
         self._fill(None)
         self._show_state()
         self.ctx.notify("info", tr("Jeton d'API oublié."))
+        if self.admin.has_token():  # un autre jeton enregistré prend le relais
+            self.connect_account(use_saved=True)
 
     def _account_chosen(self, _index: int) -> None:
         account = self.account.currentData()

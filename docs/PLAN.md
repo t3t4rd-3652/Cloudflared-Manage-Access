@@ -322,6 +322,11 @@ des routes (ajout et retrait d'une route jetable).
 
 ### P11 — Usage quotidien (2.12)
 
+**État au 2026-10-09 : les quatre points sont réalisés** (section « Non publié » du CHANGELOG) : `cma.core.links`,
+`cma.platform.links`, `ui/dialogs/links.py`, `cloud/search.py`, jetons nommés dans `CloudflareAdmin`
+(`ApiToken`, `switch_token`). À vérifier à la main après installation : un lien `cma://connect/…` ouvert depuis
+le navigateur, et un double-clic sur un fichier `.cma`.
+
 1. **Liens `cma://`** (`cma://connect/<profil>`) depuis un favori, un document ou un ticket, enregistrés par
    l'installeur pour l'utilisateur courant ; confirmation sauf pour un profil marqué comme sûr.
 2. **Partager un profil** : lien ou fichier `.cma` sans aucun secret, importé en un clic ; le service token se

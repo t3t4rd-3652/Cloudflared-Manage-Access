@@ -177,6 +177,13 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   « Account Settings : Read ». Analytique : GraphQL `httpRequestsAdaptiveGroups`, refus « authz » sans
   « Analytics : Read ». Un instantané retire les champs volatils (`VOLATILE`) : deux instantanés d'un compte
   inchangé sont identiques, vérifié sur le vrai compte.
+- **Jetons d'API nommés** (`Settings.cloudflare_tokens`, `CloudflareAdmin.tokens`, `active_token`,
+  `switch_token`) : le premier jeton garde la clé du coffre `cfapi:token` (`LEGACY_TOKEN_ID`), les suivants
+  `cfapi:token:<id>`. Un poste d'avant les jetons nommés n'a rien à migrer : son jeton apparaît sous « Principal ».
+  Les surveillances suivent `cloudflare_account_id`, qui change avec le jeton : elles repartent d'elles-mêmes.
+- **Liens** : `__main__.split_link` retire un `cma://…` ou un `.cma` des arguments ; une instance déjà ouverte le
+  reçoit par le canal local (`{"cmd": "link"}`), puis `MainWindow.handle_link`. Une connexion par lien passe par
+  `execute` (comme la CLI) après confirmation.
 - **Boîtes modales et tests** : chaque boîte ouverte par la vue Cloudflare passe par une fonction de module
   (`ask_*`, `show_*`) que les tests remplacent ; `exec()` bloquerait le test jusqu'au délai de 180 s.
 

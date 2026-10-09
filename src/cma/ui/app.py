@@ -110,9 +110,11 @@ def run_gui(args: argparse.Namespace) -> int:
     setup_logging(paths, "DEBUG" if debug else "INFO")
     log.info("Démarrage de %s %s (Python %s)", APP_NAME, __version__, sys.version.split()[0])
 
+    link = getattr(args, "link", None)
     lock = InstanceLock(paths.lock_file)
     if not lock.acquire():
-        if send_command(paths, {"cmd": "show"}, timeout=5) is not None:
+        message = {"cmd": "link", "target": link} if link else {"cmd": "show"}
+        if send_command(paths, message, timeout=5) is not None:
             log.info("Une instance tourne déjà : fenêtre ramenée au premier plan")
             return 0
         app = QApplication.instance() or QApplication(sys.argv)
@@ -175,9 +177,13 @@ def run_gui(args: argparse.Namespace) -> int:
         if message.get("cmd") == "quit":
             bridge.quit_requested.emit()
             return {"ok": True}
+        if message.get("cmd") == "link":
+            bridge.link_requested.emit(str(message.get("target", "")))
+            return {"ok": True}
         return engine.run_sync(execute(core.manager, message), timeout=150)
 
     bridge.show_requested.connect(window.bring_to_front)
+    bridge.link_requested.connect(window.handle_link)
 
     def quit_now() -> None:
         window.quitting = True
@@ -197,6 +203,8 @@ def run_gui(args: argparse.Namespace) -> int:
 
     for warning in core.warnings:
         window.notify("warning", warning)
+    if link:
+        QTimer.singleShot(500, lambda: window.handle_link(link))
     if core.migration is not None:
         from cma.ui.dialogs.misc import show_migration_report
 

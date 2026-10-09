@@ -36,6 +36,7 @@ from cma.core.dnscheck import DnsCheck, check_all, zone_of
 from cma.core.expiry import parse_expiry
 from cma.core.hostprobe import HostProbe
 from cma.core.models import (
+    ApiToken,
     AuthMode,
     CloudflareProfile,
     Config,
@@ -65,6 +66,13 @@ from cma.i18n import tr
 
 # Appels simultanés pour lire un compte : assez pour un compte ordinaire, sans assaillir l'API.
 OVERVIEW_WORKERS = 8
+# Le jeton d'avant les jetons nommés : il garde sa clé du coffre (`cfapi:token`), aucune migration de secret.
+LEGACY_TOKEN_ID = "principal"  # noqa: S105 (identifiant, pas un secret)
+
+
+def token_secret_key(token_id: str) -> str:
+    return TOKEN_SECRET_KEY if token_id == LEGACY_TOKEN_ID else f"{TOKEN_SECRET_KEY}:{token_id}"
+
 
 _SCHEME_TYPES = {
     "ssh": ServiceType.SSH,
@@ -176,17 +184,40 @@ class CloudflareAdmin:
 
     # --- Jeton et compte ----------------------------------------------------------------------------
 
+    def tokens(self) -> list[ApiToken]:
+        """Jetons enregistrés ; un jeton d'avant les jetons nommés apparaît sous le nom « Principal »."""
+        settings = self.store.snapshot().settings
+        if settings.cloudflare_tokens:
+            return list(settings.cloudflare_tokens)
+        if self.secrets.get(TOKEN_SECRET_KEY):
+            return [
+                ApiToken(id=LEGACY_TOKEN_ID, name=tr("Principal"), account_id=settings.cloudflare_account_id)
+            ]
+        return []
+
+    def active_token(self) -> ApiToken | None:
+        tokens = self.tokens()
+        chosen = self.store.snapshot().settings.cloudflare_token_id
+        return next((t for t in tokens if t.id == chosen), tokens[0] if tokens else None)
+
+    def _active_key(self) -> str | None:
+        active = self.active_token()
+        return token_secret_key(active.id) if active is not None else None
+
     def has_token(self) -> bool:
-        return bool(self.secrets.get(TOKEN_SECRET_KEY))
+        key = self._active_key()
+        return bool(key and self.secrets.get(key))
 
     def api(self, token: str | None = None) -> CloudflareApi:
-        value = token if token is not None else self.secrets.get(TOKEN_SECRET_KEY)
+        key = self._active_key()
+        value = token if token is not None else (self.secrets.get(key) if key else None)
         if not value:
             raise CloudflareApiError(tr("Aucun jeton d'API Cloudflare : connectez-vous d'abord."))
         return CloudflareApi(value, base_url=self.base_url)
 
-    async def connect(self, token: str | None = None) -> list[Account]:
-        """Vérifie le jeton (en listant les comptes) puis, s'il est nouveau, le range dans le coffre."""
+    async def connect(self, token: str | None = None, name: str = "") -> list[Account]:
+        """Vérifie le jeton (en listant les comptes) puis, s'il est nouveau, le range dans le coffre comme un jeton
+        nommé de plus (`name`, sinon le nom du premier compte), qui devient le jeton actif."""
         api = self.api(token)
         accounts = await asyncio.to_thread(api.list_accounts)
         if not accounts:
@@ -204,15 +235,56 @@ class CloudflareAdmin:
                 )
             )
         if token is not None:
-            self.secrets.set(TOKEN_SECRET_KEY, token.strip())
+            self._add_token(token.strip(), name.strip() or accounts[0].name)
         current = self.store.snapshot().settings.cloudflare_account_id
         if current not in {a.id for a in accounts}:
             self.select_account(accounts[0].id)
         return accounts
 
+    def _add_token(self, value: str, name: str) -> None:
+        existing = self.tokens()  # avec le jeton d'avant, gardé sous son ancienne clé
+        # Le premier jeton prend l'ancienne clé : un seul jeton, c'est exactement le rangement d'avant.
+        first = not existing
+        new = ApiToken(name=unique_name(name, [t.name for t in existing]))
+        if first:
+            new = ApiToken(id=LEGACY_TOKEN_ID, name=new.name)
+        self.secrets.set(token_secret_key(new.id), value)
+
+        def apply(config: Config) -> None:
+            config.settings.cloudflare_tokens = [*existing, new]
+            config.settings.cloudflare_token_id = new.id
+            config.settings.cloudflare_account_id = None
+
+        self.store.update(apply)
+
+    def switch_token(self, token_id: str) -> None:
+        """Change de jeton actif et revient au dernier compte choisi avec lui."""
+        tokens = self.tokens()
+        chosen = next((t for t in tokens if t.id == token_id), None)
+        if chosen is None:
+            raise CloudflareApiError(tr("Jeton d'API introuvable."))
+
+        def apply(config: Config) -> None:
+            config.settings.cloudflare_tokens = tokens
+            config.settings.cloudflare_token_id = chosen.id
+            config.settings.cloudflare_account_id = chosen.account_id
+
+        self.store.update(apply)
+
     def forget(self) -> None:
-        self.secrets.delete(TOKEN_SECRET_KEY)
-        self.store.update(lambda c: setattr(c.settings, "cloudflare_account_id", None))
+        """Retire le jeton actif du coffre ; le suivant (s'il y en a) devient actif."""
+        active = self.active_token()
+        if active is None:
+            return
+        self.secrets.delete(token_secret_key(active.id))
+        remaining = [t for t in self.tokens() if t.id != active.id]
+
+        def apply(config: Config) -> None:
+            config.settings.cloudflare_tokens = remaining
+            config.settings.cloudflare_token_id = remaining[0].id if remaining else None
+            config.settings.cloudflare_account_id = remaining[0].account_id if remaining else None
+
+        self.store.update(apply)
 
     def account_id(self) -> str:
         value = self.store.snapshot().settings.cloudflare_account_id
@@ -221,7 +293,15 @@ class CloudflareAdmin:
         return value
 
     def select_account(self, account_id: str) -> None:
-        self.store.update(lambda c: setattr(c.settings, "cloudflare_account_id", account_id))
+        active = self.active_token()
+
+        def apply(config: Config) -> None:
+            config.settings.cloudflare_account_id = account_id
+            for token in config.settings.cloudflare_tokens:
+                if active is not None and token.id == active.id:
+                    token.account_id = account_id
+
+        self.store.update(apply)
 
     # --- Lecture ----------------------------------------------------------------------------------------
 

@@ -42,6 +42,8 @@ class EngineBridge(QObject):
     config_changed = Signal()
     download_progress = Signal(object)
     show_requested = Signal()
+    # Lien cma:// ou fichier .cma reçu par une autre instance (CMA déjà ouvert).
+    link_requested = Signal(str)
     quit_requested = Signal()
     fatal_error = Signal(str)
 

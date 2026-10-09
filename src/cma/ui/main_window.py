@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QKeySequence, QResizeEvent, QShortcut
@@ -25,9 +26,12 @@ from PySide6.QtWidgets import (
 
 from cma import APP_NAME, __version__
 from cma.core.cfapi import Tunnel
+from cma.core.commands import execute
 from cma.core.events import Notification
 from cma.core.expiry import TokenExpiry, expiring_tokens
 from cma.core.hostprobe import HostProbe
+from cma.core.links import Link, LinkError, is_link, parse_link, profile_from_share, read_share
+from cma.core.models import Config
 from cma.core.secrets import EncryptedFileSecretStore
 from cma.core.servicewatch import ServiceChange, ServiceResult, ServiceTarget, troubled_services_summary
 from cma.core.sessions import SessionInfo, SessionKind, SessionState
@@ -37,6 +41,7 @@ from cma.ui.a11y import apply_accessible_names
 from cma.ui.context import GuiContext
 from cma.ui.dialogs.diagnose import open_diagnosis
 from cma.ui.dialogs.history import show_history
+from cma.ui.dialogs.links import ask_import_shared, ask_link_connect
 from cma.ui.dialogs.notifications import show_notifications
 from cma.ui.dialogs.palette import CommandPalette, PaletteEntry
 from cma.ui.dialogs.workspaces import launch_workspace
@@ -46,6 +51,7 @@ from cma.ui.lock import IdleWatcher, LockPanel
 from cma.ui.notices import NoticeLog
 from cma.ui.states import RUNNING, TO_CHECK, sessions_summary
 from cma.ui.views.cloud import CloudView
+from cma.ui.views.cloud.search import palette_entries as cloud_palette_entries
 from cma.ui.views.dashboard import DashboardView
 from cma.ui.views.logs import LogsView
 from cma.ui.views.profiles import CloudflareProfilesView
@@ -459,6 +465,7 @@ class MainWindow(QMainWindow):
                     icon="player-stop-filled",
                 )
             )
+        entries += cloud_palette_entries(self.cloud, lambda: self.show_view("cloud"))
         section = tr("Aller à")
         for key, item in self._nav_items.items():
             entries.append(
@@ -683,6 +690,75 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         if self._lock_panel is not None:
             self._lock_panel.setGeometry(self.rect())
+
+    # --- Liens cma:// et profils partagés ----------------------------------------------------------------
+
+    def handle_link(self, target: str) -> None:
+        """Lien `cma://` ou fichier `.cma` ouvert par le système (au lancement ou envoyé à l'instance ouverte)."""
+        self.bring_to_front()
+        try:
+            if is_link(target):
+                link = parse_link(target)
+            else:
+                link = Link("import", share=read_share(Path(target).read_text(encoding="utf-8")))
+        except (LinkError, OSError) as exc:
+            self.notify("error", str(exc))
+            return
+        if link.action == "connect":
+            self.connect_from_link(link.profile)
+        else:
+            self.import_shared(link.share)
+
+    def connect_from_link(self, name: str) -> None:
+        profile = self.ctx.config().find_profile_by_name(name)
+        if profile is None:
+            self.notify("error", tr("Lien CMA : aucun profil « {name} ».").format(name=name))
+            return
+        if not profile.link_trusted:
+            accepted, trust = ask_link_connect(self, profile)
+            if not accepted:
+                return
+            if trust:
+                profile_id = profile.id
+
+                def mark(config: Config) -> None:
+                    for item in [*config.cloudflare_profiles, *config.ssh_profiles]:
+                        if item.id == profile_id:
+                            item.link_trusted = True
+
+                self.ctx.update_config(mark)
+
+        def done(reply: dict[str, object]) -> None:
+            if not reply.get("ok"):
+                self.notify("error", str(reply.get("error") or ""))
+            elif reply.get("message"):
+                self.notify("info", str(reply["message"]))
+
+        self.ctx.run(execute(self.ctx.manager, {"cmd": "connect", "profile": profile.id}), done)
+
+    def import_shared(self, share: dict[str, object]) -> None:
+        try:
+            shared = profile_from_share(dict(share), self.ctx.config())
+        except LinkError as exc:
+            self.notify("error", str(exc))
+            return
+        if not ask_import_shared(self, shared):
+            return
+        profile = shared.profile
+        if not self.ctx.update_config(lambda c: c.cloudflare_profiles.append(profile)):
+            return
+        if shared.missing_token is not None:
+            name, client_id = shared.missing_token
+            self.notify(
+                "warning",
+                tr(
+                    "Profil « {profile} » ajouté. Il lui manque le service token « {name} » (Client ID {client_id}) : "
+                    "ajoutez-le dans Service tokens, puis choisissez-le dans le profil."
+                ).format(profile=profile.name, name=name or "—", client_id=client_id or "—"),
+            )
+        else:
+            self.notify("success", tr("Profil « {name} » ajouté.").format(name=profile.name))
+        self.open_profile(profile.id)
 
     def bring_to_front(self) -> None:
         self.showNormal() if self.isMinimized() else self.show()

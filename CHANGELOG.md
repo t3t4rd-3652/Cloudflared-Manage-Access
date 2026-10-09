@@ -29,6 +29,17 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
   - **Permissions du jeton** : chaque fonction de CMA, sa permission, et si elle fonctionne (vérifié en lecture).
 - **Trafic par nom d'hôte** (facultatif, permission « Analytics : Read ») : requêtes et erreurs 5xx des dernières
   24 heures en info-bulle, pastille « N × 5xx » sur la carte.
+- **Liens `cma://`** : `cma://connect/<profil>` ouvre une connexion depuis un favori, un document ou un ticket, après
+  confirmation (« Ne plus demander pour ce profil » possible). Liens et fichiers `.cma` déclarés par l'installeur ;
+  versions portable et Scoop : case à cocher dans « Partager… ».
+- **Partager un profil** (« Partager… » dans le menu d'un profil) : lien de partage ou fichier `.cma`, **sans aucun
+  secret** (ni proxy, ni en-têtes) ; le service token n'y est désigné que par son Client ID et retrouvé chez le
+  destinataire s'il l'a déjà.
+- **Palette Ctrl+K** : tunnels, noms d'hôte, applications Access et service tokens du compte lu, avec un saut vers
+  l'objet.
+- **Plusieurs jetons d'API** (plusieurs comptes ou plusieurs connexions Cloudflare) : choix du jeton dans l'en-tête
+  de la vue Cloudflare, « Ajouter un jeton… » avec un nom ; chaque jeton retrouve son dernier compte. Le jeton
+  existant devient « Principal », sans migration.
 
 ## [2.9.0] - 2026-10-09
 

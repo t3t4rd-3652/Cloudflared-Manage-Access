@@ -36,6 +36,7 @@ from cma.core.sessions import SessionInfo, SessionKind, SessionState
 from cma.i18n import tr
 from cma.ui.context import GuiContext
 from cma.ui.dialogs.diagnose import open_diagnosis
+from cma.ui.dialogs.links import show_share
 from cma.ui.dialogs.misc import show_text
 from cma.ui.dialogs.transfer import run_export, run_import
 from cma.ui.icons import set_icon
@@ -763,8 +764,14 @@ class CloudflareProfilesView(QWidget):
             ("copy", tr("Dupliquer"), self.duplicate),
             ("pencil", tr("Renommer"), rename),
             ("file-export", tr("Exporter…"), lambda: run_export(self.ctx, self, {profile_id})),
+            ("link", tr("Partager…"), lambda: self.share(profile_id)),
             ("trash", tr("Supprimer…"), self.delete),
         ]
+
+    def share(self, profile_id: str) -> None:
+        profile = self.ctx.config().cloudflare_profile(profile_id)
+        if profile is not None:
+            show_share(self, self.ctx, profile)
 
     def connect_group(self, group: str) -> None:
         self.ctx.run(self.ctx.manager.start_group(group), None, lambda e: self.ctx.notify("error", str(e)))

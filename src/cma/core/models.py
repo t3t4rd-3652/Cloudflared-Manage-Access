@@ -160,6 +160,8 @@ class CloudflareProfile(Model):
     service_user: str = ""
     auto_start: bool = False
     auto_reconnect: bool = True
+    # Un lien cma://connect/… ouvre ce profil sans confirmation (choisi par l'utilisateur au premier lien).
+    link_trusted: bool = False
     notes: str = ""
 
     @field_validator("hostname")
@@ -313,6 +315,7 @@ class SshProfile(Model):
     # Rebond SSH (ProxyJump) : la connexion passe d'abord par ce autre profil SSH.
     jump_profile: str | None = None
     saved_forwards: list[SavedForward] = Field(default_factory=list[SavedForward])
+    link_trusted: bool = False
     notes: str = ""
 
     @field_validator("host")
@@ -378,6 +381,16 @@ class Workspace(Model):
     items: list[LaunchItem] = Field(default_factory=list[LaunchItem])
 
 
+class ApiToken(Model):
+    """Jeton d'API Cloudflare enregistré (plusieurs comptes ou plusieurs connexions Cloudflare). Le jeton lui-même
+    est dans le coffre ; le premier, d'avant les jetons nommés, y reste sous son ancienne clé."""
+
+    id: str = Field(default_factory=new_id)
+    name: Name
+    # Dernier compte choisi avec ce jeton : on y revient en rebasculant.
+    account_id: str | None = None
+
+
 class Theme(StrEnum):
     SYSTEM = "system"
     LIGHT = "light"
@@ -416,6 +429,9 @@ class Settings(Model):
     # Test périodique, depuis Internet, des noms d'hôte HTTP publiés par les tunnels en service.
     watch_services: bool = True
     cloudflare_account_id: str | None = None
+    # Jetons d'API nommés et jeton actif ; vide tant qu'un seul jeton a jamais été utilisé.
+    cloudflare_tokens: list[ApiToken] = Field(default_factory=list[ApiToken])
+    cloudflare_token_id: str | None = None
 
     @field_validator("language", mode="before")
     @classmethod

@@ -84,6 +84,8 @@ class FakeCloudflare:
         ]
     )
     audit_allowed: bool = True
+    # Autres jetons acceptés (plusieurs jetons d'API enregistrés dans CMA).
+    other_tokens: tuple[str, ...] = ()
     # Connecteurs par tunnel : « bureau » a un connecteur sain (4 connexions), « labo » aucun.
     connectors: dict[str, list[dict[str, Any]]] = field(
         default_factory=lambda: {
@@ -250,7 +252,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         query = parse_qs(parts.query)
         with state.lock:
             state.requests.append((method, path))
-        if self.headers.get("Authorization") != f"Bearer {state.token}":
+        allowed = {f"Bearer {t}" for t in (state.token, *state.other_tokens)}
+        if self.headers.get("Authorization") not in allowed:
             self._error(401, 10000, "Authentication error")
             return
         body = self._body() if method in ("POST", "PUT", "PATCH") else None

@@ -49,6 +49,15 @@ Name: "{userdesktop}\Cloudflared Manage Access"; Filename: "{app}\CloudflaredMan
 
 [Registry]
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "CloudflaredManageAccess"; ValueData: """{app}\CloudflaredManageAccess.exe"" --minimized"; Flags: uninsdeletevalue; Tasks: autostart
+; Liens cma:// et profils partagés .cma (cma.platform.links fait de même pour les versions portable et Scoop).
+Root: HKCU; Subkey: "Software\Classes\cma"; ValueType: string; ValueName: ""; ValueData: "URL:Cloudflared Manage Access"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\cma"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\cma\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\CloudflaredManageAccess.exe"",0"
+Root: HKCU; Subkey: "Software\Classes\cma\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\CloudflaredManageAccess.exe"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\.cma"; ValueType: string; ValueName: ""; ValueData: "CloudflaredManageAccess.Profile"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\CloudflaredManageAccess.Profile"; ValueType: string; ValueName: ""; ValueData: "Cloudflared Manage Access — profil partagé"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\CloudflaredManageAccess.Profile\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\CloudflaredManageAccess.exe"",0"
+Root: HKCU; Subkey: "Software\Classes\CloudflaredManageAccess.Profile\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\CloudflaredManageAccess.exe"" ""%1"""
 
 [Run]
 Filename: "{app}\CloudflaredManageAccess.exe"; Description: "{cm:LaunchProgram,Cloudflared Manage Access}"; Flags: nowait postinstall skipifsilent
