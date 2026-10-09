@@ -68,6 +68,26 @@ class RemotePort:
     def display_name(self) -> str:
         return self.container or self.service or guess_service_type(port=self.port).label
 
+    def publish_service(self) -> str:
+        """Service à publier sur un tunnel dont le connecteur tourne sur ce même serveur : schéma détecté (HTTP,
+        HTTPS) ou déduit du port (SSH, RDP), sinon TCP ; adresse vue depuis le serveur."""
+        host = self.forward_host
+        host = "localhost" if host in ("127.0.0.1", "::1") else (f"[{host}]" if ":" in host else host)
+        if self.scheme in ("http", "https"):
+            scheme = self.scheme
+        else:
+            scheme = {22: "ssh", 3389: "rdp", 445: "smb"}.get(self.port, "tcp")
+        return f"{scheme}://{host}:{self.port}"
+
+    def suggested_hostname(self) -> str:
+        """Premier segment de nom d'hôte proposé : le conteneur ou le service, en minuscules, sans caractère
+        interdit ; à défaut « port-<numéro> »."""
+        base = (self.container or self.service or "").lower()
+        cleaned = "".join(c if c.isalnum() else "-" for c in base).strip("-")
+        while "--" in cleaned:
+            cleaned = cleaned.replace("--", "-")
+        return cleaned[:63] or f"port-{self.port}"
+
     @property
     def web_label(self) -> str:
         if self.scheme and self.http_code:

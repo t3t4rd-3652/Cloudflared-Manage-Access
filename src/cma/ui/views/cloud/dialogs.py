@@ -38,6 +38,10 @@ class PublishDialog(QDialog):
         overview: Overview,
         tokens: list[ServiceToken],
         tunnel: Tunnel | None = None,
+        *,
+        hostname: str = "",
+        service: str = "",
+        note: str = "",
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(tr("Publier un service"))
@@ -128,6 +132,14 @@ class PublishDialog(QDialog):
             combo.currentIndexChanged.connect(self._refresh)
         if not overview.tunnels or not overview.zones:
             self._fail(tr("Aucun tunnel ou domaine utilisable dans ce compte."))
+        # Valeurs proposées (publication d'un port découvert sur un serveur SSH) ; modifiables.
+        if note:
+            hint = label(note, "warning", wrap=True)
+            layout.insertWidget(2, hint)
+        if hostname:
+            self.hostname.setText(hostname)
+        if service:
+            self.service.setText(service)
         self._refresh()
 
     def _split_fqdn(self, text: str) -> None:

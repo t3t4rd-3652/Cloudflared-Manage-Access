@@ -92,6 +92,8 @@ class TunnelsTab(QWidget):
         self.view = view
         self.ctx = view.ctx
         self._preferred_tunnel: Tunnel | None = None
+        # Valeurs proposées à la boîte de publication (port découvert sur un serveur SSH).
+        self._prefill: dict[str, str] = {}
         self._build()
 
     @property
@@ -638,15 +640,21 @@ class TunnelsTab(QWidget):
             return None
         remote = {t.client_id for t in self.view.overview.tokens}
         tokens = [t for t in self.ctx.config().tokens if t.client_id in remote]
-        dialog = PublishDialog(self, self.view.overview, tokens, self._preferred_tunnel)
+        dialog = PublishDialog(self, self.view.overview, tokens, self._preferred_tunnel, **self._prefill)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return None
         return dialog.request()
 
-    def publish(self, tunnel: Tunnel | None = None) -> None:
+    def publish(
+        self, tunnel: Tunnel | None = None, *, hostname: str = "", service: str = "", note: str = ""
+    ) -> None:
         self._preferred_tunnel = tunnel if isinstance(tunnel, Tunnel) else None
-        request = self.ask_publish()
-        self._preferred_tunnel = None
+        self._prefill = {"hostname": hostname, "service": service, "note": note}
+        try:
+            request = self.ask_publish()
+        finally:
+            self._preferred_tunnel = None
+            self._prefill = {}
         if request is None:
             return
         self.view.status.setText(tr("Publication de {host}…").format(host=request.hostname))

@@ -182,6 +182,11 @@ class PortsTab(QWidget):
         layout.addWidget(self.empty_hint)
         bottom = QHBoxLayout()
         bottom.addWidget(label(tr("La destination est vue depuis le serveur SSH."), "muted"), 1)
+        self.publish_button = button(tr("Publier sur Cloudflare…"), "world-www")
+        self.publish_button.setToolTip(tr("Publier ce port sur un tunnel du compte Cloudflare"))
+        self.publish_button.clicked.connect(self.publish_selected)
+        self.publish_button.setEnabled(False)
+        bottom.addWidget(self.publish_button)
         self.redirect_button = primary_button(tr("Rediriger…"), "arrows-right-left")
         self.redirect_button.clicked.connect(self.redirect_selected)
         bottom.addWidget(self.redirect_button)
@@ -200,6 +205,7 @@ class PortsTab(QWidget):
         self.redirect_button.setText(
             tr("Rediriger le port {port}…").format(port=port.port) if port else tr("Rediriger…")
         )
+        self.publish_button.setEnabled(port is not None and self.panel.view.publish_port is not None)
 
     def _update_empty(self) -> None:
         if self._last_when is None:
@@ -279,6 +285,13 @@ class PortsTab(QWidget):
     def redirect_selected(self) -> None:
         self.panel.add_forward(self._selected_port())
 
+    def publish_selected(self) -> None:
+        """Le port choisi devient un service publié sur un tunnel (boîte de publication préremplie)."""
+        port = self._selected_port()
+        publish = self.panel.view.publish_port
+        if port is not None and publish is not None and self.panel.profile is not None:
+            publish(self.panel.profile.name, port)
+
     def _context_menu(self, pos: QPoint) -> None:
         index = self.table.indexAt(pos)
         if not index.isValid():
@@ -289,6 +302,8 @@ class PortsTab(QWidget):
             return
         menu = QMenu(self)
         menu.addAction(tr("Rediriger…"), self.redirect_selected)
+        publish = menu.addAction(tr("Publier sur Cloudflare…"), self.publish_selected)
+        publish.setEnabled(self.panel.view.publish_port is not None)
         line = "\t".join((str(port.port), ", ".join(port.bind), port.display_name, port.web_label))
         menu.addAction(tr("Copier la ligne"), lambda: copy_to_clipboard(line))
         menu.exec(self.table.viewport().mapToGlobal(pos))

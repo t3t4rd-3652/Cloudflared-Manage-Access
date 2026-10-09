@@ -460,7 +460,7 @@ README. Testés contre le faux serveur et un serveur HTTP local.
 
 ### P20 — Du serveur SSH à Cloudflare : publier un port découvert (2.11)
 
-Statut : À FAIRE
+Statut : FAIT
 
 - **Objectif** : un port trouvé sur un serveur (onglet Ports) se publie en un clic sur un tunnel du compte.
 - **Tâches** : « Publier sur Cloudflare… » sur un port découvert : boîte de publication préremplie (service
@@ -472,7 +472,7 @@ Statut : À FAIRE
 
 ### P21 — Expérience : « Quoi de neuf », raccourcis, démarrage (2.11)
 
-Statut : À FAIRE
+Statut : EN COURS
 
 - **Objectif** : après une mise à jour, savoir ce qui a changé ; retrouver les raccourcis ; démarrer au moins aussi
   vite.
@@ -516,10 +516,10 @@ Statut : À FAIRE
 | P16 | FAIT | 595f332 | 505 ✓ | 2026-10-09 |
 | P17 | FAIT | faa2f2e | 506 ✓ | 2026-10-09 |
 | P18 | FAIT | 4fc1068 | 511 ✓ | 2026-10-09 |
-| P19 | EN COURS | — | — | — |
-| P20 | À FAIRE | — | — | — |
-| P21 | À FAIRE | — | — | — |
+| P19 | FAIT | aa5464c | 512 ✓ | 2026-10-09 |
+| P20 | FAIT | — | 514 ✓ | 2026-10-09 |
+| P21 | EN COURS | — | — | — |
 | P22 | À FAIRE | — | — | — |
 
-**Prochaine action exacte :** créer `src/cma/ui/monitor.py` (P17) en y déplaçant `check_tunnels`, `check_services`,
-`_record`, `report_*_changes` et `_show_troubled_tunnels` de `src/cma/ui/main_window.py`.
+**Prochaine action exacte :** créer `src/cma/core/changelog.py` (P21) : lecture de la section d'une version dans
+`CHANGELOG.md` (embarqué dans les paquets), puis la boîte `src/cma/ui/dialogs/whatsnew.py`.

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
 from datetime import datetime
 
 from PySide6.QtGui import QKeySequence
@@ -210,6 +211,8 @@ class SshView(QWidget):
         self.ssh_states: dict[str, SshConnectionChanged] = {}
         self.discoveries: dict[str, tuple[DiscoveryResult, datetime]] = {}
         self._current: str | None = None
+        # Publier un port découvert sur Cloudflare (branché par la fenêtre principale) : (serveur, port).
+        self.publish_port: Callable[[str, RemotePort], None] | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 16)
         layout.setSpacing(4)

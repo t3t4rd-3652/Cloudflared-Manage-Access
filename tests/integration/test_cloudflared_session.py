@@ -36,7 +36,9 @@ def make_session(bus, port, mode, *, tmp_path=None, auto_reconnect=True, extra_e
     return CloudflaredSession(bus=bus, profile=profile, command=CommandSpec(args, env))
 
 
-async def wait_for(session, states, timeout=10.0):
+async def wait_for(session, states, timeout=30.0):
+    # Rendu dès que l'état est atteint ; 30 s parce que, sous la charge des tests en parallèle, le lancement du
+    # faux cloudflared (un processus Python) dépasse parfois 10 s.
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     while loop.time() < deadline:

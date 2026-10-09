@@ -28,6 +28,15 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
   avec « Voir » ; cachée quand tout va bien.
 - **Espace de travail au démarrage** (Espaces de travail) : ouvert au lancement de CMA, au besoin sauf sur un réseau
   Wi-Fi donné (« Réseau actuel » le remplit).
+- **Graphique de disponibilité** (Outils › Disponibilité) : un tunnel ou un service jour par jour sur 7, 30 ou 90
+  jours (barres du taux, courbe du temps de réponse moyen) ; **rapport exportable** en page HTML autonome ou en CSV,
+  avec les incidents et la durée des pannes de la période.
+- **Automatisation en ligne de commande** : `cma availability [--days N] [--json]` (code 2 si un incident est en
+  cours), `cma review [--json] [--all]` (bilan de sécurité, code 2 si un constat élevé n'est pas ignoré) et
+  `cma alerts test` (un test vers chaque canal d'alerte actif).
+- **Publier sur Cloudflare un port découvert** (Serveurs SSH › Ports, bouton ou menu) : la boîte de publication
+  s'ouvre préremplie (service `http://localhost:<port>`, ou le schéma détecté, SSH, RDP ; nom d'hôte d'après le
+  conteneur ou le service) et rappelle de choisir le tunnel dont cloudflared tourne sur ce serveur.
 
 ### Modifié
 - La tâche planifiée ne prévient plus à chaque passage tant qu'une panne dure : seulement à son début et à son
@@ -36,6 +45,9 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
   (`dashboard.py` passe de 858 à 451 lignes).
 - Recette sur un vrai compte (`scripts/cloudflare_recette.py`) étendue : routes privées, journal d'audit, bilan et
   permissions en lecture ; route jetable, Access exigé au niveau du tunnel et correction par le bilan en écriture.
+- La surveillance du compte (tunnels, services, journal de disponibilité, alertes) sort de la fenêtre principale
+  dans `cma.ui.monitor` (ADR 0001) ; la palette de commandes dans `palette_entries.py`. `main_window.py` passe de
+  990 à 730 lignes.
 
 ## [2.10.0] - 2026-10-09
 

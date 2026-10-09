@@ -419,15 +419,18 @@ async def test_launch_items_edge_cases(manager, store):
         await manager.probe_session("absent")
 
 
-async def test_resume_after_network(manager, store):
+async def test_resume_after_network(manager, store, monkeypatch):
     """Retour du réseau : une session en attente de reconnexion repart aussitôt, une session abandonnée après trop
     d'échecs est relancée ; une session en service n'est pas touchée."""
+    from cma.core import sessions as sessions_module
+
+    # Délai de reconnexion long et fixe : la session reste en attente tant que le réveil ne la relance pas.
+    monkeypatch.setattr(sessions_module.Backoff, "next_delay", lambda _self: 60.0)
     FAKE_ENV["FAKE_CF_MODE"] = "crash"
     FAKE_ENV["FAKE_CF_CRASH_AFTER"] = "0.3"
     waiting = add(store, CloudflareProfile(name="Attente", hostname="a.ex.fr", local_port=free_port()))
     info = await manager.start_cloudflare(waiting.id)
-    session = await wait_state(manager, info.id, {SessionState.RECONNECTING})
-    session.backoff.failures = 5  # le prochain délai serait de 32 s
+    await wait_state(manager, info.id, {SessionState.RECONNECTING})
     FAKE_ENV["FAKE_CF_MODE"] = "ok"
     # Le port de la session en panne est libre entre deux tentatives : en choisir un autre, explicitement.
     other = find_free_port(port_range=(30000, 30999), avoid={waiting.local_port or 0})
@@ -438,8 +441,8 @@ async def test_resume_after_network(manager, store):
     stale.set_state(SessionState.ERROR, "Abandon après 10 tentatives.")
 
     assert await manager.resume_after_network() == 2
-    # Délais repartis de zéro (la session, toujours en panne, a pu réessayer depuis : moins de 5 échecs suffit).
-    assert session.backoff.failures < 5
+    # Réveillée : elle relance cloudflared tout de suite, au lieu d'attendre ses 60 s.
+    await wait_state(manager, info.id, {SessionState.STARTING, SessionState.LISTENING}, timeout=30.0)
     relaunched = manager.active_session_for(given_up.id)
     assert relaunched is not None and relaunched.id != abandoned.id
     await wait_state(manager, relaunched.id, {SessionState.LISTENING})

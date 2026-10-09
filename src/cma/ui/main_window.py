@@ -34,6 +34,7 @@ from cma.core.models import Config
 from cma.core.secrets import EncryptedFileSecretStore
 from cma.core.servicewatch import ServiceResult, troubled_services_summary
 from cma.core.sessions import SessionInfo, SessionKind, SessionState
+from cma.core.ssh.discovery import RemotePort
 from cma.core.tunnelwatch import troubled_summary
 from cma.i18n import tr
 from cma.ui.a11y import apply_accessible_names
@@ -249,6 +250,7 @@ class MainWindow(QMainWindow):
         ctx.bridge.config_changed.connect(self._show_troubled_tunnels)
         self.dashboard.health.open_cloud = lambda: self.open_tunnel(None)
         self.dashboard.health.open_tokens = self.open_cloud_tokens
+        self.ssh.publish_port = self.publish_port
 
         status = self.statusBar()
         status.setSizeGripEnabled(False)
@@ -435,6 +437,33 @@ class MainWindow(QMainWindow):
         self.cloud.refresh()
         if diagnose and tunnel is not None:
             self.cloud.check_connectors(tunnel)
+
+    def publish_port(self, server: str, port: RemotePort) -> None:
+        """« Publier sur Cloudflare… » d'un port découvert : la boîte de publication de la vue Cloudflare, préremplie."""
+        cloud = self.cloud
+        if not cloud.admin.has_token():
+            self.show_view("cloud")
+            self.notify("info", tr("Connectez d'abord votre compte Cloudflare avec un jeton d'API."))
+            return
+        if cloud.overview is None:
+            self.show_view("cloud")
+            self.notify(
+                "info",
+                tr(
+                    "Lecture du compte Cloudflare en cours : relancez « Publier sur Cloudflare… » dans un instant."
+                ),
+            )
+            return
+        self.show_view("cloud")
+        cloud.tabs.setCurrentIndex(0)
+        cloud.publish(
+            hostname=port.suggested_hostname(),
+            service=port.publish_service(),
+            note=tr(
+                "Le service est joint depuis le connecteur du tunnel : choisissez le tunnel dont cloudflared tourne "
+                "sur « {server} » (sinon, remplacez localhost par l'adresse du serveur)."
+            ).format(server=server),
+        )
 
     def open_cloud_tokens(self) -> None:
         """Onglet « Service tokens » de la vue Cloudflare, où se prolonge un token."""
