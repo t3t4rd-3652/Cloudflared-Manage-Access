@@ -196,6 +196,12 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   `teamName` lu dans `/access/organizations`, `audTag` de l'application qui couvre le nom).
 - **Jeton de la surveillance** (`Settings.watch_token_id`, `CloudflareAdmin.watch_api`) : `tunnel_states` et
   `service_targets` le prennent ; tout le reste utilise le jeton actif.
+- **Disponibilité et alertes** (`cma.core.availability`, `alerts`, `monitoring`) : `record_tunnels` et
+  `record_services` tiennent le journal et renvoient les incidents ouverts ou fermés ; CMA ouvert et la tâche
+  planifiée s'en servent de la même façon (la tâche n'écrit que si CMA est fermé). La sourdine (`Settings.muted`,
+  clés `tunnel:<id>` et `service:<nom d'hôte et chemin>`) coupe notifications, alertes et badge, pas le relevé.
+  Les fonctions d'envoi ou de test remplaçables (`send_events(sender=…)`, `probe_targets(prober=…)`) se résolvent à
+  l'appel : une valeur par défaut figée empêche les tests de les remplacer.
 - **Boîtes modales et tests** : chaque boîte ouverte par la vue Cloudflare passe par une fonction de module
   (`ask_*`, `show_*`) que les tests remplacent ; `exec()` bloquerait le test jusqu'au délai de 180 s.
 

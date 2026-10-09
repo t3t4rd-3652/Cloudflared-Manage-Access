@@ -171,6 +171,7 @@ def test_tools_menu_opens_the_audit_log(qtbot, view, monkeypatch):
     monkeypatch.setattr(tools_module, "show_audit_log", lambda _p, entries: shown.append(len(entries)))
     assert [a.text() for a in view.tools.menu.actions()] == [
         "Bilan de sécurité…",
+        "Disponibilité…",
         "Journal d'audit du compte…",
         "Instantanés de la configuration…",
         "Permissions du jeton…",

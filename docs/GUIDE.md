@@ -6,6 +6,7 @@ sécurité et les permissions du jeton d'API, [SECURITE.md](SECURITE.md).
 - [Ouvrir un accès Bureau à distance (RDP)](#ouvrir-un-accès-bureau-à-distance-rdp)
 - [Publier un nouveau service](#publier-un-nouveau-service)
 - [Un service ne répond plus (erreur 502, 1033…)](#un-service-ne-répond-plus-erreur-502-1033)
+- [Être prévenu sur son téléphone, suivre la disponibilité](#être-prévenu-sur-son-téléphone-suivre-la-disponibilité)
 - [Renouveler un service token](#renouveler-un-service-token)
 - [Donner accès à un réseau privé (WARP)](#donner-accès-à-un-réseau-privé-warp)
 - [Vérifier la sécurité du compte](#vérifier-la-sécurité-du-compte)
@@ -71,6 +72,27 @@ d'hôte** pour un tableau récapitulatif, pannes en premier. Le conseil de la li
 
 Avec la permission « Analytics : Read » sur le jeton, chaque carte montre aussi le trafic des dernières 24 heures
 et le nombre d'erreurs 5xx renvoyées aux visiteurs.
+
+## Être prévenu sur son téléphone, suivre la disponibilité
+
+**Paramètres › Général › Alertes › Ajouter un canal…** : choisissez le type et collez l'adresse.
+
+| Type | Adresse |
+| --- | --- |
+| ntfy (application ntfy sur le téléphone) | `https://ntfy.sh/<un sujet difficile à deviner>`, ou votre propre serveur ntfy |
+| Slack | webhook entrant de l'application Slack |
+| Microsoft Teams | workflow « Publier dans un canal quand une requête webhook est reçue » |
+| Discord | webhook du salon (Paramètres du salon › Intégrations) |
+| Webhook | toute adresse qui accepte un JSON (`title`, `text`, `level`, `at`) |
+
+**Envoyer un test** vérifie le canal. Les pannes et les retours partent ensuite vers chaque canal actif, depuis CMA
+ouvert comme depuis la tâche planifiée (Paramètres › Général › Cloudflare).
+
+Une maintenance prévue ? Clic droit sur le tunnel ou le nom d'hôte › **Mettre en sourdine** : il reste relevé, mais
+ne déclenche ni notification ni alerte jusqu'à la fin de la sourdine.
+
+**Outils › Disponibilité…** montre, pour chaque tunnel et service, le taux de disponibilité sur 7 et 30 jours, le
+temps de réponse moyen et la liste des incidents (début, fin, durée, cause).
 
 ## Renouveler un service token
 

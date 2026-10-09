@@ -12,6 +12,8 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
 | Clés privées SSH générées | Dossier `ssh_keys` du dossier de données, chiffrables par phrase de passe (bcrypt/OpenSSH). |
 | Configuration `config.json` | Ne contient aucun secret. |
 | Instantanés `snapshots/*.json` | Configuration du compte Cloudflare (règles, politiques, DNS, Client ID des tokens) ; aucun jeton ni secret. Les 30 derniers par compte. |
+| Disponibilité `availability.json` | Incidents et taux des tunnels et services (noms d'hôte, états, durées) ; 90 jours au plus. |
+| Adresses des canaux d'alerte | Coffre du système (clé `alert:<id>`) : une adresse ntfy, Slack ou Teams vaut un jeton. |
 | Historique `history.json` | Nom des accès, horaires, compteurs et messages d'incident déjà masqués ; 90 jours au plus, effaçable depuis CMA. |
 | Journaux et rapport de diagnostic | Les secrets connus et les motifs habituels (en-tête `Cf-Access-Client-Secret`, `password=`…) sont masqués. |
 | Exports | Secrets exclus par défaut, ou chiffrés par phrase de passe (scrypt, AES-256-GCM). |

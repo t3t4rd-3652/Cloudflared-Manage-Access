@@ -48,6 +48,7 @@ from cma.ui.context import GuiContext
 from cma.ui.dialogs.misc import KeysDialog, KnownHostsDialog, confirm_delete_v1
 from cma.ui.dialogs.transfer import run_export, run_import
 from cma.ui.views.common import FormCard, card_page, page_header, side_by_side
+from cma.ui.views.settings_alerts import AlertsSection
 from cma.ui.views.settings_updates import UpdateActions
 from cma.ui.widgets import add_shortcut, button, label, primary_button
 
@@ -83,7 +84,11 @@ class SettingsView(QWidget):
         self.tabs.setDocumentMode(True)
         outer.addWidget(self.tabs, 1)
         pages = (
-            ("general", tr("Général"), (self._build_appearance, self._build_behaviour, self._build_watch)),
+            (
+                "general",
+                tr("Général"),
+                (self._build_appearance, self._build_behaviour, self._build_watch, self._build_alerts),
+            ),
             ("cloudflared", tr("cloudflared"), (self._build_cloudflared,)),
             ("ssh", tr("SSH"), (self._build_ssh,)),
             ("data", tr("Données"), (self._build_data,)),
@@ -225,6 +230,16 @@ class SettingsView(QWidget):
         ports.addWidget(self.port_max)
         ports.addStretch()
         form.addRow(tr("Ports automatiques"), ports)
+
+    def _build_alerts(self) -> None:
+        form = self._section(
+            tr("Alertes"),
+            tr(
+                "Pannes et retours des tunnels et des services publiés, envoyés aussi hors de ce poste : téléphone "
+                "(ntfy), Slack, Teams, Discord ou webhook. La tâche planifiée les envoie aussi quand CMA est fermé."
+            ),
+        )
+        self.alerts = AlertsSection(self, form)
 
     def _build_watch(self) -> None:
         form = self._section(
@@ -402,6 +417,7 @@ class SettingsView(QWidget):
     def load(self) -> None:
         self._loading = True
         settings = self.ctx.config().settings
+        self.alerts.load(self.ctx.config())
         self.cf_path.setText(settings.cloudflared_path or "")
         self.cf_log_level.setCurrentIndex(max(0, self.cf_log_level.findData(settings.cloudflared_log_level)))
         self.theme.setCurrentIndex(max(0, self.theme.findData(settings.theme)))

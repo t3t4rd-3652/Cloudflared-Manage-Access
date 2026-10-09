@@ -375,6 +375,11 @@ Lu sur le vrai compte le 2026-10-09 : dernière utilisation renseignée pour les
 
 ### P14 — Disponibilité et alertes (2.12)
 
+**État au 2026-10-09 : réalisé** (`cma.core.availability`, `alerts`, `monitoring` ; `cloud/availability.py`,
+`settings_alerts.py`, sourdine dans `tunnels_tab.py`). La tâche planifiée se sert du journal comme mémoire : elle ne
+prévient qu'au début et à la fin d'une panne. Teams passe par un « workflow » qui reçoit un webhook (carte
+adaptative) : les anciens connecteurs Office 365 sont retirés par Microsoft.
+
 1. **Historique des pannes** de tunnels et de services (90 jours, y compris par la tâche planifiée) et vue
    « Disponibilité » : taux par nom d'hôte sur 7 et 30 jours, incidents.
 2. **Temps de réponse** de chaque test, gardé dans l'historique.

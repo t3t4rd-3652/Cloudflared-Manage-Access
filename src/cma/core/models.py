@@ -391,6 +391,17 @@ class ApiToken(Model):
     account_id: str | None = None
 
 
+class AlertChannel(Model):
+    """Canal d'alerte vers l'extérieur (ntfy, Slack, Teams, Discord, webhook). L'adresse est dans le coffre."""
+
+    id: str = Field(default_factory=new_id)
+    name: Name
+    kind: Literal["ntfy", "slack", "teams", "discord", "webhook"] = "ntfy"
+    enabled: bool = True
+    # Prévenir aussi des retours à la normale, pas seulement des pannes.
+    recoveries: bool = True
+
+
 class Theme(StrEnum):
     SYSTEM = "system"
     LIGHT = "light"
@@ -436,6 +447,10 @@ class Settings(Model):
     watch_token_id: str | None = None
     # Constats du bilan de sécurité acceptés par l'utilisateur (`Finding.ident`), par exemple un site public voulu.
     ignored_findings: list[str] = Field(default_factory=list[str])
+    # Alertes vers l'extérieur, et objets en sourdine (« tunnel:<id> » ou « service:<nom d'hôte et chemin> »
+    # → fin de la sourdine, ISO 8601 UTC).
+    alert_channels: list[AlertChannel] = Field(default_factory=list[AlertChannel])
+    muted: dict[str, str] = Field(default_factory=dict[str, str])
 
     @field_validator("language", mode="before")
     @classmethod

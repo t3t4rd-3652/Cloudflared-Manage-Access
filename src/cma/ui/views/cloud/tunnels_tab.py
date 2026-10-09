@@ -5,6 +5,7 @@ d'ingress, DNS, test depuis Internet, connecteurs, réseaux privés, création e
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPoint, QSignalBlocker, Qt, QUrl
@@ -24,7 +25,8 @@ from cma.core.cfadmin import CloudflareAdmin, NewTunnel, Overview, PublishReques
 from cma.core.cfapi import Connector, IngressRule, Tunnel
 from cma.core.dnscheck import DnsCheck
 from cma.core.hostprobe import HostProbe, probe_hostname_async
-from cma.core.models import CloudflareProfile
+from cma.core.models import CloudflareProfile, Config
+from cma.core.monitoring import mute, muted_until, tunnel_key
 from cma.core.servicewatch import ServiceResult, ServiceTarget, probe_token, targets_of
 from cma.core.traffic import HostTraffic
 from cma.i18n import tr
@@ -32,6 +34,7 @@ from cma.ui.icons import token_icon
 from cma.ui.theme import mono_font
 from cma.ui.views.cloud.cards import (
     DNS_ROLE,
+    MUTED_ROLE,
     PROFILE_ROLE,
     PROTECTED_ROLE,
     RULE_ROLE,
@@ -59,6 +62,28 @@ from cma.ui.widgets import EmptyState, button, clear_items, copy_to_clipboard, l
 
 if TYPE_CHECKING:
     from cma.ui.views.cloud.view import CloudView
+
+
+def rule_key(rule: IngressRule) -> str:
+    """Clé de sourdine d'un nom d'hôte, la même que celle de la surveillance des services."""
+    return f"service:{rule.hostname.lower()}{rule.path}"
+
+
+def mute_label(until: datetime) -> str:
+    local = until.astimezone()
+    return local.strftime("%H:%M") if local.date() == datetime.now().date() else local.strftime("%d/%m %H:%M")
+
+
+def mute_choices(now: datetime | None = None) -> list[tuple[str, timedelta]]:
+    """Durées proposées ; « jusqu'à demain matin » vise 8 h le lendemain."""
+    moment = now or datetime.now()
+    tomorrow = (moment + timedelta(days=1)).replace(hour=8, minute=0, second=0, microsecond=0)
+    return [
+        (tr("1 heure"), timedelta(hours=1)),
+        (tr("4 heures"), timedelta(hours=4)),
+        (tr("Jusqu'à demain 8 h"), tomorrow - moment),
+        (tr("1 semaine"), timedelta(days=7)),
+    ]
 
 
 class TunnelsTab(QWidget):
@@ -144,9 +169,18 @@ class TunnelsTab(QWidget):
                 summary += " · " + tr("{n}/{total} protégés par Access").format(
                     n=guarded, total=len(tunnel_view.hostnames)
                 )
+            config = self.ctx.config()
+            tunnel_muted = muted_until(config, tunnel_key(tunnel_view.tunnel.id))
+            if tunnel_muted is not None:
+                summary_suffix = " · " + tr("alertes en sourdine jusqu'à {time}").format(
+                    time=mute_label(tunnel_muted)
+                )
+            else:
+                summary_suffix = ""
             routes = sum(1 for r in overview.routes if r.tunnel_id == tunnel_view.tunnel.id)
             if routes:
                 summary += " · " + plural(routes, tr("{n} réseau privé"), tr("{n} réseaux privés"))
+            summary += summary_suffix
             parent = QTreeWidgetItem([tunnel_view.tunnel.name, summary, f"{symbol} {text}"])
             parent.setToolTip(
                 0,
@@ -175,6 +209,8 @@ class TunnelsTab(QWidget):
                 dns = overview.dns.get(rule.hostname.lower())
                 child.setData(0, DNS_ROLE, dns)
                 child.setData(0, TRAFFIC_ROLE, overview.traffic.get(rule.hostname.lower()))
+                until = muted_until(config, rule_key(rule)) or tunnel_muted
+                child.setData(0, MUTED_ROLE, mute_label(until) if until is not None else "")
                 self._set_service_result(child, self.ctx.services.result(rule.hostname, rule.path))
                 if dns is not None and not dns.ok:
                     notes.append(dns.label())
@@ -319,6 +355,7 @@ class TunnelsTab(QWidget):
                 up.setEnabled(position > 0)
                 down = menu.addAction(tr("Descendre"), lambda: self.move_rule(owner, rule, 1))
                 down.setEnabled(position < count - 1)
+            self._mute_menu(menu, rule_key(rule))
             menu.addSeparator()
             menu.addAction(
                 tr("Retirer cette règle…") if rule.path else tr("Retirer ce nom d'hôte…"),
@@ -334,6 +371,7 @@ class TunnelsTab(QWidget):
                 tr("Réseaux privés…"),
                 lambda: show_private_network(self, self.ctx, self.admin, tunnel, self.view.refresh),
             )
+            self._mute_menu(menu, tunnel_key(tunnel.id))
             menu.addSeparator()
             menu.addAction(tr("Renommer…"), lambda: self.rename_tunnel(tunnel))
             menu.addAction(tr("Supprimer le tunnel…"), lambda: self.delete_tunnel(tunnel))
@@ -356,6 +394,26 @@ class TunnelsTab(QWidget):
             self.view.refresh()
 
         self.ctx.run(self.admin.add_path_rule(tunnel, rule.hostname, path, service), done, self.view._error)
+
+    def _mute_menu(self, menu: QMenu, key: str) -> None:
+        """« Mettre en sourdine » (maintenance) : relevé et journalisé, mais ni notification ni alerte."""
+        until = muted_until(self.ctx.config(), key)
+        if until is not None:
+            menu.addAction(
+                tr("Réactiver les alertes (sourdine jusqu'à {time})").format(time=mute_label(until)),
+                lambda: self.set_mute(key, None),
+            )
+            return
+        sub = menu.addMenu(tr("Mettre en sourdine"))
+        for text, duration in mute_choices():
+            sub.addAction(text, lambda d=duration: self.set_mute(key, d))
+
+    def set_mute(self, key: str, duration: timedelta | None) -> None:
+        def apply(config: Config) -> None:
+            mute(config, key, duration)
+
+        self.ctx.update_config(apply)
+        self.view.refresh()
 
     def require_access(self, tunnel: Tunnel, rule: IngressRule, required: bool) -> None:
         """Le tunnel vérifie lui-même le jeton Access de ce nom d'hôte : si l'application Access disparaît, le service

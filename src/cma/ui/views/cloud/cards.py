@@ -59,6 +59,7 @@ TOKEN_ROLE = 260  # tableau des service tokens du compte
 DNS_ROLE = 262  # état du DNS d'un nom d'hôte publié (DnsCheck)
 SERVICE_ROLE = 263  # dernier test du nom d'hôte depuis Internet (ServiceResult)
 TRAFFIC_ROLE = 264  # trafic des dernières 24 heures (HostTraffic)
+MUTED_ROLE = 265  # fin de la sourdine (texte « HH:MM » ou date), vide si les alertes sont actives
 
 # Géométrie des cartes de tunnel.
 CARD_GAP = 12
@@ -319,6 +320,8 @@ class TunnelDelegate(QStyledItemDelegate):
             badges.append((dns.label(), "world-www", "danger" if dns.fixable else "warning"))
         if (probe_badge := service_badge(index.data(SERVICE_ROLE))) is not None:
             badges.append(probe_badge)
+        if index.data(MUTED_ROLE):
+            badges.append((tr("Sourdine"), "bell", "neutral"))
         traffic = index.data(TRAFFIC_ROLE)
         if isinstance(traffic, HostTraffic) and traffic.errors:
             badges.append((tr("{n} × 5xx").format(n=traffic.errors), "alert-triangle", "warning"))

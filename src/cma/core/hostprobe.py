@@ -20,7 +20,8 @@ import asyncio
 import http.client
 import socket
 import ssl
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field, replace
 
 from cma import __version__
 from cma.i18n import tr
@@ -36,6 +37,8 @@ class HostProbe:
     state: str
     status: int | None = None
     detail: str = ""
+    # Temps de réponse (ms) de la requête, réponse reçue ; None sans réponse.
+    ms: float | None = field(default=None, compare=False)
 
     @property
     def tone(self) -> str:
@@ -153,11 +156,15 @@ def probe_hostname(
     if token is not None:
         headers["CF-Access-Client-Id"], headers["CF-Access-Client-Secret"] = token
     try:
+        started = time.perf_counter()
         connection.request("GET", path or "/", headers=headers)
         response = connection.getresponse()
+        elapsed = (time.perf_counter() - started) * 1000
         body = response.read(4096).decode("utf-8", "replace")
         received = {name.lower(): value for name, value in response.getheaders()}
-        return classify(response.status, received, body, with_token=token is not None)
+        return replace(
+            classify(response.status, received, body, with_token=token is not None), ms=round(elapsed, 1)
+        )
     except (OSError, http.client.HTTPException) as exc:
         return HostProbe("unreachable", detail=str(exc) or type(exc).__name__)
     finally:

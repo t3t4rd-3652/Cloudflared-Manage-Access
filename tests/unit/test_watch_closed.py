@@ -116,20 +116,30 @@ def test_tunnels_notify_only_when_cma_is_closed(monkeypatch, tmp_path):
     running = {"value": None}
     monkeypatch.setattr(cli, "send_command", lambda *_a, **_k: running["value"])
     assert cli.show_tunnels(paths, as_json=False, notify=True, secrets=MemorySecretStore()) == 2
-    assert shown == ["Tunnel « labo » hors ligne — ouvrez CMA pour le diagnostic."]
+    assert shown == [
+        "Le tunnel « labo » est hors ligne : plus aucun connecteur ne le relie à Cloudflare. "
+        "Ouvrez CMA pour le diagnostic."
+    ]
+    # Toujours en panne au passage suivant : le journal s'en souvient, pas de nouvelle notification.
+    assert cli.show_tunnels(paths, as_json=False, notify=True, secrets=MemorySecretStore()) == 2
+    assert len(shown) == 1
     # CMA ouvert : il surveille déjà, pas de seconde notification.
     running["value"] = {"ok": True}
     assert (
         cli.show_tunnels(paths, as_json=False, notify=True, secrets=MemorySecretStore()) == 2
         and len(shown) == 1
     )
-    # Tout va bien : rien.
+    # Rétabli : une notification de retour, puis plus rien.
     running["value"] = None
     readings["value"] = [Tunnel("t1", "labo", "healthy")]
-    assert (
-        cli.show_tunnels(paths, as_json=False, notify=True, secrets=MemorySecretStore()) == 0
-        and len(shown) == 1
-    )
+    assert cli.show_tunnels(paths, as_json=False, notify=True, secrets=MemorySecretStore()) == 0
+    assert shown[-1] == "Le tunnel « labo » est de nouveau en ligne."
+    assert cli.show_tunnels(paths, as_json=False, notify=True, secrets=MemorySecretStore()) == 0
+    assert len(shown) == 2
+    from cma.core.availability import AvailabilityLog
+
+    incidents = AvailabilityLog(paths.data_dir / "availability.json").incidents
+    assert [(i.key, i.open) for i in incidents] == [("tunnel:t1", False)]
 
 
 def test_windowed_entry_runs_the_silent_check(monkeypatch):
@@ -187,7 +197,10 @@ def test_scheduled_check_also_reports_services(monkeypatch, tmp_path):
     monkeypatch.setattr("cma.core.cfadmin.CloudflareAdmin.check_services", services)
     monkeypatch.setattr(cli, "send_command", lambda *_a, **_k: None)
     assert cli.show_tunnels(paths, as_json=False, notify=True, secrets=MemorySecretStore()) == 2
-    assert shown == ["app.exemple.fr ne répond plus — ouvrez CMA pour le diagnostic."]
+    assert shown == [
+        "app.exemple.fr : le tunnel répond, mais pas le service derrière lui (erreur 502). "
+        "Ouvrez CMA pour le diagnostic."
+    ]
     outcome["value"] = CloudflareApiError("zone illisible")
     assert cli.show_tunnels(paths, as_json=False, notify=True, secrets=MemorySecretStore()) == 0
     assert len(shown) == 1

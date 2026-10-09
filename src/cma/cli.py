@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import getpass
 import json
 import sys
@@ -182,9 +183,9 @@ def show_tunnels(
     from cma.core.cfapi import API_BASE, CloudflareApiError
     from cma.core.config_store import ConfigStore
     from cma.core.secrets import open_secret_store
-    from cma.core.servicewatch import ServiceResult, troubled_services_summary
+    from cma.core.servicewatch import ServiceResult
     from cma.core.servicewatch import severity as service_severity
-    from cma.core.tunnelwatch import severity, status_label, troubled_summary
+    from cma.core.tunnelwatch import severity, status_label
 
     store = ConfigStore(paths)
     store.load()
@@ -234,14 +235,45 @@ def show_tunnels(
     troubled = [t for t in tunnels if severity(t.status)]
     now = datetime.now()
     down = [ServiceResult(t, p, now) for t, p in tested if service_severity(p.state)]
-    if notify and (troubled or down) and send_command(paths, {"cmd": "status"}, timeout=5) is None:
-        from cma.platform.notify import system_notification
-
-        problems = " · ".join(
-            text for text in (troubled_summary(troubled), troubled_services_summary(down)) if text
-        )
-        system_notification(APP_NAME, problems + " — " + tr("ouvrez CMA pour le diagnostic."))
+    if notify and send_command(paths, {"cmd": "status"}, timeout=5) is None:
+        # CMA fermé : la tâche tient le journal de disponibilité, et ne prévient qu'à un changement (nouvelle panne
+        # ou retour), pas à chaque passage tant que la panne dure.
+        _record_and_alert(paths, store.snapshot(), vault, tunnels, tested)
     return 2 if troubled or down else 0
+
+
+def _record_and_alert(
+    paths: AppPaths,
+    config: Any,
+    secrets: SecretStore,
+    tunnels: list[Any],
+    tested: list[Any],
+) -> None:
+    from cma.core.availability import AvailabilityLog
+    from cma.core.monitoring import record_services, record_tunnels, send_events
+    from cma.platform.notify import system_notification
+
+    log = AvailabilityLog(paths.data_dir / "availability.json")
+    events = record_tunnels(log, config, tunnels) + record_services(log, config, tested)
+    with contextlib.suppress(OSError):  # un journal non écrit ne doit pas empêcher de prévenir
+        log.save()
+    shown = [e for e in events if not e.muted]
+    problems = [e.label for e in shown if not e.recovered]
+    back = [e.label for e in shown if e.recovered]
+    if len(shown) == 1:
+        text = shown[0].text
+    else:
+        parts = []
+        if problems:
+            parts.append(tr("En panne : {list}").format(list=", ".join(problems)))
+        if back:
+            parts.append(tr("Rétablis : {list}").format(list=", ".join(back)))
+        text = " · ".join(parts)
+    if text:
+        if problems:
+            text += " " + tr("Ouvrez CMA pour le diagnostic.")
+        system_notification(APP_NAME, text)
+    send_events(events, config, secrets)
 
 
 def take_snapshot_cli(

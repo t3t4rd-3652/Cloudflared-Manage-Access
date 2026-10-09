@@ -10,6 +10,7 @@ from cma.core.audit import AuditEntry
 from cma.core.cfapi import Account
 from cma.i18n import tr
 from cma.ui.views.cloud.audit_log import show_audit_log
+from cma.ui.views.cloud.availability import show_availability
 from cma.ui.views.cloud.permissions import show_permissions
 from cma.ui.views.cloud.security_review import show_security_review
 from cma.ui.views.cloud.snapshots import show_snapshots
@@ -27,6 +28,7 @@ class AccountTools:
         )
         self.menu = QMenu(self.button)
         self.menu.addAction(tr("Bilan de sécurité…"), self.open_security_review)
+        self.menu.addAction(tr("Disponibilité…"), self.open_availability)
         self.menu.addAction(tr("Journal d'audit du compte…"), self.open_audit_log)
         self.menu.addAction(tr("Instantanés de la configuration…"), self.open_snapshots)
         self.menu.addAction(tr("Permissions du jeton…"), self.open_permissions)
@@ -55,6 +57,9 @@ class AccountTools:
 
     def open_security_review(self) -> None:
         show_security_review(self.view, self.view.ctx, self.view.admin, self.view.refresh)
+
+    def open_availability(self) -> None:
+        show_availability(self.view, self.view.ctx.paths.data_dir / "availability.json")
 
     def open_permissions(self) -> None:
         show_permissions(self.view, self.view.ctx, self.view.admin)

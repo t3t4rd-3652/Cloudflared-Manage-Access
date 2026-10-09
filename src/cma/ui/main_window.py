@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from cma import APP_NAME, __version__
+from cma.core.availability import AvailabilityLog
 from cma.core.cfapi import Tunnel
 from cma.core.commands import execute
 from cma.core.events import Notification
@@ -32,6 +34,15 @@ from cma.core.expiry import TokenExpiry, expiring_tokens
 from cma.core.hostprobe import HostProbe
 from cma.core.links import Link, LinkError, is_link, parse_link, profile_from_share, read_share
 from cma.core.models import Config
+from cma.core.monitoring import (
+    Event,
+    is_muted,
+    record_services,
+    record_tunnels,
+    send_events,
+    service_key,
+    tunnel_key,
+)
 from cma.core.secrets import EncryptedFileSecretStore
 from cma.core.servicewatch import ServiceChange, ServiceResult, ServiceTarget, troubled_services_summary
 from cma.core.sessions import SessionInfo, SessionKind, SessionState
@@ -241,6 +252,8 @@ class MainWindow(QMainWindow):
         self._tunnel_timer.timeout.connect(self.check_tunnels)
         self._tunnel_timer.start()
         QTimer.singleShot(20_000, self.check_tunnels)
+        # Journal de disponibilité (incidents, taux), partagé avec la tâche planifiée.
+        self.availability = AvailabilityLog(ctx.paths.data_dir / "availability.json")
         # Services publiés : test complet peu après, puis toutes les 15 minutes.
         self._service_check_running = False
         self._service_account: str | None = None
@@ -254,6 +267,8 @@ class MainWindow(QMainWindow):
         self.wake.resumed.connect(self.resume_sessions)
         QTimer.singleShot(3_000, self.wake.watch_network)
         ctx.theme.changed.connect(self._refresh_nav_icons)
+        # Une sourdine posée ou levée change ce qui compte comme une panne à signaler.
+        ctx.bridge.config_changed.connect(self._show_troubled_tunnels)
 
         status = self.statusBar()
         status.setSizeGripEnabled(False)
@@ -552,6 +567,7 @@ class MainWindow(QMainWindow):
             self._tunnel_check_running = False
             if self.ctx.config().settings.cloudflare_account_id == account:
                 self.report_tunnel_changes(self.tunnel_watch.update(tunnels))
+                self._record(record_tunnels(self.availability, self.ctx.config(), tunnels))
                 self._show_troubled_tunnels()
 
         def failed(error: BaseException) -> None:
@@ -583,6 +599,7 @@ class MainWindow(QMainWindow):
             if self.ctx.config().settings.cloudflare_account_id != account:
                 return
             self.report_service_changes(watch.update(results))
+            self._record(record_services(self.availability, self.ctx.config(), results))
             self._show_troubled_tunnels()
             self.cloud.show_service_results()
 
@@ -609,16 +626,46 @@ class MainWindow(QMainWindow):
         self.ctx.run(self.ctx.manager.resume_after_network(), done)
         QTimer.singleShot(15_000, self.check_tunnels)
 
+    def _record(self, events: list[Event]) -> None:
+        """Journal enregistré ; les nouveaux incidents et les retours partent vers les canaux d'alerte."""
+        try:
+            self.availability.save()
+        except OSError as exc:
+            log.warning("Journal de disponibilité non enregistré : %s", exc)
+        config = self.ctx.config()
+        if not events or not config.settings.alert_channels:
+            return
+
+        async def send() -> list[str]:
+            return await asyncio.to_thread(send_events, events, config, self.ctx.core.secrets)
+
+        def done(errors: list[str]) -> None:
+            for error in errors:
+                log.warning("Alerte non envoyée : %s", error)
+            if errors:
+                self.notify("warning", tr("Alerte non envoyée : {error}").format(error=errors[0]))
+
+        self.ctx.run(send(), done)
+
     def report_service_changes(self, changes: list[ServiceChange]) -> None:
+        config = self.ctx.config()
         for change in changes:
+            if is_muted(config, service_key(change.target), change.target.tunnel_id):
+                continue
             action = None if change.recovered else (tr("Voir…"), lambda: self.open_tunnel(None))
             self.notify(change.level, change.message(), action=action)
 
     def _show_troubled_tunnels(self) -> None:
         """« Cloudflare · 1 ! » dans la navigation tant qu'un tunnel ou un service publié est en panne ; la zone de
         notification suit."""
-        troubled = self.tunnel_watch.troubled
-        services: list[ServiceResult] = self.ctx.services.troubled
+        # Ce qui est en sourdine (maintenance) ne compte pas comme une panne à signaler.
+        config = self.ctx.config()
+        troubled = [t for t in self.tunnel_watch.troubled if not is_muted(config, tunnel_key(t.id))]
+        services: list[ServiceResult] = [
+            r
+            for r in self.ctx.services.troubled
+            if not is_muted(config, service_key(r.target), r.target.tunnel_id)
+        ]
         item = self._nav_items.get("cloud")
         if item is not None:
             base = str(item.data(Qt.ItemDataRole.UserRole + 1)[0])
@@ -632,7 +679,10 @@ class MainWindow(QMainWindow):
         self.services_troubled.emit(services)
 
     def report_tunnel_changes(self, changes: list[TunnelChange]) -> None:
+        config = self.ctx.config()
         for change in changes:
+            if is_muted(config, tunnel_key(change.tunnel.id)):
+                continue
             action = (
                 None
                 if change.recovered
