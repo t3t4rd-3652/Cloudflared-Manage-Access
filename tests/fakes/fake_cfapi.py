@@ -110,7 +110,14 @@ class FakeCloudflare:
     )
     apps: list[dict[str, Any]] = field(
         default_factory=lambda: [
-            {"id": "app1", "name": "SSH", "domain": "ssh.exemple.fr", "type": "self_hosted", "policies": []}
+            {
+                "id": "app1",
+                "name": "SSH",
+                "domain": "ssh.exemple.fr",
+                "type": "self_hosted",
+                "aud": "aud-ssh-0123456789",
+                "policies": [],
+            }
         ]
     )
     # Politiques legacy (propres à une application), par application.
@@ -203,6 +210,10 @@ class FakeCloudflare:
         }
     )
     analytics_allowed: bool = True
+    # Organisation Zero Trust (nom d'équipe) ; `organization_allowed` à False reproduit un jeton sans
+    # « Access: Organizations, Identity Providers, and Groups : Read ».
+    auth_domain: str = "exemple.cloudflareaccess.com"
+    organization_allowed: bool = True
     requests: list[tuple[str, str]] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -347,6 +358,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if (m := re.fullmatch(r"/accounts/(\w+)/teamnet/routes/([\w-]+)", path)) and method == "DELETE":
             state.routes = [r for r in state.routes if r["id"] != m.group(2)]
             return self._send(200, _ok({"id": m.group(2)}))
+        if re.fullmatch(r"/accounts/(\w+)/access/organizations", path):
+            if not state.organization_allowed:
+                return self._error(403, 10000, "Authentication error")
+            return self._send(200, _ok({"name": "Exemple", "auth_domain": state.auth_domain}))
         if m := re.fullmatch(r"/accounts/(\w+)/teamnet/virtual_networks", path):
             return self._send(200, _page(state.virtual_networks, query))
         if m := re.fullmatch(r"/accounts/(\w+)/logs/audit", path):
@@ -535,6 +550,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "client_id": f"{uuid.uuid4().hex}.access",
                     "expires_at": "2027-09-29T00:00:00Z",
                     "duration": body.get("duration"),
+                    "created_at": _ago(),
+                    "last_seen_at": None,
                 }
                 state.service_tokens.append(token)
                 return self._send(200, _ok({**token, "client_secret": "secret-" + uuid.uuid4().hex}))

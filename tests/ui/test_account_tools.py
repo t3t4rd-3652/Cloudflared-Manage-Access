@@ -4,6 +4,7 @@ instantanés, permissions du jeton, trafic sur les cartes."""
 from __future__ import annotations
 
 import pytest
+from PySide6.QtCore import Qt as Qt_
 
 import cma.ui.views.cloud.account_tools as tools_module
 import cma.ui.views.cloud.audit_log as audit_module
@@ -169,6 +170,7 @@ def test_tools_menu_opens_the_audit_log(qtbot, view, monkeypatch):
     shown: list[int] = []
     monkeypatch.setattr(tools_module, "show_audit_log", lambda _p, entries: shown.append(len(entries)))
     assert [a.text() for a in view.tools.menu.actions()] == [
+        "Bilan de sécurité…",
         "Journal d'audit du compte…",
         "Instantanés de la configuration…",
         "Permissions du jeton…",
@@ -229,3 +231,122 @@ def test_permissions_dialog(qtbot, view, cf):
     qtbot.waitUntil(
         lambda: dialog.summary.text() == "Toutes les permissions nécessaires sont présentes.", timeout=10000
     )
+
+
+def test_security_review_dialog(qtbot, view, cf, monkeypatch):
+    import cma.ui.views.cloud.security_review as review_module
+    from cma.ui.views.cloud.security_review import SecurityReviewDialog
+
+    cf.state.configs["t1"]["ingress"][-1] = {"service": "http://localhost:9999"}
+    changed: list[bool] = []
+    dialog = SecurityReviewDialog(view, view.ctx, view.admin, lambda: changed.append(True))
+    qtbot.addWidget(dialog)
+    qtbot.waitUntil(lambda: dialog.table.rowCount() > 0 and dialog.rerun_button.isEnabled(), timeout=10000)
+    rows = {dialog.table.item(r, 2).text(): r for r in range(dialog.table.rowCount())}
+    assert dialog.table.item(rows["rdp.exemple.fr"], 0).text() == "Élevée"
+    assert "élevé(s)" in dialog.summary.text()
+    # Cochées d'office : règle finale et DNS orphelin ; protéger un nom (qui le ferme) se coche à la main.
+    assert {f.kind for f in dialog.checked()} == {"exposed_catch_all"}
+    dialog.table.item(rows["rdp.exemple.fr"], 3).setCheckState(Qt_.CheckState.Checked)
+    assert {f.kind for f in dialog.checked()} == {"exposed_catch_all", "unprotected"}
+    dialog.table.selectRow(rows["bureau"])
+    assert "règle finale" in dialog.detail.text()
+    asked: list[str] = []
+    monkeypatch.setattr(review_module, "confirm", lambda _p, heading, text, *_a: asked.append(text) or True)
+    dialog.fix_selected()
+    qtbot.waitUntil(lambda: bool(changed) and dialog.rerun_button.isEnabled(), timeout=10000)
+    assert "Protéger par Access : rdp.exemple.fr" in asked[0]
+    assert cf.state.configs["t1"]["ingress"][-1] == {"service": "http_status:404"}
+    assert all(
+        dialog.table.item(r, 1).text() != "Règle finale ouverte" for r in range(dialog.table.rowCount())
+    )
+
+
+def test_tools_menu_and_tunnel_access_requirement(qtbot, view, cf, monkeypatch):
+    import cma.ui.views.cloud.tunnels_tab as tunnels_module
+
+    opened: list[str] = []
+    monkeypatch.setattr(tools_module, "show_security_review", lambda *_a: opened.append("bilan"))
+    action = next(a for a in view.tools.menu.actions() if a.text() == "Bilan de sécurité…")
+    action.trigger()
+    assert opened == ["bilan"]
+    bureau = view.tree.topLevelItem(0)
+    ssh = next(
+        bureau.child(i) for i in range(bureau.childCount()) if bureau.child(i).text(0) == "ssh.exemple.fr"
+    )
+    require = next(
+        a for a in view.tree_menu(ssh).actions() if a.text() == "Exiger Access au niveau du tunnel"
+    )
+    require.trigger()
+    qtbot.waitUntil(
+        lambda: (
+            "access"
+            in next(
+                r for r in cf.state.configs["t1"]["ingress"] if r.get("hostname") == "ssh.exemple.fr"
+            ).get("originRequest", {})
+        ),
+        timeout=10000,
+    )
+
+    def ssh_item():
+        top = view.tree.topLevelItem(0)
+        return next(top.child(i) for i in range(top.childCount()) if top.child(i).text(0) == "ssh.exemple.fr")
+
+    qtbot.waitUntil(
+        lambda: (
+            view.tree.topLevelItemCount() == 2
+            and "Ne plus exiger Access au niveau du tunnel"
+            in [a.text() for a in view.tree_menu(ssh_item()).actions()]
+        ),
+        timeout=10000,
+    )
+    bureau = view.tree.topLevelItem(0)
+    ssh = ssh_item()
+    grafana = next(
+        bureau.child(i) for i in range(bureau.childCount()) if bureau.child(i).text(0) == "grafana.exemple.fr"
+    )
+    assert not any("Exiger Access" in a.text() for a in view.tree_menu(grafana).actions())  # non protégé
+    monkeypatch.setattr(tunnels_module, "confirm", lambda *_a: False)
+    next(a for a in view.tree_menu(ssh).actions() if a.text().startswith("Ne plus exiger")).trigger()
+
+
+def test_settings_watch_token_choice(qtbot, gui):
+    ctx, window = gui
+    ctx.core.secrets.set("cfapi:token", "jeton-principal-assez-long")
+    ctx.update_config(lambda c: setattr(c.settings, "watch_services", True))
+    settings = window.settings
+    settings.load()
+    combo = settings.watch_token
+    assert [combo.itemText(i) for i in range(combo.count())] == [
+        "Le jeton actif de la vue Cloudflare",
+        "Principal",
+    ]
+    combo.setCurrentIndex(1)
+    combo.activated.emit(1)
+    assert ctx.config().settings.watch_token_id == "principal"
+
+
+def test_security_review_ignores_accepted_findings(qtbot, view):
+    from cma.ui.views.cloud.security_review import SecurityReviewDialog
+
+    dialog = SecurityReviewDialog(view, view.ctx, view.admin)
+    qtbot.addWidget(dialog)
+    qtbot.waitUntil(lambda: dialog.table.rowCount() > 0 and dialog.rerun_button.isEnabled(), timeout=10000)
+    total = dialog.table.rowCount()
+    row = next(r for r in range(total) if dialog.table.item(r, 2).text() == "grafana.exemple.fr")
+    dialog.table.selectRow(row)
+    assert dialog.ignore_button.text() == "Ignorer ce constat"
+    dialog.toggle_ignored()
+    assert view.ctx.config().settings.ignored_findings == ["unprotected:grafana.exemple.fr"]
+    assert dialog.table.rowCount() == total - 1 and "1 constat ignoré." in dialog.summary.text()
+    assert all(f.target != "grafana.exemple.fr" for f in dialog.checked())
+    # Affichés à part, marqués « Ignoré », non cochables ; « Ne plus ignorer » les rétablit.
+    dialog.show_ignored.setChecked(True)
+    row = next(
+        r for r in range(dialog.table.rowCount()) if dialog.table.item(r, 2).text() == "grafana.exemple.fr"
+    )
+    assert dialog.table.item(row, 0).text() == "Ignoré"
+    dialog.table.selectRow(row)
+    assert dialog.ignore_button.text() == "Ne plus ignorer"
+    dialog.toggle_ignored()
+    assert view.ctx.config().settings.ignored_findings == []

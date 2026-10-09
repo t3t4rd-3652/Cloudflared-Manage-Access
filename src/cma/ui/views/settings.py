@@ -249,6 +249,18 @@ class SettingsView(QWidget):
         )
         self.watch_services.toggled.connect(lambda checked: self._set("watch_services", checked))
         form.addRow(self.watch_services)
+        self.watch_token = QComboBox()
+        self.watch_token.setAccessibleName(tr("Jeton de la surveillance"))
+        self.watch_token.setToolTip(
+            tr(
+                "La surveillance ne fait que lire : un jeton en lecture seule suffit, et limite les dégâts si ce "
+                "poste est compromis (la tâche planifiée l'utilise aussi)."
+            )
+        )
+        self.watch_token.activated.connect(
+            lambda _i: self._set("watch_token_id", self.watch_token.currentData())
+        )
+        form.addRow(tr("Jeton de la surveillance"), self.watch_token)
         # Quand CMA est fermé : tâche planifiée Windows (`tunnels --notify` toutes les 15 minutes). Son état est lu
         # une fois ici, pas à chaque changement de configuration (schtasks est lent à lancer).
         self.watch_closed = QCheckBox(
@@ -401,6 +413,12 @@ class SettingsView(QWidget):
         self.check_updates.setChecked(settings.check_updates)
         self.watch_tunnels.setChecked(settings.watch_tunnels)
         self.watch_services.setChecked(settings.watch_services)
+        with QSignalBlocker(self.watch_token):
+            self.watch_token.clear()
+            self.watch_token.addItem(tr("Le jeton actif de la vue Cloudflare"), None)
+            for token in self.ctx.manager.cloudflare.tokens():
+                self.watch_token.addItem(token.name, token.id)
+            self.watch_token.setCurrentIndex(max(0, self.watch_token.findData(settings.watch_token_id)))
         self.start_with_system.setChecked(autostart.supported() and autostart.is_enabled())
         self.port_min.setValue(settings.auto_port_min)
         self.port_max.setValue(settings.auto_port_max)

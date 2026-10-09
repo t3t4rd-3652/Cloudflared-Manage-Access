@@ -302,6 +302,14 @@ class TunnelsTab(QWidget):
             if isinstance(owner, Tunnel) and parent is not None:
                 menu.addAction(tr("Modifier le service…"), lambda: self.edit_service(owner, rule))
                 menu.addAction(tr("Ajouter une règle avec chemin…"), lambda: self.add_path_rule(owner, rule))
+                if item.data(0, PROTECTED_ROLE):
+                    required = bool((rule.origin.get("access") or {}).get("required"))
+                    menu.addAction(
+                        tr("Ne plus exiger Access au niveau du tunnel")
+                        if required
+                        else tr("Exiger Access au niveau du tunnel"),
+                        lambda: self.require_access(owner, rule, not required),
+                    )
                 dns = item.data(0, DNS_ROLE)
                 if isinstance(dns, DnsCheck) and dns.fixable:
                     menu.addAction(tr("Corriger le DNS…"), lambda: self.fix_dns(owner, rule, dns))
@@ -348,6 +356,29 @@ class TunnelsTab(QWidget):
             self.view.refresh()
 
         self.ctx.run(self.admin.add_path_rule(tunnel, rule.hostname, path, service), done, self.view._error)
+
+    def require_access(self, tunnel: Tunnel, rule: IngressRule, required: bool) -> None:
+        """Le tunnel vérifie lui-même le jeton Access de ce nom d'hôte : si l'application Access disparaît, le service
+        reste fermé au lieu de s'ouvrir à tous."""
+        host = rule.hostname + rule.path
+        if not required and not confirm(
+            self,
+            tr("Ne plus exiger Access au niveau du tunnel pour {host} ?").format(host=host),
+            tr("Seule l'application Access protégera alors ce nom d'hôte."),
+            tr("Ne plus exiger"),
+        ):
+            return
+
+        def done(_result: object) -> None:
+            self.ctx.notify(
+                "success",
+                tr("Le tunnel exige désormais Access pour {host}.").format(host=host)
+                if required
+                else tr("Le tunnel n'exige plus Access pour {host}.").format(host=host),
+            )
+            self.view.refresh()
+
+        self.ctx.run(self.admin.require_access(tunnel, rule, required), done, self.view._error)
 
     def fix_dns(self, tunnel: Tunnel, rule: IngressRule, check: DnsCheck) -> None:
         """CNAME du nom d'hôte vers ce tunnel, proxifié ; la confirmation dit ce qui est faux et ce qui change."""

@@ -189,6 +189,13 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
 - **Liens** : `__main__.split_link` retire un `cma://…` ou un `.cma` des arguments ; une instance déjà ouverte le
   reçoit par le canal local (`{"cmd": "link"}`), puis `MainWindow.handle_link`. Une connexion par lien passe par
   `execute` (comme la CLI) après confirmation.
+- **Bilan de sécurité** (`cma.core.security.review`, analyse pure ; lecture et corrections dans `CloudflareAdmin`) :
+  « Protéger par Access » crée une application sans politique, donc ferme le service ; il n'est jamais coché
+  d'office (le vrai compte a des sites publics voulus). Un constat accepté est gardé par `Finding.ident` dans
+  `Settings.ignored_findings`. « Exiger Access au niveau du tunnel » écrit `originRequest.access` (`required`,
+  `teamName` lu dans `/access/organizations`, `audTag` de l'application qui couvre le nom).
+- **Jeton de la surveillance** (`Settings.watch_token_id`, `CloudflareAdmin.watch_api`) : `tunnel_states` et
+  `service_targets` le prennent ; tout le reste utilise le jeton actif.
 - **Boîtes modales et tests** : chaque boîte ouverte par la vue Cloudflare passe par une fonction de module
   (`ask_*`, `show_*`) que les tests remplacent ; `exec()` bloquerait le test jusqu'au délai de 180 s.
 

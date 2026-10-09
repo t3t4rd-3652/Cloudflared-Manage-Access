@@ -432,6 +432,10 @@ class Settings(Model):
     # Jetons d'API nommés et jeton actif ; vide tant qu'un seul jeton a jamais été utilisé.
     cloudflare_tokens: list[ApiToken] = Field(default_factory=list[ApiToken])
     cloudflare_token_id: str | None = None
+    # Jeton de la surveillance (CMA ouvert ou tâche planifiée), conseillé en lecture seule ; None : le jeton actif.
+    watch_token_id: str | None = None
+    # Constats du bilan de sécurité acceptés par l'utilisateur (`Finding.ident`), par exemple un site public voulu.
+    ignored_findings: list[str] = Field(default_factory=list[str])
 
     @field_validator("language", mode="before")
     @classmethod

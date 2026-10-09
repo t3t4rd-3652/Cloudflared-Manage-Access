@@ -42,6 +42,12 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
   groupe Access dans une politique par son nom ; Access: Audit Logs (lire), pour le journal des accès ; Analytics
   (lire, sur les zones), pour le trafic par nom d'hôte. « Outils › Permissions du jeton… » vérifie chaque fonction
   par une lecture.
+- La surveillance (CMA ouvert ou tâche planifiée) peut utiliser son propre jeton, en lecture seule : un poste
+  compromis n'ouvre alors pas l'écriture sur le compte (Paramètres › Général › Cloudflare).
+- « Exiger Access au niveau du tunnel » fait vérifier le jeton Access par cloudflared lui-même
+  (`originRequest.access`) : sans application Access, le service reste fermé au lieu de s'ouvrir. Le bilan de
+  sécurité (Outils) signale les noms d'hôte publiés sans Access, les politiques ouvertes à tous et les secrets
+  inutilisés.
 - Le test d'un nom d'hôte depuis Internet et la surveillance des services envoient le secret d'un service token
   (en-tête `CF-Access-Client-Secret`) au seul nom d'hôte du profil CMA qui l'utilise, en HTTPS ; il n'est jamais
   journalisé.

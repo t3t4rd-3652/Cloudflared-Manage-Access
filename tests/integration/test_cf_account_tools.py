@@ -180,3 +180,74 @@ async def test_cli_snapshot_reports_changes(cf, admin, paths, secrets, capsys):
     assert await asyncio.to_thread(run) == 2
     assert "- Applications Access · SSH" in capsys.readouterr().out
     assert len(list((paths.data_dir / "snapshots").glob("acc1-*.json"))) == 3
+
+
+async def test_security_review_and_fixes(cf, admin):
+    from cma.core.cfapi import IngressRule
+
+    await admin.connect(TOKEN)
+    cf.state.configs["t1"]["ingress"][-1] = {"service": "http://localhost:9999"}  # règle finale ouverte
+    cf.state.dns["z1"].append(
+        {
+            "id": "orphelin",
+            "type": "CNAME",
+            "name": "ancien.exemple.fr",
+            "content": "t-vieux.cfargotunnel.com",
+        }
+    )
+    cf.state.service_tokens.append(
+        {
+            "id": "tok9",
+            "name": "Oublié",
+            "client_id": "tok9.access",
+            "expires_at": "2030-01-01T00:00:00Z",
+            "created_at": "2025-01-01T00:00:00Z",
+            "last_seen_at": "2025-02-01T00:00:00Z",
+        }
+    )
+    findings = await admin.security_review()
+    kinds = {(f.kind, f.target) for f in findings}
+    assert ("unprotected", "rdp.exemple.fr") in kinds and ("unprotected", "grafana.exemple.fr") in kinds
+    assert ("access_not_required", "ssh.exemple.fr") in kinds
+    assert ("exposed_catch_all", "bureau") in kinds and ("dangling_dns", "ancien.exemple.fr") in kinds
+    assert ("token_unused", "Oublié") in kinds
+    fixable = [f for f in findings if f.fix]
+    results = await admin.fix_findings(fixable)
+    assert [(f.kind, error) for f, error in results if error] == []
+    assert cf.state.configs["t1"]["ingress"][-1] == {"service": "http_status:404"}
+    assert all(r["id"] != "orphelin" for r in cf.state.dns["z1"])
+    assert all(t["id"] != "tok9" for t in cf.state.service_tokens)
+    assert {a["domain"] for a in cf.state.apps} >= {"rdp.exemple.fr", "grafana.exemple.fr"}
+    ssh_rule = next(r for r in cf.state.configs["t1"]["ingress"] if r.get("hostname") == "ssh.exemple.fr")
+    assert ssh_rule["originRequest"]["access"] == {
+        "required": True,
+        "teamName": "exemple",
+        "audTag": ["aud-ssh-0123456789"],
+    }
+    # Refait : il ne reste que ce qui n'a pas de correction automatique (ou les nouvelles applications sans
+    # politique, fermées à tous).
+    assert {f.kind for f in await admin.security_review()} <= {"app_without_policy", "access_not_required"}
+    # Retirer l'exigence ; sans la permission d'organisation, une erreur qui la nomme.
+    rule = IngressRule("ssh.exemple.fr", "ssh://localhost:22")
+    await admin.require_access(BUREAU, rule, False)
+    ssh_rule = next(r for r in cf.state.configs["t1"]["ingress"] if r.get("hostname") == "ssh.exemple.fr")
+    assert "originRequest" not in ssh_rule
+    cf.state.organization_allowed = False
+    with pytest.raises(CloudflareApiError, match="Organizations"):
+        await admin.require_access(BUREAU, rule, True)
+    with pytest.raises(CloudflareApiError, match="aucune application"):
+        await admin.require_access(BUREAU, IngressRule("inconnu.exemple.fr", "http://x:1"), True)
+
+
+async def test_watch_uses_its_own_token(cf, admin, store):
+    await admin.connect(TOKEN)
+    assert admin.watch_api()._token == TOKEN
+    cf.state.other_tokens = ("jeton-lecture-seule-assez-long",)
+    await admin.connect("jeton-lecture-seule-assez-long", "Surveillance")
+    reader = next(t for t in admin.tokens() if t.name == "Surveillance")
+    admin.switch_token(admin.tokens()[0].id)
+    store.update(lambda c: setattr(c.settings, "watch_token_id", reader.id))
+    assert admin.watch_api()._token == "jeton-lecture-seule-assez-long" and admin.api()._token == TOKEN
+    assert len(await admin.tunnel_states()) == 2
+    store.update(lambda c: setattr(c.settings, "watch_token_id", "disparu"))
+    assert admin.watch_api()._token == TOKEN

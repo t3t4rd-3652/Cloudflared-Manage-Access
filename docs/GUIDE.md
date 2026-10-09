@@ -8,6 +8,7 @@ sécurité et les permissions du jeton d'API, [SECURITE.md](SECURITE.md).
 - [Un service ne répond plus (erreur 502, 1033…)](#un-service-ne-répond-plus-erreur-502-1033)
 - [Renouveler un service token](#renouveler-un-service-token)
 - [Donner accès à un réseau privé (WARP)](#donner-accès-à-un-réseau-privé-warp)
+- [Vérifier la sécurité du compte](#vérifier-la-sécurité-du-compte)
 - [Savoir ce qui a changé sur le compte](#savoir-ce-qui-a-changé-sur-le-compte)
 - [Partager un accès avec un collègue](#partager-un-accès-avec-un-collègue)
 - [Travailler avec plusieurs comptes Cloudflare](#travailler-avec-plusieurs-comptes-cloudflare)
@@ -93,6 +94,26 @@ Les appareils munis du client WARP de votre organisation peuvent joindre des adr
 ![Réseaux privés d'un tunnel](captures/guide-reseaux-prives.png)
 
 Les politiques d'accès des appareils WARP se règlent dans Cloudflare Zero Trust, pas dans CMA.
+
+## Vérifier la sécurité du compte
+
+**Outils › Bilan de sécurité…** liste ce qui expose un service (nom d'hôte publié sans Access, politique ouverte à
+tout le monde), ce qui traîne (token inutilisé depuis 90 jours, politique sans application, DNS vers un tunnel
+supprimé) et ce qui est cassé (token expiré, application sans politique).
+
+1. Choisissez un constat : son explication s'affiche dessous.
+2. Cochez ceux que CMA sait corriger, puis **Corriger la sélection…** : chaque action est listée avant d'être faite.
+   « Protéger par Access » ferme le service à tous jusqu'à ce qu'une politique l'ouvre : il n'est jamais coché
+   d'office.
+3. Un site public voulu ? **Ignorer ce constat** : il ne sera plus compté (« Afficher les constats ignorés » pour
+   revenir dessus).
+
+Pour aller plus loin sur un nom d'hôte protégé : clic droit › **Exiger Access au niveau du tunnel**. Le tunnel vérifie
+alors lui-même le jeton Access ; si l'application Access disparaît, le service reste fermé. Il faut la permission
+« Access: Organizations, Identity Providers, and Groups : Read » sur le jeton.
+
+Enfin, **Paramètres › Général › Cloudflare › Jeton de la surveillance** : un jeton en lecture seule pour la
+surveillance limite les dégâts si ce poste est compromis.
 
 ## Savoir ce qui a changé sur le compte
 

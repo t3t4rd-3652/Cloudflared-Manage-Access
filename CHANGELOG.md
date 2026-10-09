@@ -2,6 +2,20 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Ajouté
+- **Bilan de sécurité du compte** (Outils) : noms d'hôte publiés sans Access, politiques ouvertes à tout le monde,
+  service tokens expirés ou inutilisés depuis 90 jours, DNS vers un tunnel supprimé, règle finale ouverte, Access
+  non exigé par le tunnel, politiques et applications orphelines, tunnels inactifs. Les constats que CMA sait
+  corriger se cochent et se corrigent ensemble, après une confirmation qui liste chaque action ; un constat
+  accepté (site public voulu) s'ignore.
+- **Exiger Access au niveau du tunnel** (menu d'un nom d'hôte protégé) : le tunnel vérifie lui-même le jeton Access,
+  et le service reste fermé si l'application Access disparaît. Demande la permission « Access: Organizations,
+  Identity Providers, and Groups : Read ».
+- **Jeton de la surveillance** (Paramètres › Général › Cloudflare) : la surveillance, et la tâche planifiée, peuvent
+  utiliser un jeton à part, conseillé en lecture seule.
+
 ## [2.10.0] - 2026-10-09
 
 ### Ajouté

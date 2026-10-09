@@ -59,6 +59,7 @@ from cma.core.privnet import (
 )
 from cma.core.redact import register_secret
 from cma.core.secrets import SecretStore
+from cma.core.security import AccountData, Finding, covering_app, review
 from cma.core.servicewatch import ServiceTarget, probe_targets, probe_token, targets_of
 from cma.core.snapshot import take_snapshot
 from cma.core.traffic import HostTraffic, zone_traffic
@@ -207,6 +208,16 @@ class CloudflareAdmin:
     def has_token(self) -> bool:
         key = self._active_key()
         return bool(key and self.secrets.get(key))
+
+    def watch_api(self) -> CloudflareApi:
+        """API de la surveillance : le jeton choisi pour elle s'il est encore là, sinon le jeton actif. Un jeton en
+        lecture seule suffit : la surveillance ne fait que lire."""
+        chosen = self.store.snapshot().settings.watch_token_id
+        if chosen and any(t.id == chosen for t in self.tokens()):
+            value = self.secrets.get(token_secret_key(chosen))
+            if value:
+                return CloudflareApi(value, base_url=self.base_url)
+        return self.api()
 
     def api(self, token: str | None = None) -> CloudflareApi:
         key = self._active_key()
@@ -413,12 +424,12 @@ class CloudflareAdmin:
 
     async def tunnel_states(self) -> list[Tunnel]:
         """Tunnels du compte choisi avec leur état, en une seule requête (relevé de la surveillance)."""
-        api = self.api()
+        api = self.watch_api()
         return await asyncio.to_thread(api.list_tunnels, self.account_id())
 
     async def service_targets(self, *, web_only: bool = True) -> list[ServiceTarget]:
         """Noms d'hôte publiés par les tunnels en service : la liste des tunnels, puis leurs règles en même temps."""
-        api = self.api()
+        api = self.watch_api()
         account = self.account_id()
 
         def load() -> list[ServiceTarget]:
@@ -763,24 +774,118 @@ class CloudflareAdmin:
         rien n'est supprimé et le message nomme les politiques à revoir. Sa copie dans CMA reste à part."""
         api = self.api()
         account = self.account_id()
-        only_this = (PolicyRule("service_token", remote.id),)
+        return await asyncio.to_thread(self._delete_remote_token, api, account, remote)
 
-        def run() -> list[str]:
-            users = api.policies_using_token(account, remote.id)
-            blocking = [p for p in users if p.app_count or p.include != only_this or p.exclude or p.require]
-            if blocking:
-                raise CloudflareApiError(
-                    tr(
-                        "Le token « {name} » est encore cité par : {policies}. Retirez-le de ces politiques (ou "
-                        "retirez-les de leurs applications), ou changez son secret pour couper les accès."
-                    ).format(name=remote.name, policies=", ".join(p.name for p in blocking))
+    @staticmethod
+    def _delete_remote_token(api: CloudflareApi, account: str, remote: RemoteServiceToken) -> list[str]:
+        only_this = (PolicyRule("service_token", remote.id),)
+        users = api.policies_using_token(account, remote.id)
+        blocking = [p for p in users if p.app_count or p.include != only_this or p.exclude or p.require]
+        if blocking:
+            raise CloudflareApiError(
+                tr(
+                    "Le token « {name} » est encore cité par : {policies}. Retirez-le de ces politiques (ou "
+                    "retirez-les de leurs applications), ou changez son secret pour couper les accès."
+                ).format(name=remote.name, policies=", ".join(p.name for p in blocking))
+            )
+        for policy in users:
+            api.delete_account_policy(account, policy.id)
+        api.delete_service_token(account, remote.id)
+        return [p.name for p in users]
+
+    # --- Bilan de sécurité ----------------------------------------------------------------------------
+
+    async def security_review(self) -> list[Finding]:
+        """Lit le compte (tunnels et règles, applications, politiques, tokens, DNS de toutes les zones) et en tire
+        les constats de `cma.core.security`."""
+        api = self.api()
+        account = self.account_id()
+
+        def records_of(zone_id: str) -> list[tuple[str, dict[str, Any]]]:
+            try:
+                return [(zone_id, record) for record in api.zone_records(zone_id)]
+            except CloudflareApiError:
+                return []
+
+        def load() -> list[Finding]:
+            with ThreadPoolExecutor(max_workers=OVERVIEW_WORKERS, thread_name_prefix="cma-cf") as pool:
+                tunnels_call = pool.submit(api.list_tunnels, account)
+                apps_call = pool.submit(api.list_access_apps, account)
+                policies_call = pool.submit(self._optional, lambda: api.list_account_policies(account), [])
+                tokens_call = pool.submit(api.list_service_tokens, account)
+                zones_call = pool.submit(self._optional, lambda: api.list_zones(account), [])
+                listed = tunnels_call.result()
+                ingress = [pool.submit(api.tunnel_ingress, account, t.id) for t in listed]
+                records = [pool.submit(records_of, zone.id) for zone in zones_call.result()]
+                data = AccountData(
+                    tunnels=[(t, *call.result()) for t, call in zip(listed, ingress, strict=True)],
+                    apps=apps_call.result(),
+                    policies=policies_call.result(),
+                    tokens=tokens_call.result(),
+                    records=[item for call in records for item in call.result()],
                 )
-            for policy in users:
-                api.delete_account_policy(account, policy.id)
-            api.delete_service_token(account, remote.id)
-            return [p.name for p in users]
+            return review(data)
+
+        return await asyncio.to_thread(load)
+
+    async def fix_findings(self, findings: list[Finding]) -> list[tuple[Finding, str | None]]:
+        """Applique les corrections, une par une ; renvoie chaque constat avec son erreur (None si corrigé)."""
+        api = self.api()
+        account = self.account_id()
+
+        def run() -> list[tuple[Finding, str | None]]:
+            tunnels = {t.id: t for t in api.list_tunnels(account)}
+            tokens: dict[str, RemoteServiceToken] = {}
+            team: str | None = None
+            results: list[tuple[Finding, str | None]] = []
+            for finding in findings:
+                try:
+                    if finding.fix == "protect":
+                        if covering_app(finding.key, api.list_access_apps(account)) is None:
+                            api.create_access_app(account, finding.key, finding.key)
+                    elif finding.fix == "require_access":
+                        team = team or api.access_team(account)
+                        tunnel_id, path, aud = finding.data
+                        api.require_access(account, tunnels[tunnel_id], finding.key, path, team, aud)
+                    elif finding.fix == "delete_token":
+                        tokens = tokens or {t.id: t for t in api.list_service_tokens(account)}
+                        self._delete_remote_token(api, account, tokens[finding.key])
+                    elif finding.fix == "delete_dns":
+                        api.delete_dns_record(finding.data[0], finding.key)
+                    elif finding.fix == "catch_all_404":
+                        api.set_catch_all(account, tunnels[finding.key], "http_status:404")
+                    elif finding.fix == "delete_policy":
+                        api.delete_account_policy(account, finding.key)
+                    else:
+                        raise CloudflareApiError(tr("Aucune correction automatique pour ce constat."))
+                except (CloudflareApiError, KeyError) as exc:
+                    message = str(exc) if isinstance(exc, CloudflareApiError) else tr("Objet introuvable.")
+                    results.append((finding, message))
+                else:
+                    results.append((finding, None))
+            return results
 
         return await asyncio.to_thread(run)
+
+    async def require_access(self, tunnel: Tunnel, rule: IngressRule, required: bool = True) -> None:
+        """Le tunnel exige (ou n'exige plus) le jeton de l'application Access qui protège ce nom d'hôte."""
+        api = self.api()
+        account = self.account_id()
+
+        def run() -> None:
+            if not required:
+                api.require_access(account, tunnel, rule.hostname, rule.path, "", None)
+                return
+            app = covering_app(rule.hostname, api.list_access_apps(account))
+            if app is None or not app.aud:
+                raise CloudflareApiError(
+                    tr("{host} n'est protégé par aucune application Access : protégez-le d'abord.").format(
+                        host=rule.hostname
+                    )
+                )
+            api.require_access(account, tunnel, rule.hostname, rule.path, api.access_team(account), app.aud)
+
+        await asyncio.to_thread(run)
 
     async def protect_hostname(self, hostname: str) -> AccessApp:
         """Application Access « self-hosted » pour ce nom d'hôte ; l'existante est réutilisée."""

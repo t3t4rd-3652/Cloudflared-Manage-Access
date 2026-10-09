@@ -114,6 +114,8 @@ class AccessApp:
     # Nombre de politiques attachées (None : inconnu) et identifiant repris par le journal des accès (`app_uid`).
     policy_count: int | None = field(default=None, compare=False)
     uid: str = field(default="", compare=False)
+    # Audience des jetons Access de l'application : à donner au tunnel pour qu'il exige Access lui-même.
+    aud: str = field(default="", compare=False)
 
 
 # Durées de session proposées pour une application Access ; « 0s » : la session expire aussitôt.
@@ -152,6 +154,8 @@ class AccessRequest:
 AUDIT_PERMISSION = "Access: Audit Logs : Read"
 # Permission de zone de l'analytique (trafic par nom d'hôte) ; facultative.
 ANALYTICS_PERMISSION = "Analytics : Read"
+# Nom d'équipe Access (`<équipe>.cloudflareaccess.com`), demandé pour exiger Access au niveau du tunnel.
+ORGANIZATION_PERMISSION = "Access: Organizations, Identity Providers, and Groups : Read"
 
 
 @dataclass(frozen=True)
@@ -160,6 +164,9 @@ class RemoteServiceToken:
     name: str
     client_id: str
     expires_at: str = ""
+    # Dernière utilisation vue par Cloudflare (ISO 8601) ; vide si jamais utilisé.
+    last_seen_at: str = field(default="", compare=False)
+    created_at: str = field(default="", compare=False)
 
 
 @dataclass(frozen=True)
@@ -506,6 +513,49 @@ class CloudflareApi:
             dict(cast(dict[str, Any], rule.get("originRequest") or {})),
         )
 
+    def require_access(
+        self, account_id: str, tunnel: Tunnel, hostname: str, path: str, team: str, aud: str | None
+    ) -> None:
+        """Le tunnel vérifie lui-même le jeton Access sur cette règle (`originRequest.access`) ; `aud` None retire
+        l'exigence. Les autres options d'origine et clés de la règle sont gardées."""
+        config = self.tunnel_config(account_id, tunnel.id)
+        ingress = cast(list[dict[str, Any]], config.get("ingress") or [])
+        rule = self._find_rule(ingress, tunnel, hostname, path)
+        options = dict(cast(dict[str, Any], rule.get("originRequest") or {}))
+        if aud is None:
+            options.pop("access", None)
+        else:
+            options["access"] = {"required": True, "teamName": team, "audTag": [aud]}
+        if options:
+            rule["originRequest"] = options
+        else:
+            rule.pop("originRequest", None)
+        self._put_ingress(account_id, tunnel, config)
+
+    def access_team(self, account_id: str) -> str:
+        """Nom d'équipe Access du compte (`exemple` pour `exemple.cloudflareaccess.com`)."""
+        try:
+            org = cast(
+                dict[str, Any], self._result("GET", f"/accounts/{account_id}/access/organizations") or {}
+            )
+        except CloudflareApiError as exc:
+            if exc.status == 403:
+                raise CloudflareApiError(
+                    tr("Le jeton n'a pas la permission « {permission} ».").format(
+                        permission=ORGANIZATION_PERMISSION
+                    ),
+                    status=403,
+                    codes=exc.codes,
+                ) from exc
+            raise
+        domain = str(org.get("auth_domain") or "")
+        if not domain:
+            raise CloudflareApiError(tr("Aucune organisation Zero Trust n'est configurée sur ce compte."))
+        return domain.split(".")[0]
+
+    def delete_dns_record(self, zone_id: str, record_id: str) -> None:
+        self._result("DELETE", f"/zones/{zone_id}/dns_records/{record_id}")
+
     def unpublish_hostname(self, account_id: str, tunnel: Tunnel, hostname: str, path: str = "") -> None:
         """Retire la règle `hostname` + `path` du tunnel. L'enregistrement DNS n'est supprimé que si plus aucune
         règle du tunnel n'utilise ce nom d'hôte (et seulement s'il vise ce tunnel)."""
@@ -605,6 +655,7 @@ class CloudflareApi:
                     str(a.get("type", "")),
                     len(cast(list[Any], a["policies"])) if isinstance(a.get("policies"), list) else None,
                     str(a.get("uid") or a.get("aud") or ""),
+                    str(a.get("aud") or ""),
                 )
                 for a in apps
             ),
@@ -824,6 +875,8 @@ class CloudflareApi:
                     str(t.get("name", "")),
                     str(t.get("client_id", "")),
                     str(t.get("expires_at") or ""),
+                    str(t.get("last_seen_at") or ""),
+                    str(t.get("created_at") or ""),
                 )
                 for t in tokens
             ),

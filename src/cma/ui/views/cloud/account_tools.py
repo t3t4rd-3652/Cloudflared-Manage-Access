@@ -11,6 +11,7 @@ from cma.core.cfapi import Account
 from cma.i18n import tr
 from cma.ui.views.cloud.audit_log import show_audit_log
 from cma.ui.views.cloud.permissions import show_permissions
+from cma.ui.views.cloud.security_review import show_security_review
 from cma.ui.views.cloud.snapshots import show_snapshots
 from cma.ui.widgets import button
 
@@ -25,6 +26,7 @@ class AccountTools:
             tr("Outils"), "settings", tooltip=tr("Journal d'audit, instantanés, permissions")
         )
         self.menu = QMenu(self.button)
+        self.menu.addAction(tr("Bilan de sécurité…"), self.open_security_review)
         self.menu.addAction(tr("Journal d'audit du compte…"), self.open_audit_log)
         self.menu.addAction(tr("Instantanés de la configuration…"), self.open_snapshots)
         self.menu.addAction(tr("Permissions du jeton…"), self.open_permissions)
@@ -50,6 +52,9 @@ class AccountTools:
         account = self.account()
         if account is not None:
             show_snapshots(self.view, self.view.ctx, self.view.admin, account)
+
+    def open_security_review(self) -> None:
+        show_security_review(self.view, self.view.ctx, self.view.admin, self.view.refresh)
 
     def open_permissions(self) -> None:
         show_permissions(self.view, self.view.ctx, self.view.admin)

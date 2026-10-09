@@ -1,7 +1,7 @@
 # Plan du projet
 
 État au 2026-10-09, version **2.10.0** (P9 à P12 : surveillance des services, compte Cloudflare plus complet, usage quotidien, qualité
-et guide). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+et guide) ; P13 à P16 en cours. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -350,6 +350,49 @@ interface) ; la requête HTTPS elle-même l'est contre un serveur local (`test_h
    502, renouveler un token, avec des captures à jour.
 3. **Finitions** : messages longs repliés dans l'historique des notifications ; tests de bout en bout de la
    surveillance des services avec le faux serveur.
+
+### P13 — Sécurité du compte (2.11)
+
+**État au 2026-10-09 : réalisé** (`cma.core.security`, `cloud/security_review.py`, `CloudflareAdmin.security_review`,
+`fix_findings`, `require_access`, `watch_api`). Le ménage guidé (point 4) est dans le bilan : constats cochables,
+corrigés ensemble. Sur le vrai compte, en lecture : 34 constats, dont 17 noms d'hôte publiés sans Access (certains
+sont des sites publics voulus, d'où « Ignorer ce constat »), 3 DNS vers un tunnel supprimé, 3 tokens inutilisés.
+« Protéger par Access » n'est jamais coché d'office : il ferme le service à tous.
+
+Lu sur le vrai compte le 2026-10-09 : dernière utilisation renseignée pour les 5 service tokens, `aud` présent sur les
+10 applications, une seule règle de tunnel sur 28 exige Access au niveau du tunnel, organisation Access illisible
+(permission « Access: Organizations, Identity Providers, and Groups : Read » absente).
+
+1. **Bilan de sécurité** (Outils) : constats classés par gravité, avec « Corriger… » quand CMA sait le faire — nom
+   d'hôte publié sans Access, politique « Tout le monde » en « Autoriser », application sans politique, service token
+   expiré ou inutilisé depuis 90 jours, DNS vers un tunnel supprimé, règle finale qui expose un service, tunnel
+   inactif.
+2. **Exiger Access au niveau du tunnel** (`originRequest.access` : `required`, `teamName`, `audTag`) : la règle
+   vérifie elle-même le jeton Access ; sans application Access, le service reste fermé.
+3. **Jeton de surveillance** : la surveillance (CMA ouvert ou tâche planifiée) peut utiliser un jeton nommé à part,
+   conseillé en lecture seule.
+4. **Ménage guidé** : tokens inutilisés, politiques orphelines, DNS orphelins, en une liste à cocher.
+
+### P14 — Disponibilité et alertes (2.12)
+
+1. **Historique des pannes** de tunnels et de services (90 jours, y compris par la tâche planifiée) et vue
+   « Disponibilité » : taux par nom d'hôte sur 7 et 30 jours, incidents.
+2. **Temps de réponse** de chaque test, gardé dans l'historique.
+3. **Alertes vers l'extérieur** : webhook générique, ntfy, Slack, Teams, Discord ; adresse dans le coffre ; « Envoyer
+   un test ».
+4. **Mise en sourdine** d'un nom d'hôte ou d'un tunnel pendant une maintenance.
+
+### P15 — Prise en main et usage quotidien (2.13)
+
+1. **Importer `~/.ssh/config`** (hôtes, utilisateurs, ports, clés, `ProxyJump`), avec aperçu.
+2. **Carte « Santé du compte »** sur la page Sessions.
+3. **Espace de travail au démarrage**, éventuellement seulement hors d'un réseau donné.
+
+### P16 — Qualité (au fil des versions)
+
+1. Découper `dashboard.py`.
+2. Noms accessibles vérifiés sur les boîtes ajoutées depuis la 2.9.
+3. Recette en écriture étendue (routes privées, Access exigé au niveau du tunnel, ménage).
 
 ### Dette technique à surveiller
 
