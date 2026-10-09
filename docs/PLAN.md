@@ -1,7 +1,7 @@
 # Plan du projet
 
 État au 2026-10-09, version **2.10.0** (P9 à P12 : surveillance des services, compte Cloudflare plus complet, usage quotidien, qualité
-et guide) ; P13 à P16 en cours. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+et guide) ; P13 à P16 réalisés, non publiés. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -398,6 +398,11 @@ adaptative) : les anciens connecteurs Office 365 sont retirés par Microsoft.
 3. **Espace de travail au démarrage**, éventuellement seulement hors d'un réseau donné.
 
 ### P16 — Qualité (au fil des versions)
+
+**État au 2026-10-09 : réalisé.** `dashboard.py` découpé (858 → 451 lignes, `session_cards.py`) ; noms accessibles
+vérifiés sur les onze boîtes ajoutées depuis la 2.9 (`test_recent_dialogs_have_no_unnamed_control`) ; recette
+étendue, passée en lecture sur le vrai compte. Reste au propriétaire : `cloudflare_recette.py --ecriture` (route
+jetable dans 198.18.250.0/24, Access exigé au niveau du tunnel si la permission d'organisation est là).
 
 1. Découper `dashboard.py`.
 2. Noms accessibles vérifiés sur les boîtes ajoutées depuis la 2.9.

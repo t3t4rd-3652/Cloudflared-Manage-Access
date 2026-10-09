@@ -32,6 +32,10 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
 ### Modifié
 - La tâche planifiée ne prévient plus à chaque passage tant qu'une panne dure : seulement à son début et à son
   retour (elle se souvient des incidents dans le journal de disponibilité).
+- Page Sessions découpée : la ligne d'une session et la tuile d'un favori sont dans `session_cards.py`
+  (`dashboard.py` passe de 858 à 451 lignes).
+- Recette sur un vrai compte (`scripts/cloudflare_recette.py`) étendue : routes privées, journal d'audit, bilan et
+  permissions en lecture ; route jetable, Access exigé au niveau du tunnel et correction par le bilan en écriture.
 
 ## [2.10.0] - 2026-10-09
 

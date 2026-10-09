@@ -26,15 +26,20 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from cma.core.audit import account_audit
 from cma.core.cfadmin import CloudflareAdmin
-from cma.core.cfapi import TOKEN_SECRET_KEY, CloudflareApiError
+from cma.core.cfapi import TOKEN_SECRET_KEY, CloudflareApiError, IngressRule
 from cma.core.models import Config
 from cma.core.policies import AccessPolicy, PolicyRule
+from cma.core.privnet import list_routes, list_virtual_networks
 from cma.core.secrets import MemorySecretStore, open_secret_store
+from cma.core.security import Finding
 from cma.core.tunnelhealth import diagnose_connectors
 from cma.paths import resolve_paths
 
 NAME = "cma-essai"
+# Plage réservée aux essais de réseau (RFC 2544) : aucune route réelle ne la vise.
+TEST_NETWORK = "198.18.250.0/24"
 failures: list[str] = []
 
 
@@ -81,6 +86,14 @@ def read_only(admin: CloudflareAdmin, account: str) -> None:
     except CloudflareApiError as exc:
         # Permission facultative : son absence n'est pas un échec de la recette.
         print(f"  [info]  journal des accès : {exc}")
+    # Outils du compte (2.11) : lectures seulement.
+    step("routes de réseau privé", lambda: list_routes(api, account))
+    step("réseaux virtuels", lambda: list_virtual_networks(api, account))
+    step("journal d'audit du compte (1 jour)", lambda: account_audit(api, account, days=1, limit=20))
+    findings = step("bilan de sécurité", lambda: run(admin.security_review())) or []
+    print(f"           {len(findings)} constat(s)")
+    for check_result in step("permissions du jeton", lambda: run(admin.permissions())) or []:
+        print(f"           {check_result.state:<8} {check_result.feature}")
 
 
 def write_tests(admin: CloudflareAdmin, account: str, zone: str) -> None:
@@ -131,6 +144,7 @@ def write_tests(admin: CloudflareAdmin, account: str, zone: str) -> None:
                     failures.append("relecture du service")
             step("état des connecteurs (aucun attendu)", lambda: run(admin.connectors(created["tunnel"])))
             path_tests(admin, account, created["tunnel"], host)
+            network_tests(admin, created["tunnel"])
 
         app = step("créer une application Access", lambda: api.create_access_app(account, host, host))
         if app:
@@ -159,6 +173,8 @@ def write_tests(admin: CloudflareAdmin, account: str, zone: str) -> None:
                 step("la remettre (politique existante)", lambda: run(admin.attach_policy(app, saved)))
                 step("la retirer à nouveau", lambda: run(admin.remove_policy(app, saved)))
             settings_tests(admin, app)
+            if "tunnel" in created:
+                access_tests(admin, created["tunnel"], host)
 
         token = step(
             "créer un service token", lambda: run(admin.create_service_token(NAME, duration="8760h"))
@@ -209,6 +225,42 @@ def path_tests(admin: CloudflareAdmin, account: str, tunnel: Any, host: str) -> 
     check("une règle reste", [r.path for r in api.tunnel_ingress(account, tunnel.id)[0]] == [""], None)
 
 
+def network_tests(admin: CloudflareAdmin, tunnel: Any) -> None:
+    """Route privée jetable (plage réservée aux essais, 198.18.0.0/15) sur le tunnel de test, puis retrait ;
+    règle finale ouverte corrigée par le bilan de sécurité."""
+    route = step(
+        "ajouter une route privée de test",
+        lambda: run(admin.add_route(tunnel, TEST_NETWORK, comment=NAME)),
+    )
+    if route:
+        view = run(admin.private_network(tunnel))
+        print(
+            "           routée :",
+            [r.network for r in view.routes] == [TEST_NETWORK],
+            "| WARP :",
+            view.warp_routing,
+        )
+        step("retirer la route privée", lambda: run(admin.remove_route(route)))
+    step(
+        "règle finale ouverte (pour le bilan)", lambda: run(admin.set_catch_all(tunnel, "http://localhost:9"))
+    )
+    finding = Finding("exposed_catch_all", "medium", tunnel.name, tunnel.id, "catch_all_404")
+    results = step("corriger par le bilan de sécurité", lambda: run(admin.fix_findings([finding]))) or []
+    print("           corrigée :", [error for _f, error in results] == [None])
+
+
+def access_tests(admin: CloudflareAdmin, tunnel: Any, host: str) -> None:
+    """Exiger Access au niveau du tunnel sur la règle de test (permission d'organisation facultative)."""
+    rule = IngressRule(host, "https://localhost:8443")
+    try:
+        run(admin.require_access(tunnel, rule, True))
+    except CloudflareApiError as exc:
+        print(f"  [info]  exiger Access au niveau du tunnel : {exc}")
+        return
+    print("  [OK]    exiger Access au niveau du tunnel")
+    step("ne plus l'exiger", lambda: run(admin.require_access(tunnel, rule, False)))
+
+
 def settings_tests(admin: CloudflareAdmin, app: Any) -> None:
     """Réglages de l'application de test : modifiés, relus ; elle est supprimée au nettoyage."""
     current = step("lire les réglages de l'application", lambda: run(admin.app_settings(app)))
@@ -244,6 +296,7 @@ def leftovers(admin: CloudflareAdmin, account: str, host: str) -> list[str]:
         + [f"application {a.name}" for a in api.list_access_apps(account) if a.domain.split("/")[0] == host]
         + [f"token {t.name}" for t in api.list_service_tokens(account) if is_test_name(t.name)]
         + [f"politique {p.name}" for p in api.list_account_policies(account) if is_test_name(p.name)]
+        + [f"route {r.network}" for r in list_routes(api, account) if is_test_name(r.comment)]
     )
 
 
@@ -267,6 +320,9 @@ def cleanup(admin: CloudflareAdmin, account: str, host: str, heading: str) -> No
             step(
                 f"supprimer la politique {policy.name}", lambda p=policy: run(admin.delete_account_policy(p))
             )
+    for route in list_routes(api, account):
+        if is_test_name(route.comment):
+            step(f"supprimer la route {route.network}", lambda r=route: run(admin.remove_route(r)))
     for tunnel in api.list_tunnels(account):
         if is_test_name(tunnel.name):
             step(f"supprimer le tunnel {tunnel.name}", lambda t=tunnel: run(admin.delete_tunnel(t, [])))

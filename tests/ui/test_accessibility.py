@@ -105,3 +105,79 @@ def test_dialogs_have_no_unnamed_control(qtbot, gui, tmp_path):
         apply_accessible_names(dialog)
         assert describe(missing_accessible_names(dialog)) == [], type(dialog).__name__
         dialog.deleteLater()
+
+
+def test_recent_dialogs_have_no_unnamed_control(qtbot, gui, tmp_path):
+    """Boîtes ajoutées depuis la 2.9 : notifications, tests depuis Internet, réseaux privés, outils du compte,
+    bilan de sécurité, disponibilité, alertes, partage, import de ~/.ssh/config."""
+    from types import SimpleNamespace
+
+    from cma.core.audit import AuditEntry
+    from cma.core.cfapi import Account, Tunnel
+    from cma.core.hostprobe import HostProbe
+    from cma.core.servicewatch import ServiceTarget
+    from cma.ui.dialogs.links import ShareDialog
+    from cma.ui.dialogs.notifications import NotificationsDialog
+    from cma.ui.views.cloud.audit_log import AuditLogDialog
+    from cma.ui.views.cloud.availability import AvailabilityDialog
+    from cma.ui.views.cloud.permissions import PermissionsDialog
+    from cma.ui.views.cloud.private_network import PrivateNetworkDialog
+    from cma.ui.views.cloud.security_review import SecurityReviewDialog
+    from cma.ui.views.cloud.services import ServiceTestsDialog
+    from cma.ui.views.cloud.snapshots import SnapshotsDialog
+    from cma.ui.views.settings_alerts import ChannelDialog
+    from cma.ui.views.ssh.import_config import SshConfigImportDialog
+
+    ctx, window = gui
+    profile = CloudflareProfile(name="NAS", hostname="nas.exemple.fr", local_port=24445)
+    ctx.update_config(lambda c: c.cloudflare_profiles.append(profile))
+    # Façades inertes : les boîtes qui lisent le compte à l'ouverture n'appellent rien.
+    admin = SimpleNamespace(
+        private_network=lambda _t: None,
+        snapshot=lambda _a: None,
+        permissions=lambda: None,
+        security_review=lambda: None,
+    )
+    quiet = SimpleNamespace(
+        run=lambda *_a, **_k: None,
+        notify=lambda *_a, **_k: None,
+        paths=ctx.paths,
+        config=ctx.config,
+        update_config=ctx.update_config,
+        core=ctx.core,
+    )
+    target = ServiceTarget("wiki.exemple.fr", "", "http://localhost:8080", "t1", "bureau")
+    (tmp_path / "config").write_text("Host nas\n  HostName 192.168.1.2\n", encoding="utf-8")
+    dialogs = [
+        NotificationsDialog(window, window.notices),
+        ServiceTestsDialog(window, [(target, HostProbe("origin_down", 502))]),
+        PrivateNetworkDialog(window, quiet, admin, Tunnel("t1", "bureau", "healthy")),  # type: ignore[arg-type]
+        AuditLogDialog(
+            window,
+            [
+                AuditEntry(
+                    "2026-10-09T08:00:00Z",
+                    "x",
+                    "update",
+                    "success",
+                    "dns",
+                    "record",
+                    "r1",
+                    "a@x.fr",
+                    "user",
+                    "dash",
+                )
+            ],
+        ),
+        SnapshotsDialog(window, quiet, admin, Account("acc", "Compte")),  # type: ignore[arg-type]
+        PermissionsDialog(window, quiet, admin),  # type: ignore[arg-type]
+        SecurityReviewDialog(window, quiet, admin),  # type: ignore[arg-type]
+        AvailabilityDialog(window, tmp_path / "availability.json"),
+        ShareDialog(window, ctx, profile),
+        ChannelDialog(window),
+        SshConfigImportDialog(window, ctx, tmp_path / "config"),
+    ]
+    for dialog in dialogs:
+        apply_accessible_names(dialog)
+        assert describe(missing_accessible_names(dialog)) == [], type(dialog).__name__
+        dialog.deleteLater()
