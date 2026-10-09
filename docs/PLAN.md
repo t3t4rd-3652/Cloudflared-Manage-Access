@@ -1,7 +1,7 @@
 # Plan du projet
 
-État au 2026-10-09, version **2.9.0** (P8 : lecture du compte en parallèle, test depuis Internet, historique des notifications) ; P9 à P12 réalisés,
-non publiés. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+État au 2026-10-09, version **2.10.0** (P9 à P12 : surveillance des services, compte Cloudflare plus complet, usage quotidien, qualité
+et guide). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
