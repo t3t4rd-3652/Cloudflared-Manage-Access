@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
 
 from cma.core.cfapi import AccessApp, IngressRule, RemoteServiceToken, Tunnel
 from cma.core.dnscheck import DnsCheck
+from cma.core.traffic import HostTraffic
 from cma.i18n import tr
 from cma.ui.icons import icon, set_glyph
 from cma.ui.theme import current_tokens, mono_font, status_colors
@@ -57,6 +58,7 @@ PROFILE_ROLE = 259
 TOKEN_ROLE = 260  # tableau des service tokens du compte
 DNS_ROLE = 262  # état du DNS d'un nom d'hôte publié (DnsCheck)
 SERVICE_ROLE = 263  # dernier test du nom d'hôte depuis Internet (ServiceResult)
+TRAFFIC_ROLE = 264  # trafic des dernières 24 heures (HostTraffic)
 
 # Géométrie des cartes de tunnel.
 CARD_GAP = 12
@@ -317,6 +319,9 @@ class TunnelDelegate(QStyledItemDelegate):
             badges.append((dns.label(), "world-www", "danger" if dns.fixable else "warning"))
         if (probe_badge := service_badge(index.data(SERVICE_ROLE))) is not None:
             badges.append(probe_badge)
+        traffic = index.data(TRAFFIC_ROLE)
+        if isinstance(traffic, HostTraffic) and traffic.errors:
+            badges.append((tr("{n} × 5xx").format(n=traffic.errors), "alert-triangle", "warning"))
         if index.data(PROFILE_ROLE):
             badges.append((tr("Profil CMA"), "circle-check", "info"))
         if index.data(PROTECTED_ROLE):

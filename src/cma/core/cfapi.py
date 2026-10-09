@@ -150,6 +150,8 @@ class AccessRequest:
 
 
 AUDIT_PERMISSION = "Access: Audit Logs : Read"
+# Permission de zone de l'analytique (trafic par nom d'hôte) ; facultative.
+ANALYTICS_PERMISSION = "Analytics : Read"
 
 
 @dataclass(frozen=True)
@@ -199,16 +201,7 @@ class CloudflareApi:
         if params:
             url += "?" + urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
         data = json.dumps(body).encode("utf-8") if body is not None else None
-        request = urllib.request.Request(
-            url,
-            data=data,
-            method=method,
-            headers={
-                "Authorization": f"Bearer {self._token}",
-                "Content-Type": "application/json",
-                "User-Agent": f"CloudflaredManageAccess/{__version__}",
-            },
-        )
+        request = urllib.request.Request(url, data=data, method=method, headers=self._headers())
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 payload = json.loads(response.read().decode("utf-8") or "{}")
@@ -244,8 +237,60 @@ class CloudflareApi:
         log.debug("API Cloudflare %s %s : succès", method, path)
         return payload
 
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._token}",
+            "Content-Type": "application/json",
+            "User-Agent": f"CloudflaredManageAccess/{__version__}",
+        }
+
     def _result(self, method: str, path: str, **kwargs: Any) -> Any:
         return self._call(method, path, **kwargs).get("result")
+
+    def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Réponse complète d'une lecture (`result`, `result_info`…), pour les modules qui lisent l'API à part."""
+        return self._call("GET", path, params=params)
+
+    def get_list(self, path: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Toutes les pages d'une liste, telles que l'API les renvoie."""
+        return self._paged(path, params)
+
+    def send(self, method: str, path: str, body: Any = None) -> Any:
+        """Écriture (POST, PUT, PATCH, DELETE) ; renvoie `result`."""
+        return self._result(method, path, body=body)
+
+    def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+        """API GraphQL (analytique) : renvoie `data`. Un refus de droits (« authz ») devient une erreur 403, sans
+        le message brut de Cloudflare (il cite l'identifiant du jeton)."""
+        body = json.dumps({"query": query, "variables": variables}).encode("utf-8")
+        request = urllib.request.Request(
+            self.base_url + "/graphql", data=body, method="POST", headers=self._headers()
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                payload = cast(dict[str, Any], json.loads(response.read().decode("utf-8") or "{}"))
+        except urllib.error.HTTPError as exc:
+            raise CloudflareApiError(
+                tr("Erreur de l'API Cloudflare ({status}) : {detail}").format(
+                    status=exc.code, detail="graphql"
+                ),
+                status=exc.code,
+            ) from exc
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            reason = getattr(exc, "reason", exc)
+            raise CloudflareApiError(tr("API Cloudflare injoignable : {error}").format(error=reason)) from exc
+        errors = cast(list[dict[str, Any]], payload.get("errors") or [])
+        if errors:
+            if any(cast(dict[str, Any], e.get("extensions") or {}).get("code") == "authz" for e in errors):
+                raise CloudflareApiError(
+                    tr("Le jeton n'a pas la permission « {permission} ».").format(
+                        permission=ANALYTICS_PERMISSION
+                    ),
+                    status=403,
+                )
+            detail = "; ".join(str(e.get("message", "")) for e in errors)
+            raise CloudflareApiError(tr("Erreur de l'API Cloudflare : {detail}").format(detail=detail))
+        return cast(dict[str, Any], payload.get("data") or {})
 
     def _paged(
         self, path: str, params: dict[str, Any] | None = None, *, per_page: int = 50

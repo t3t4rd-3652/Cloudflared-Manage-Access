@@ -50,11 +50,13 @@ from cma.core.dnscheck import DnsCheck
 from cma.core.hostprobe import HostProbe, probe_hostname_async
 from cma.core.models import CloudflareProfile
 from cma.core.servicewatch import ServiceResult, ServiceTarget, probe_token, targets_of
+from cma.core.traffic import HostTraffic
 from cma.i18n import tr
 from cma.ui.context import GuiContext
 from cma.ui.format import last_read
 from cma.ui.icons import set_glyph, token_icon
 from cma.ui.theme import current_tokens, mono_font
+from cma.ui.views.cloud.account_tools import AccountTools
 from cma.ui.views.cloud.apps_tab import AppsTab
 from cma.ui.views.cloud.cards import (
     DNS_ROLE,
@@ -62,6 +64,7 @@ from cma.ui.views.cloud.cards import (
     PROTECTED_ROLE,
     RULE_ROLE,
     SERVICE_ROLE,
+    TRAFFIC_ROLE,
     TUNNEL_ROLE,
     StatTile,
     TunnelTree,
@@ -80,6 +83,7 @@ from cma.ui.views.cloud.helpers import (
     plural,
     tunnel_state,
 )
+from cma.ui.views.cloud.private_network import show_private_network
 from cma.ui.views.cloud.services import service_tooltip, show_service_tests
 from cma.ui.views.cloud.summary import account_stats, protected_hosts
 from cma.ui.views.cloud.tokens_tab import TokensTab
@@ -109,7 +113,7 @@ PERMISSION_GROUPS = (
             "Access: Audit Logs : Read",
         ),
     ),
-    ("Zone", ("DNS : Edit", "Zone : Read")),
+    ("Zone", ("DNS : Edit", "Zone : Read", "Analytics : Read")),
 )
 
 
@@ -290,6 +294,8 @@ class CloudView(QWidget):
         self.refresh_button = button(tr("Actualiser"), "refresh", tooltip=tr("Relire le compte (F5)"))
         self.refresh_button.clicked.connect(self.refresh)
         bar.addWidget(self.refresh_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.tools = AccountTools(self)
+        bar.addWidget(self.tools.button, 0, Qt.AlignmentFlag.AlignVCenter)
         forget = button(tr("Oublier le jeton…"), "key-off")
         forget.clicked.connect(self.forget)
         bar.addWidget(forget, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -576,6 +582,9 @@ class CloudView(QWidget):
                 summary += " · " + tr("{n}/{total} protégés par Access").format(
                     n=guarded, total=len(view.hostnames)
                 )
+            routes = sum(1 for r in overview.routes if r.tunnel_id == view.tunnel.id)
+            if routes:
+                summary += " · " + plural(routes, tr("{n} réseau privé"), tr("{n} réseaux privés"))
             parent = QTreeWidgetItem([view.tunnel.name, summary, f"{symbol} {text}"])
             parent.setToolTip(
                 0,
@@ -594,8 +603,6 @@ class CloudView(QWidget):
                 notes = [tr("protégé par Access") if is_protected else tr("non protégé")]
                 if in_cma:
                     notes.append(tr("profil présent dans CMA"))
-                child.setToolTip(0, f"{rule.hostname}{rule.path}  →  {rule.service}")
-                self._set_service_result(child, self.ctx.services.result(rule.hostname, rule.path))
                 child.setToolTip(1, rule.service)
                 child.setData(0, TUNNEL_ROLE, view.tunnel)
                 child.setData(0, RULE_ROLE, rule)
@@ -603,6 +610,8 @@ class CloudView(QWidget):
                 child.setData(0, PROFILE_ROLE, in_cma)
                 dns = overview.dns.get(rule.hostname.lower())
                 child.setData(0, DNS_ROLE, dns)
+                child.setData(0, TRAFFIC_ROLE, overview.traffic.get(rule.hostname.lower()))
+                self._set_service_result(child, self.ctx.services.result(rule.hostname, rule.path))
                 if dns is not None and not dns.ok:
                     notes.append(dns.label())
                 child.setData(
@@ -750,6 +759,10 @@ class CloudView(QWidget):
             publish.setEnabled(self.publish_button.isEnabled())
             menu.addAction(tr("Règle finale…"), lambda: self.edit_catch_all(tunnel))
             menu.addAction(tr("État des connecteurs…"), lambda: self.check_connectors(tunnel))
+            menu.addAction(
+                tr("Réseaux privés…"),
+                lambda: show_private_network(self, self.ctx, self.admin, tunnel, self.refresh),
+            )
             menu.addSeparator()
             menu.addAction(tr("Renommer…"), lambda: self.rename_tunnel(tunnel))
             menu.addAction(tr("Supprimer le tunnel…"), lambda: self.delete_tunnel(tunnel))
@@ -796,11 +809,22 @@ class CloudView(QWidget):
         return probe_token(self.ctx.config(), self.ctx.core.secrets, hostname)
 
     def _set_service_result(self, item: QTreeWidgetItem, result: ServiceResult | None) -> None:
+        """Dernier test du nom d'hôte, et info-bulle : règle, trafic des 24 dernières heures, test."""
         item.setData(0, SERVICE_ROLE, result)
         rule = item.data(0, RULE_ROLE)
-        if isinstance(rule, IngressRule):
-            base = f"{rule.hostname}{rule.path}  →  {rule.service}"
-            item.setToolTip(0, base + ("\n\n" + service_tooltip(result) if result is not None else ""))
+        if not isinstance(rule, IngressRule):
+            return
+        parts = [f"{rule.hostname}{rule.path}  →  {rule.service}"]
+        traffic = item.data(0, TRAFFIC_ROLE)
+        if isinstance(traffic, HostTraffic):
+            parts.append(
+                tr("Dernières 24 h : {requests} requêtes, {errors} erreurs 5xx.").format(
+                    requests=traffic.requests, errors=traffic.errors
+                )
+            )
+        if result is not None:
+            parts.append(service_tooltip(result))
+        item.setToolTip(0, "\n\n".join(parts))
 
     def show_service_results(self) -> None:
         """Reporte les derniers tests (surveillance ou test manuel) sur les cartes, sans relire le compte."""

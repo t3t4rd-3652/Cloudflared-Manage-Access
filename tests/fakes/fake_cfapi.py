@@ -122,6 +122,85 @@ class FakeCloudflare:
     service_tokens: list[dict[str, Any]] = field(default_factory=list)
     # Jeton sans « Zone : Read » : /zones est refusé.
     zones_forbidden: bool = False
+    # Réseaux privés (WARP) : routes et réseaux virtuels du compte.
+    routes: list[dict[str, Any]] = field(default_factory=list)
+    virtual_networks: list[dict[str, Any]] = field(
+        default_factory=lambda: [
+            {"id": "vn1", "name": "default", "is_default_network": True, "comment": "", "created_at": _ago()}
+        ]
+    )
+    # Journal d'audit du compte (forme de /logs/audit relevée sur un vrai compte), servi par pages de `limit`.
+    audit_logs: list[dict[str, Any]] = field(
+        default_factory=lambda: [
+            {
+                "id": f"audit{i}",
+                "action": {
+                    "description": description,
+                    "result": "success",
+                    "time": _ago(hours=i),
+                    "type": kind,
+                },
+                "actor": {
+                    "context": context,
+                    "email": email,
+                    "id": "u1",
+                    "ip_address": "203.0.113.5",
+                    "type": actor,
+                },
+                "resource": {"id": rid, "product": product, "type": rtype, "scope": {}},
+                "raw": {"method": "PUT"},
+                "account": {"id": "acc1", "name": "Mon compte"},
+            }
+            for i, (description, kind, context, email, actor, rid, product, rtype) in enumerate(
+                [
+                    (
+                        "Update a Cloudflare Tunnel configuration",
+                        "update",
+                        "dash",
+                        "alice@exemple.fr",
+                        "user",
+                        "t1",
+                        "cfd_tunnel",
+                        "configurations",
+                    ),
+                    (
+                        "Delete an Access application",
+                        "delete",
+                        "api_token",
+                        "",
+                        "user",
+                        "app9",
+                        "access",
+                        "apps",
+                    ),
+                    (
+                        "Rotate a service token",
+                        "update",
+                        "api_token",
+                        "bob@exemple.fr",
+                        "user",
+                        "st1",
+                        "access",
+                        "service_tokens.rotate",
+                    ),
+                ],
+                start=1,
+            )
+        ]
+    )
+    audit_log_allowed: bool = True
+    # Analytique GraphQL par zone : groupes (nom d'hôte, code, nombre) ; `analytics_allowed` à False reproduit un
+    # jeton sans « Analytics : Read » (refus « authz »).
+    analytics: dict[str, list[tuple[str, int, int]]] = field(
+        default_factory=lambda: {
+            "z1": [
+                ("grafana.exemple.fr", 200, 120),
+                ("grafana.exemple.fr", 502, 6),
+                ("ssh.exemple.fr", 302, 40),
+            ]
+        }
+    )
+    analytics_allowed: bool = True
     requests: list[tuple[str, str]] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -209,8 +288,80 @@ class Handler(http.server.BaseHTTPRequestHandler):
         expanded += [{**p, "reusable": False} for p in self.state.policies.get(app["id"], [])]
         return {**{k: v for k, v in app.items() if not k.startswith("_")}, "policies": expanded}
 
+    def _graphql(self, body: Any) -> None:
+        state = self.state
+        if not state.analytics_allowed:
+            return self._send(
+                200,
+                {
+                    "data": None,
+                    "errors": [
+                        {
+                            "message": "Actor 'com.cloudflare.api.token.0000' does not have permission "
+                            "'com.cloudflare.api.account.zone.analytics.read' for zone z1",
+                            "extensions": {"code": "authz"},
+                        }
+                    ],
+                },
+            )
+        zone = body["variables"]["zone"]
+        groups = [
+            {"count": count, "dimensions": {"clientRequestHTTPHost": host, "edgeResponseStatus": status}}
+            for host, status, count in state.analytics.get(zone, [])
+        ]
+        return self._send(
+            200, {"data": {"viewer": {"zones": [{"httpRequestsAdaptiveGroups": groups}]}}, "errors": None}
+        )
+
     def _route(self, method: str, path: str, query: dict[str, list[str]], body: Any) -> None:
         state = self.state
+        if method == "POST" and path == "/graphql":
+            return self._graphql(body)
+        if m := re.fullmatch(r"/accounts/(\w+)/teamnet/routes", path):
+            if method == "POST":
+                vnet = body.get("virtual_network_id") or "vn1"
+                route = {
+                    "id": "route-" + uuid.uuid4().hex[:8],
+                    "network": body["network"],
+                    "tunnel_id": body["tunnel_id"],
+                    "comment": body.get("comment", ""),
+                    "virtual_network_id": vnet,
+                    "virtual_network_name": next(
+                        (v["name"] for v in state.virtual_networks if v["id"] == vnet), ""
+                    ),
+                    "created_at": _ago(),
+                }
+                if any(
+                    r["network"] == route["network"] and r["virtual_network_id"] == vnet for r in state.routes
+                ):
+                    return self._error(400, 1014, "A route for this network already exists")
+                state.routes.append(route)
+                return self._send(200, _ok(route))
+            tunnel = query.get("tunnel_id", [None])[0]
+            return self._send(
+                200, _page([r for r in state.routes if tunnel in (None, r["tunnel_id"])], query)
+            )
+        if (m := re.fullmatch(r"/accounts/(\w+)/teamnet/routes/([\w-]+)", path)) and method == "DELETE":
+            state.routes = [r for r in state.routes if r["id"] != m.group(2)]
+            return self._send(200, _ok({"id": m.group(2)}))
+        if m := re.fullmatch(r"/accounts/(\w+)/teamnet/virtual_networks", path):
+            return self._send(200, _page(state.virtual_networks, query))
+        if m := re.fullmatch(r"/accounts/(\w+)/logs/audit", path):
+            if not state.audit_log_allowed:
+                return self._error(403, 10000, "Authentication error")
+            limit = int(query.get("limit", ["100"])[0])
+            start = int(query.get("cursor", ["0"])[0])
+            chunk = state.audit_logs[start : start + limit]
+            cursor = str(start + limit) if start + limit < len(state.audit_logs) else ""
+            return self._send(
+                200,
+                {
+                    "success": True,
+                    "errors": [],
+                    "result": chunk,
+                    "result_info": {"count": len(chunk), "cursor": cursor},
+                },
+            )
         if method == "GET" and path == "/accounts":
             return self._send(200, _page(state.accounts, query))
         if method == "GET" and path == "/zones":

@@ -170,6 +170,13 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
 - **Reprise après la veille** (`cma.ui.wake.WakeWatcher`) : saut de l'horloge murale entre deux tics de 30 s, et
   `QNetworkInformation` pour le réseau. `Session.wake()` écourte l'attente d'une reconnexion ; une session
   abandonnée (`gave_up`) est relancée par `SessionManager.resume_after_network`.
+- **Outils du compte (P10)** : chaque fonction a son module du cœur (`privnet`, `audit`, `traffic`, `snapshot`,
+  `permissions`) qui lit l'API par `CloudflareApi.get`, `get_list`, `send` et `graphql` (le cœur est typé en
+  strict : pas d'accès aux méthodes privées). Routes et trafic sont des lectures facultatives de `overview` : une
+  permission manquante ne la fait pas échouer. Journal d'audit : `/logs/audit` (v2, curseur), permission
+  « Account Settings : Read ». Analytique : GraphQL `httpRequestsAdaptiveGroups`, refus « authz » sans
+  « Analytics : Read ». Un instantané retire les champs volatils (`VOLATILE`) : deux instantanés d'un compte
+  inchangé sont identiques, vérifié sur le vrai compte.
 - **Boîtes modales et tests** : chaque boîte ouverte par la vue Cloudflare passe par une fonction de module
   (`ask_*`, `show_*`) que les tests remplacent ; `exec()` bloquerait le test jusqu'au délai de 180 s.
 

@@ -11,6 +11,7 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
 | Phrases de passe des clés SSH | Gardées en mémoire pour la session. |
 | Clés privées SSH générées | Dossier `ssh_keys` du dossier de données, chiffrables par phrase de passe (bcrypt/OpenSSH). |
 | Configuration `config.json` | Ne contient aucun secret. |
+| Instantanés `snapshots/*.json` | Configuration du compte Cloudflare (règles, politiques, DNS, Client ID des tokens) ; aucun jeton ni secret. Les 30 derniers par compte. |
 | Historique `history.json` | Nom des accès, horaires, compteurs et messages d'incident déjà masqués ; 90 jours au plus, effaçable depuis CMA. |
 | Journaux et rapport de diagnostic | Les secrets connus et les motifs habituels (en-tête `Cf-Access-Client-Secret`, `password=`…) sont masqués. |
 | Exports | Secrets exclus par défaut, ou chiffrés par phrase de passe (scrypt, AES-256-GCM). |
@@ -38,7 +39,12 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
 - Permissions conseillées, et rien de plus : Account Settings (lire), Cloudflare Tunnel (modifier), Access: Apps
   and Policies (modifier), Access: Service Tokens (modifier) sur le compte ; DNS (modifier) et Zone (lire) sur les
   zones concernées. Facultatif : Access: Organizations, Identity Providers, and Groups (lire), pour désigner un
-  groupe Access dans une politique par son nom.
+  groupe Access dans une politique par son nom ; Access: Audit Logs (lire), pour le journal des accès ; Analytics
+  (lire, sur les zones), pour le trafic par nom d'hôte. « Outils › Permissions du jeton… » vérifie chaque fonction
+  par une lecture.
+- Le test d'un nom d'hôte depuis Internet et la surveillance des services envoient le secret d'un service token
+  (en-tête `CF-Access-Client-Secret`) au seul nom d'hôte du profil CMA qui l'utilise, en HTTPS ; il n'est jamais
+  journalisé.
 - Un service token créé depuis CMA part directement dans le coffre. Cloudflare ne renvoie son secret qu'une fois,
   et CMA ne l'affiche jamais. « Changer le secret » fait de même avec le nouveau secret ; Cloudflare révoque
   l'ancien aussitôt.

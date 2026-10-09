@@ -18,6 +18,17 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
   celles abandonnées après une longue coupure sont relancées.
 - **Conseils** pour chaque résultat d'un test depuis Internet, dont la vérification de navigateur de Cloudflare
   (Bot Fight Mode, « I'm Under Attack », règle WAF) et ce qu'elle implique pour une machine munie d'un service token.
+- **Réseaux privés d'un tunnel** (WARP, menu d'un tunnel) : routes vers des plages d'adresses (CIDR) dans un réseau
+  virtuel, routage WARP du tunnel activé avec la première route ; nombre de réseaux privés sur la carte du tunnel.
+- **Menu « Outils » du compte** :
+  - **Journal d'audit du compte** : qui a modifié quoi, et d'où (tableau de bord, jeton d'API, Cloudflare), sur 30
+    jours, filtrable et exportable en CSV ;
+  - **Instantanés de la configuration** : tunnels et règles, applications, politiques, tokens (sans secret), DNS,
+    réseaux privés ; comparaison à l'état actuel ou au précédent, champ par champ. `cma snapshot` en ligne de
+    commande (code 2 si quelque chose a changé) ;
+  - **Permissions du jeton** : chaque fonction de CMA, sa permission, et si elle fonctionne (vérifié en lecture).
+- **Trafic par nom d'hôte** (facultatif, permission « Analytics : Read ») : requêtes et erreurs 5xx des dernières
+  24 heures en info-bulle, pastille « N × 5xx » sur la carte.
 
 ## [2.9.0] - 2026-10-09
 

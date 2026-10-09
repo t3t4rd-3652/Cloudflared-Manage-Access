@@ -14,6 +14,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from cma.core.audit import AuditEntry, account_audit
 from cma.core.cfapi import (
     API_BASE,
     TOKEN_SECRET_KEY,
@@ -43,10 +44,23 @@ from cma.core.models import (
     guess_service_type,
     unique_name,
 )
+from cma.core.permissions import PermissionCheck, check_permissions
 from cma.core.policies import AccessGroup, AccessPolicy, PolicyRule
+from cma.core.privnet import (
+    PrivateRoute,
+    VirtualNetwork,
+    create_route,
+    delete_route,
+    list_routes,
+    list_virtual_networks,
+    set_warp_routing,
+    warp_routing,
+)
 from cma.core.redact import register_secret
 from cma.core.secrets import SecretStore
 from cma.core.servicewatch import ServiceTarget, probe_targets, probe_token, targets_of
+from cma.core.snapshot import take_snapshot
+from cma.core.traffic import HostTraffic, zone_traffic
 from cma.i18n import tr
 
 # Appels simultanés pour lire un compte : assez pour un compte ordinaire, sans assaillir l'API.
@@ -77,6 +91,20 @@ class Overview:
     zones: list[Zone] = field(default_factory=list[Zone])
     # État du DNS de chaque nom d'hôte publié (clé : nom d'hôte en minuscules).
     dns: dict[str, DnsCheck] = field(default_factory=dict[str, DnsCheck])
+    # Routes de réseau privé de tous les tunnels (vide si illisible).
+    routes: list[PrivateRoute] = field(default_factory=list[PrivateRoute])
+    # Trafic des 24 dernières heures par nom d'hôte (en minuscules) ; `traffic_note` dit pourquoi il manque.
+    traffic: dict[str, HostTraffic] = field(default_factory=dict[str, HostTraffic])
+    traffic_note: str = ""
+
+
+@dataclass(frozen=True)
+class PrivateNetwork:
+    """Réseaux privés d'un tunnel : ses routes, les réseaux virtuels du compte et l'état du routage WARP."""
+
+    routes: list[PrivateRoute]
+    virtual_networks: list[VirtualNetwork]
+    warp_routing: bool
 
 
 @dataclass(frozen=True)
@@ -208,22 +236,53 @@ class CloudflareAdmin:
                 apps_call = pool.submit(api.list_access_apps, account.id)
                 tokens_call = pool.submit(api.list_service_tokens, account.id)
                 zones_call = pool.submit(api.list_zones, account.id)
+                routes_call = pool.submit(self._optional, lambda: list_routes(api, account.id), [])
                 listed = tunnels_call.result()
                 ingress = [pool.submit(api.tunnel_ingress, account.id, t.id) for t in listed]
                 tunnels = [TunnelView(t, *call.result()) for t, call in zip(listed, ingress, strict=True)]
                 zones = zones_call.result()
+                traffic_call = pool.submit(self._traffic, api, tunnels, zones)
+                dns = self._dns_checks(api, tunnels, zones, pool)  # en même temps que le trafic
+                traffic, note = traffic_call.result()
                 return Overview(
                     account=account,
                     tunnels=tunnels,
                     apps=apps_call.result(),
                     tokens=tokens_call.result(),
                     zones=zones,
-                    dns=self._dns_checks(api, tunnels, zones, pool),
+                    dns=dns,
+                    routes=routes_call.result(),
+                    traffic=traffic,
+                    traffic_note=note,
                 )
 
         overview = await asyncio.to_thread(load)
         self.sync_expirations(overview.tokens)
         return overview
+
+    @staticmethod
+    def _optional(call: Callable[[], Any], default: Any) -> Any:
+        """Lecture facultative de la vue du compte : une permission manquante ne la fait pas échouer."""
+        try:
+            return call()
+        except CloudflareApiError:
+            return default
+
+    @staticmethod
+    def _traffic(
+        api: CloudflareApi, tunnels: list[TunnelView], zones: list[Zone]
+    ) -> tuple[dict[str, HostTraffic], str]:
+        """Trafic des zones qui portent des noms publiés (une requête GraphQL par zone, en série : elles sont peu
+        nombreuses). Sans la permission d'analyse, rien, avec la raison."""
+        hosts = [rule.hostname for view in tunnels for rule in view.hostnames]
+        used = {zone.id for host in hosts if (zone := zone_of(host, zones)) is not None}
+        traffic: dict[str, HostTraffic] = {}
+        for zone_id in sorted(used):
+            try:
+                traffic.update(zone_traffic(api, zone_id))
+            except CloudflareApiError as exc:
+                return {}, str(exc)
+        return traffic, ""
 
     @staticmethod
     def _dns_checks(
@@ -299,6 +358,59 @@ class CloudflareAdmin:
     async def check_services(self) -> list[tuple[ServiceTarget, HostProbe]]:
         """Relevé de la surveillance des services : noms HTTP des tunnels en service, tous testés."""
         return await self.probe_services(await self.service_targets())
+
+    # --- Réseaux privés, audit, instantanés, permissions -------------------------------------------------
+
+    async def private_network(self, tunnel: Tunnel) -> PrivateNetwork:
+        api = self.api()
+        account = self.account_id()
+
+        def load() -> PrivateNetwork:
+            with ThreadPoolExecutor(max_workers=3, thread_name_prefix="cma-cf") as pool:
+                routes = pool.submit(list_routes, api, account, tunnel.id)
+                networks = pool.submit(list_virtual_networks, api, account)
+                config = pool.submit(api.tunnel_config, account, tunnel.id)
+                return PrivateNetwork(routes.result(), networks.result(), warp_routing(config.result()))
+
+        return await asyncio.to_thread(load)
+
+    async def add_route(
+        self, tunnel: Tunnel, network: str, *, comment: str = "", virtual_network_id: str | None = None
+    ) -> PrivateRoute:
+        """Nouvelle route vers ce tunnel ; le routage WARP du tunnel est activé s'il ne l'était pas (sans lui, la
+        route ne sert à rien)."""
+        api = self.api()
+        account = self.account_id()
+
+        def run() -> PrivateRoute:
+            route = create_route(
+                api, account, tunnel.id, network, comment=comment, virtual_network_id=virtual_network_id
+            )
+            if not warp_routing(api.tunnel_config(account, tunnel.id)):
+                set_warp_routing(api, account, tunnel, True)
+            return route
+
+        return await asyncio.to_thread(run)
+
+    async def remove_route(self, route: PrivateRoute) -> None:
+        api = self.api()
+        await asyncio.to_thread(delete_route, api, self.account_id(), route.id)
+
+    async def set_warp_routing(self, tunnel: Tunnel, enabled: bool) -> None:
+        api = self.api()
+        await asyncio.to_thread(set_warp_routing, api, self.account_id(), tunnel, enabled)
+
+    async def audit_log(self, *, days: int = 7, limit: int = 1000) -> list[AuditEntry]:
+        api = self.api()
+        return await asyncio.to_thread(account_audit, api, self.account_id(), days=days, limit=limit)
+
+    async def snapshot(self, account: Account) -> dict[str, Any]:
+        api = self.api()
+        return await asyncio.to_thread(take_snapshot, api, account)
+
+    async def permissions(self) -> list[PermissionCheck]:
+        api = self.api()
+        return await asyncio.to_thread(check_permissions, api, self.account_id())
 
     async def connectors(self, tunnel: Tunnel) -> list[Connector]:
         api = self.api()

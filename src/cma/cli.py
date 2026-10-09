@@ -69,6 +69,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=tr("tester aussi depuis Internet les services HTTP publiés (code 2 si l'un est en panne)"),
     )
+    sub.add_parser(
+        "snapshot",
+        help=tr(
+            "enregistrer un instantané de la configuration Cloudflare et dire ce qui a changé depuis le précédent "
+            "(code 2 si quelque chose a changé)"
+        ),
+    )
     sub.add_parser("doctor", help=tr("créer un rapport de diagnostic"))
     sub.add_parser("quit", help=tr("fermer l'application en cours (et toutes ses sessions)"))
     return parser
@@ -237,6 +244,53 @@ def show_tunnels(
     return 2 if troubled or down else 0
 
 
+def take_snapshot_cli(
+    paths: AppPaths, *, secrets: SecretStore | None = None, base_url: str | None = None
+) -> int:
+    """Instantané du compte choisi dans CMA, enregistré avec ceux de l'interface, puis comparé au précédent.
+
+    Code de retour : 0 sans changement (ou premier instantané), 2 si la configuration a changé, 1 si la lecture
+    échoue.
+    """
+    from cma.core.cfadmin import CloudflareAdmin
+    from cma.core.cfapi import API_BASE, Account, CloudflareApiError
+    from cma.core.config_store import ConfigStore
+    from cma.core.secrets import open_secret_store
+    from cma.core.snapshot import diff_snapshots, list_snapshots, load_snapshot, save_snapshot, section_label
+
+    store = ConfigStore(paths)
+    store.load()
+    vault = secrets or portable_secret_store(paths) or open_secret_store()
+    admin = CloudflareAdmin(store, vault, lambda _port, _taken: None, base_url=base_url or API_BASE)
+    directory = paths.data_dir / "snapshots"
+    try:
+        account_id = admin.account_id()
+        api = admin.api()
+        try:
+            names = {a.id: a.name for a in api.list_accounts()}
+        except CloudflareApiError:
+            names = {}
+        previous = list_snapshots(directory, account_id)
+        snapshot = asyncio.run(admin.snapshot(Account(account_id, names.get(account_id, account_id))))
+    except (CloudflareApiError, OSError) as exc:
+        print(tr("Erreur : {error}").format(error=exc), file=sys.stderr)
+        return 1
+    path = save_snapshot(directory, snapshot)
+    print(tr("Instantané enregistré : {path}").format(path=path))
+    if not previous:
+        return 0
+    changes = diff_snapshots(load_snapshot(previous[0].path), snapshot)
+    if not changes:
+        print(tr("Aucun changement depuis le précédent."))
+        return 0
+    marks = {"added": "+", "removed": "-", "changed": "~"}
+    for change in changes:
+        print(f"{marks.get(change.kind, '?')} {section_label(change.section)} · {change.name}")
+        for detail in change.details:
+            print(f"    {detail}")
+    return 2
+
+
 async def _foreground_connect(args: argparse.Namespace) -> int:
     from cma.context import create_context
     from cma.logging_setup import setup_logging
@@ -305,6 +359,9 @@ def run(args: argparse.Namespace) -> int:
 
     if command == "tunnels":
         return show_tunnels(paths, as_json=args.json, notify=args.notify, services=args.services)
+
+    if command == "snapshot":
+        return take_snapshot_cli(paths)
 
     if command == "doctor":
         from cma.core.config_store import ConfigStore

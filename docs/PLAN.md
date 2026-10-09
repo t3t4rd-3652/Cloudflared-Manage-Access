@@ -301,6 +301,14 @@ plus souvent le réseau du poste, et tous les noms tomberaient ensemble.
 
 ### P10 — Compte Cloudflare plus complet (2.11)
 
+**État au 2026-10-09 : les cinq points sont réalisés** (section « Non publié » du CHANGELOG) : `cma.core.privnet`,
+`audit`, `traffic`, `snapshot`, `permissions` ; boîtes `cloud/private_network.py`, `audit_log.py`, `snapshots.py`,
+`permissions.py`, menu `account_tools.py`. Vérifié en lecture sur le vrai compte : routes et réseaux virtuels
+lisibles (aucune route, routage WARP actif sur un tunnel sur quatre), journal d'audit v2 lisible avec « Account
+Settings : Read » (101 entrées sur 30 jours), deux instantanés successifs identiques, trafic refusé faute de
+« Analytics : Read » (facultative, à ajouter au jeton pour le voir). Reste au propriétaire : la recette en écriture
+des routes (ajout et retrait d'une route jetable).
+
 1. **Routes de réseau privé des tunnels** (WARP) : lister, ajouter et retirer les plages d'adresses (CIDR) et les
    réseaux virtuels routés par un tunnel.
 2. **Instantané de la configuration** : tunnels, règles, applications Access, politiques, DNS des noms publiés et
