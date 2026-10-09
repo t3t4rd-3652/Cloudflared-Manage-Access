@@ -73,6 +73,8 @@ class ShareDialog(QDialog):
         )
         self.share_field = QLineEdit(share_link(profile, config))
         self.share_field.setReadOnly(True)
+        for field in (self.connect_field, self.share_field):
+            field.setCursorPosition(0)  # le début du lien, lisible, plutôt que sa fin
         copy_share = button(tr("Copier"), "copy")
         copy_share.clicked.connect(lambda: self._copy(self.share_field.text(), tr("Lien de partage copié.")))
         row = QHBoxLayout()

@@ -88,6 +88,7 @@ CATALOG: dict[str, str] = {
     "Ajouter la route": "Route hinzufügen",
     "Ajouter le profil « {name} » ?": "Profil „{name}“ hinzufügen?",
     "Ajouter sous un autre nom": "Unter anderem Namen hinzufügen",
+    "Ajouter un jeton d'API…": "API-Token hinzufügen…",
     "Ajouter un jeton…": "Token hinzufügen…",
     "Ajouter un token": "Token hinzufügen",
     "Ajouter une existante…": "Vorhandene hinzufügen…",

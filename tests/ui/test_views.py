@@ -13,6 +13,7 @@ from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 import cma.ui.views.settings as settings_view
+import cma.ui.views.settings_updates as updates_view
 from cma.core.cloudflared.binary import ReleaseInfo
 from cma.core.models import CloudflareProfile, ServiceType, SshProfile, Theme
 from cma.core.sessions import SessionInfo, SessionKind, SessionState
@@ -195,7 +196,7 @@ def test_settings_view(qtbot, gui, monkeypatch, tmp_path):
     assert ctx.config().settings.cloudflared_path is None
 
     release = ReleaseInfo("2099.1.1", "", ())
-    monkeypatch.setattr(settings_view, "fetch_latest_release", lambda *a, **k: release)
+    monkeypatch.setattr(updates_view, "fetch_latest_release", lambda *a, **k: release)
     view._installed_version = "2026.1.1"
     view.check_cloudflared_release()
     qtbot.waitUntil(lambda: view._release is release, timeout=5000)
@@ -210,14 +211,14 @@ def test_settings_view(qtbot, gui, monkeypatch, tmp_path):
         progress(100, None)
         return installed
 
-    monkeypatch.setattr(settings_view, "download_release_binary", fake_download)
+    monkeypatch.setattr(updates_view, "download_release_binary", fake_download)
     view._download()
     qtbot.waitUntil(lambda: ctx.config().settings.cloudflared_path == str(installed), timeout=5000)
 
-    monkeypatch.setattr(settings_view, "check_for_update", lambda: UpdateInfo("2.0.0", "9.9.9", "https://x"))
+    monkeypatch.setattr(updates_view, "check_for_update", lambda: UpdateInfo("2.0.0", "9.9.9", "https://x"))
     view.check_cma_update()
     qtbot.waitUntil(lambda: "9.9.9" in view.cma_update_label.text(), timeout=5000)
-    monkeypatch.setattr(settings_view, "check_for_update", lambda: UpdateInfo("2.0.0", None, None))
+    monkeypatch.setattr(updates_view, "check_for_update", lambda: UpdateInfo("2.0.0", None, None))
     view.check_cma_update()
     qtbot.waitUntil(lambda: "Aucune version" in view.cma_update_label.text(), timeout=5000)
 
@@ -226,7 +227,7 @@ def test_settings_view(qtbot, gui, monkeypatch, tmp_path):
 
     asset = ReleaseAsset("CloudflaredManageAccess-9.9.9-setup.exe", "https://x/s.exe", 1, "ab" * 32)
     monkeypatch.setattr(
-        settings_view, "check_for_update", lambda: UpdateInfo("2.0.0", "9.9.9", "https://x", (asset,))
+        updates_view, "check_for_update", lambda: UpdateInfo("2.0.0", "9.9.9", "https://x", (asset,))
     )
     monkeypatch.setattr(view, "self_update_possible", lambda: False)
     view.check_cma_update()
@@ -243,10 +244,10 @@ def test_settings_view(qtbot, gui, monkeypatch, tmp_path):
         progress(1, 2)
         return installer
 
-    monkeypatch.setattr(settings_view, "download_installer", fake_download_installer)
-    monkeypatch.setattr(settings_view, "launch_installer", launched.append)
+    monkeypatch.setattr(updates_view, "download_installer", fake_download_installer)
+    monkeypatch.setattr(updates_view, "launch_installer", launched.append)
     monkeypatch.setattr(
-        settings_view.QMessageBox, "question", lambda *_a: settings_view.QMessageBox.StandardButton.Yes
+        updates_view.QMessageBox, "question", lambda *_a: updates_view.QMessageBox.StandardButton.Yes
     )
     monkeypatch.setattr(view.window(), "quit_now", lambda: quits.append(True))
     view.install_cma_update()
@@ -257,11 +258,12 @@ def test_settings_view(qtbot, gui, monkeypatch, tmp_path):
     zip_asset = ReleaseAsset("CloudflaredManageAccess-9.9.9-portable.zip", "https://x/p.zip", 1, "cd" * 32)
     view._cma_update = UpdateInfo("2.0.0", "9.9.9", "https://x", (asset, zip_asset))
     monkeypatch.setattr(settings_view, "update_mode", lambda: "portable")
-    monkeypatch.setattr(settings_view, "download_portable", lambda info, dest, **_kw: tmp_path / "p.zip")
-    monkeypatch.setattr(settings_view, "prepare_portable", lambda archive, staging: tmp_path / "nouveau")
+    monkeypatch.setattr(updates_view, "update_mode", lambda: "portable")
+    monkeypatch.setattr(updates_view, "download_portable", lambda info, dest, **_kw: tmp_path / "p.zip")
+    monkeypatch.setattr(updates_view, "prepare_portable", lambda archive, staging: tmp_path / "nouveau")
     portable_launches: list[tuple[Path, Path]] = []
     monkeypatch.setattr(
-        settings_view,
+        updates_view,
         "launch_portable_update",
         lambda new, app, staging: portable_launches.append((new, app)),
     )
@@ -270,6 +272,7 @@ def test_settings_view(qtbot, gui, monkeypatch, tmp_path):
     qtbot.waitUntil(lambda: bool(quits), timeout=5000)
     assert portable_launches[0][0] == tmp_path / "nouveau"
     monkeypatch.setattr(settings_view, "update_mode", lambda: "scoop")
+    monkeypatch.setattr(updates_view, "update_mode", lambda: "scoop")
     view.check_cma_update()
     qtbot.waitUntil(lambda: "scoop update" in view.cma_update_label.text(), timeout=5000)
 
@@ -414,8 +417,8 @@ def test_full_application_start_and_stop(qtbot, qapp, paths, monkeypatch):
 
     monkeypatch.setattr(misc, "show_migration_report", lambda ctx, parent, report: reports.append(report))
     monkeypatch.setattr(qapp, "exec", lambda: 0)
-    monkeypatch.setattr(settings_view, "fetch_latest_release", lambda *a, **k: ReleaseInfo("1.0.0", "", ()))
-    monkeypatch.setattr(settings_view, "check_for_update", lambda: UpdateInfo("2.0.0", None, None))
+    monkeypatch.setattr(updates_view, "fetch_latest_release", lambda *a, **k: ReleaseInfo("1.0.0", "", ()))
+    monkeypatch.setattr(updates_view, "check_for_update", lambda: UpdateInfo("2.0.0", None, None))
     args = argparse.Namespace(data_dir=str(paths.data_dir), debug=True, minimized=False)
 
     def check_and_quit() -> None:

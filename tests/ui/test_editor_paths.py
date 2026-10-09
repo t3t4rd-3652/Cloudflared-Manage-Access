@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+import cma.ui.views.profile_editor as editor_module
 import cma.ui.views.profiles as profiles_module
 import cma.ui.views.tokens as tokens_module
 from cma.core.models import AuthMode, CloudflareProfile, ServiceToken, SshProfile
@@ -66,7 +67,7 @@ def test_profile_remote_actions(qtbot, gui, notes, monkeypatch):
     monkeypatch.setattr(manager, "access_token_valid", fake_token)
     monkeypatch.setattr(manager, "ssh_config_snippet", fake_ssh_config)
     shown: list[str] = []
-    monkeypatch.setattr(profiles_module, "show_text", lambda *a: shown.append(a[-1]))
+    monkeypatch.setattr(editor_module, "show_text", lambda *a: shown.append(a[-1]))
 
     window.show_view("profiles")
     view = window.profiles

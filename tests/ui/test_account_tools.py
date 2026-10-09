@@ -9,7 +9,7 @@ import cma.ui.views.cloud.account_tools as tools_module
 import cma.ui.views.cloud.audit_log as audit_module
 import cma.ui.views.cloud.private_network as privnet_module
 import cma.ui.views.cloud.snapshots as snapshots_module
-import cma.ui.views.cloud.view as cloud_module
+import cma.ui.views.cloud.tunnels_tab as tunnels_module
 from cma.core.audit import AuditEntry
 from cma.core.cfapi import Tunnel
 from cma.core.traffic import HostTraffic
@@ -79,7 +79,7 @@ def test_private_network_dialog(qtbot, view, cf, monkeypatch):
 def test_tunnel_menu_routes_and_traffic_on_cards(qtbot, view, cf, monkeypatch):
     opened: list[str] = []
     monkeypatch.setattr(
-        cloud_module, "show_private_network", lambda _p, _c, _a, tunnel, _r: opened.append(tunnel.name)
+        tunnels_module, "show_private_network", lambda _p, _c, _a, tunnel, _r: opened.append(tunnel.name)
     )
     bureau = view.tree.topLevelItem(0)
     action = next(a for a in view.tree_menu(bureau).actions() if a.text() == "Réseaux privés…")
@@ -172,6 +172,8 @@ def test_tools_menu_opens_the_audit_log(qtbot, view, monkeypatch):
         "Journal d'audit du compte…",
         "Instantanés de la configuration…",
         "Permissions du jeton…",
+        "",
+        "Ajouter un jeton d'API…",
     ]
     view.tools.open_audit_log()
     qtbot.waitUntil(lambda: shown == [3], timeout=5000)

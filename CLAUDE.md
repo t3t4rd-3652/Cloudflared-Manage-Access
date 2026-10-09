@@ -44,7 +44,7 @@ Depuis Windows, l'environnement est `.venv` (uv n'est pas forcément dans le PAT
   libglib2.0-0`, `pip install uv`, `UV_PROJECT_ENVIRONMENT=/opt/venv`, `QT_QPA_PLATFORM=offscreen`, puis
   `uv sync --locked` et la commande pytest de `ci.yml` (`MSYS_NO_PATHCONV=1` devant `docker run` depuis Git Bash).
 - Captures de la documentation : `scripts/capture_screenshots.py <dossier>`, à regarder en clair et en sombre
-  avant de copier dans `docs/captures/`. Sans `QT_QPA_PLATFORM=offscreen` sous Windows (pas de police en
+  avant de copier dans `docs/captures/` (les `guide-*.png` de `docs/GUIDE.md` sont produites au passage). Sans `QT_QPA_PLATFORM=offscreen` sous Windows (pas de police en
   offscreen sur ce poste). `CMA_CAPTURE_LANGUAGE=de` (ou `en`, `es`) pour vérifier la mise en page d'une langue.
 - Traductions : chaque nouveau `tr("…")` doit avoir son entrée dans **chaque** catalogue : `i18n_en.py`,
   `i18n_de.py` et `i18n_es.py` (`tests/unit/test_i18n.py` liste les manquants par langue). Les catalogues sont
@@ -138,9 +138,13 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
 - **DNS des noms d'hôte** (`cma.core.dnscheck`, appelé par `CloudflareAdmin.overview`) : une lecture par zone
   utilisée ; une zone illisible donne « unknown », jamais une alerte. « Corriger » passe par `ensure_cname`, qui
   refuse de remplacer un A ou un AAAA : ne pas l'assouplir.
-- **Vue Cloudflare découpée** : `cloud/apps_tab.py` (`AppsTab`) et `cloud/tokens_tab.py` (`TokensTab`) portent leurs
-  onglets ; la vue garde les anciens noms par délégation (`view.apps`, `view.allow_token`…). Les tests remplacent les
-  boîtes dans le module de l'onglet (`apps_module.ask_allow`, `tokens_module.confirm`…), pas dans `view`.
+- **Vue Cloudflare découpée** : `cloud/tunnels_tab.py` (`TunnelsTab`), `cloud/apps_tab.py` (`AppsTab`) et
+  `cloud/tokens_tab.py` (`TokensTab`) portent leurs onglets ; la vue garde les anciens noms par délégation
+  (`view.tree`, `view.publish`, `view.apps`, `view.allow_token`…). Les tests remplacent les boîtes dans le module de
+  l'onglet (`tunnels_module.ask_service`, `apps_module.ask_allow`…), pas dans `view` ; `confirm` sert aux deux
+  (oublier le jeton dans la vue, retirer un nom d'hôte dans l'onglet). Même principe pour `profile_editor.py`
+  (éditeur de profil) et `settings_updates.py` (mises à jour des Paramètres) : `self_update_possible` et
+  `refresh_cloudflared_version` restent sur la vue, que les tests et le script de captures remplacent.
 - **Dates de test relatives** : tout ce qui filtre par période (journal des accès) se teste avec des dates calculées
   depuis maintenant (`_ago` du faux serveur) ; une date fixe ferait échouer le test quelques semaines plus tard.
 - **Règles d'ingress** : une règle est identifiée par (nom d'hôte, chemin) (`cfapi._same_rule`). Republier met la

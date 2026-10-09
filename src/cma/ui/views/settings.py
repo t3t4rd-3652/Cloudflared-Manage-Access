@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLineEdit,
-    QMessageBox,
     QProgressBar,
     QSpinBox,
     QTabWidget,
@@ -33,10 +32,6 @@ from cma.core import dpapi
 from cma.core.cloudflared.binary import (
     DOWNLOAD_PAGE,
     ReleaseInfo,
-    asset_name,
-    download_release_binary,
-    fetch_latest_release,
-    is_newer,
     read_version,
 )
 from cma.core.diagnostics import build_report
@@ -45,16 +40,6 @@ from cma.core.models import Config, KnownHostsMode, Theme
 from cma.core.secrets import EncryptedFileSecretStore
 from cma.core.updates import (
     UpdateInfo,
-    appimage_path,
-    check_for_update,
-    download_asset,
-    download_installer,
-    download_portable,
-    install_appimage,
-    launch_installer,
-    launch_portable_update,
-    prepare_portable,
-    relaunch_after_exit,
     update_mode,
 )
 from cma.i18n import SUPPORTED_LANGUAGES, tr
@@ -63,6 +48,7 @@ from cma.ui.context import GuiContext
 from cma.ui.dialogs.misc import KeysDialog, KnownHostsDialog, confirm_delete_v1
 from cma.ui.dialogs.transfer import run_export, run_import
 from cma.ui.views.common import FormCard, card_page, page_header, side_by_side
+from cma.ui.views.settings_updates import UpdateActions
 from cma.ui.widgets import add_shortcut, button, label, primary_button
 
 
@@ -78,6 +64,15 @@ class SettingsView(QWidget):
         self._installed_version: str | None = None
         self._cancel_download = threading.Event()
         self._cma_update: UpdateInfo | None = None
+        # Mises à jour (cloudflared, CMA) : module à part ; anciens noms gardés pour les boutons et la fenêtre.
+        self.updates = UpdateActions(self)
+        self.check_cloudflared_release = self.updates.check_cloudflared_release
+        self.check_cma_update = self.updates.check_cma_update
+        self.install_cma_update = self.updates.install_cma_update
+        self._update_download_state = self.updates._update_download_state
+        self._download = self.updates._download
+        self._on_progress = self.updates._on_progress
+        self._on_cma_progress = self.updates._on_cma_progress
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 20, 24, 16)
         outer.setSpacing(4)
@@ -534,236 +529,10 @@ class SettingsView(QWidget):
 
         self.ctx.run(read_version(binary), done, lambda e: self.cf_version.setText(str(e)))
 
-    def check_cloudflared_release(self, *, quiet: bool = False) -> None:
-        self.check_button.setEnabled(False)
-        cache = self.ctx.paths.cache_dir / "cloudflared-release.json"
-
-        async def fetch() -> ReleaseInfo:
-            return await asyncio.to_thread(fetch_latest_release, cache, max_age=0 if not quiet else 86400)
-
-        def done(release: ReleaseInfo) -> None:
-            self.check_button.setEnabled(True)
-            self._release = release
-            self._update_download_state()
-
-        def failed(error: BaseException) -> None:
-            self.check_button.setEnabled(True)
-            if not quiet:
-                self.ctx.notify("error", tr("Impossible de joindre GitHub : {error}").format(error=error))
-
-        self.ctx.run(fetch(), done, failed)
-
-    def _update_download_state(self) -> None:
-        release = self._release
-        if release is None:
-            self.release_label.setText("")
-            self.download_button.setEnabled(False)
-            return
-        newer = is_newer(release.version, self._installed_version)
-        if self._installed_version is None:
-            text = tr("Dernière version : {v}.").format(v=release.version)
-        elif newer:
-            text = tr("Mise à jour disponible : {v} (installée : {cur}).").format(
-                v=release.version, cur=self._installed_version
-            )
-        else:
-            text = tr("Vous avez la dernière version ({v}).").format(v=release.version)
-        self.release_label.setText(
-            text + " " + tr("Fichier : {name}, vérifié par SHA-256 et signature.").format(name=asset_name())
-        )
-        self.download_button.setEnabled(self._installed_version is None or newer)
-        self.download_button.setText(tr("Mettre à jour") if self._installed_version else tr("Télécharger"))
-
-    def _download(self) -> None:
-        release = self._release
-        if release is None:
-            return
-        self.download_button.setEnabled(False)
-        self.progress.setValue(0)
-        self.progress.show()
-        self._cancel_download.clear()
-
-        def progress(received: int, total: int | None) -> None:
-            self.download_progress.emit(received, total)
-
-        async def run() -> Path:
-            return await asyncio.to_thread(
-                download_release_binary,
-                release,
-                self.ctx.paths.bin_dir,
-                progress=progress,
-                cancel=self._cancel_download,
-            )
-
-        def done(path: Path) -> None:
-            self.progress.hide()
-            self.ctx.update_config(lambda c: setattr(c.settings, "cloudflared_path", str(path)))
-            self.ctx.notify(
-                "success",
-                tr("cloudflared {v} installé et vérifié : {path}").format(v=release.version, path=path),
-            )
-            self.refresh_cloudflared_version()
-
-        def failed(error: BaseException) -> None:
-            self.progress.hide()
-            self.download_button.setEnabled(True)
-            self.ctx.notify("error", str(error))
-
-        self.ctx.run(run(), done, failed)
-
-    def _on_progress(self, received: int, total: object) -> None:
-        if isinstance(total, int) and total > 0:
-            self.progress.setMaximum(1000)
-            self.progress.setValue(int(received * 1000 / total))
-        else:
-            self.progress.setMaximum(0)
-
-    def _on_cma_progress(self, received: int, total: object) -> None:
-        if isinstance(total, int) and total > 0:
-            self.cma_progress_bar.setMaximum(1000)
-            self.cma_progress_bar.setValue(int(received * 1000 / total))
-        else:
-            self.cma_progress_bar.setMaximum(0)
-
     # --- Mise à jour de CMA -----------------------------------------------------------------------
 
     def self_update_possible(self) -> bool:
         return update_mode() in ("installer", "portable", "appimage")
-
-    def install_cma_update(self) -> None:
-        info = self._cma_update
-        if info is not None and update_mode() == "portable":
-            self._install_portable_update(info)
-            return
-        if info is not None and update_mode() == "appimage":
-            self._install_appimage_update(info)
-            return
-        if info is None or info.installer is None:
-            return
-        answer = QMessageBox.question(
-            self,
-            tr("Mettre à jour CMA"),
-            tr(
-                "La version {v} va être téléchargée et vérifiée. CMA se fermera ensuite (les sessions "
-                "ouvertes seront arrêtées), s'installera puis redémarrera. Continuer ?"
-            ).format(v=info.latest),
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-        self.cma_install.setEnabled(False)
-        self.cma_progress_bar.setValue(0)
-        self.cma_progress_bar.show()
-
-        def progress(received: int, total: int | None) -> None:
-            self.cma_progress.emit(received, total)
-
-        async def run() -> Path:
-            return await asyncio.to_thread(
-                download_installer, info, self.ctx.paths.cache_dir / "updates", progress=progress
-            )
-
-        def done(installer: Path) -> None:
-            self.cma_progress_bar.hide()
-            launch_installer(installer)
-            window = self.window()
-            quit_now = getattr(window, "quit_now", None)
-            if callable(quit_now):
-                quit_now()
-
-        def failed(error: BaseException) -> None:
-            self.cma_progress_bar.hide()
-            self.cma_install.setEnabled(True)
-            self.ctx.notify("error", str(error))
-
-        self.ctx.run(run(), done, failed)
-
-    def _install_portable_update(self, info: UpdateInfo) -> None:
-        """Version portable : zip vérifié, fichiers du programme remplacés après fermeture, data/ conservé."""
-        if info.portable_zip is None:
-            return
-        answer = QMessageBox.question(
-            self,
-            tr("Mettre à jour CMA"),
-            tr(
-                "La version {v} va être téléchargée et vérifiée. CMA se fermera (les sessions ouvertes seront "
-                "arrêtées), remplacera ses fichiers en gardant le dossier data/, puis redémarrera. Continuer ?"
-            ).format(v=info.latest),
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-        self.cma_install.setEnabled(False)
-        self.cma_progress_bar.setValue(0)
-        self.cma_progress_bar.show()
-        updates_dir = self.ctx.paths.cache_dir / "updates"
-        staging = updates_dir / "portable"
-        app_dir = Path(sys.executable).resolve().parent
-
-        def progress(received: int, total: int | None) -> None:
-            self.cma_progress.emit(received, total)
-
-        async def run() -> Path:
-            archive = await asyncio.to_thread(download_portable, info, updates_dir, progress=progress)
-            return await asyncio.to_thread(prepare_portable, archive, staging)
-
-        def done(new_app: Path) -> None:
-            self.cma_progress_bar.hide()
-            launch_portable_update(new_app, app_dir, staging)
-            window = self.window()
-            quit_now = getattr(window, "quit_now", None)
-            if callable(quit_now):
-                quit_now()
-
-        def failed(error: BaseException) -> None:
-            self.cma_progress_bar.hide()
-            self.cma_install.setEnabled(True)
-            self.ctx.notify("error", str(error))
-
-        self.ctx.run(run(), done, failed)
-
-    def _install_appimage_update(self, info: UpdateInfo) -> None:
-        """AppImage Linux : fichier vérifié, puis remplacé d'un coup ; CMA se relance sur la nouvelle version."""
-        target, asset = appimage_path(), info.appimage
-        if target is None or asset is None:
-            return
-        answer = QMessageBox.question(
-            self,
-            tr("Mettre à jour CMA"),
-            tr(
-                "La version {v} va être téléchargée et vérifiée, puis remplacer {path}. CMA se fermera ensuite "
-                "(les sessions ouvertes seront arrêtées) et redémarrera. Continuer ?"
-            ).format(v=info.latest, path=target),
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-        self.cma_install.setEnabled(False)
-        self.cma_progress_bar.setValue(0)
-        self.cma_progress_bar.show()
-        updates_dir = self.ctx.paths.cache_dir / "updates"
-
-        def progress(received: int, total: int | None) -> None:
-            self.cma_progress.emit(received, total)
-
-        async def run() -> Path:
-            downloaded = await asyncio.to_thread(download_asset, info, asset, updates_dir, progress=progress)
-            try:
-                return await asyncio.to_thread(install_appimage, downloaded, target)
-            finally:
-                downloaded.unlink(missing_ok=True)
-
-        def done(installed: Path) -> None:
-            self.cma_progress_bar.hide()
-            relaunch_after_exit(installed)
-            window = self.window()
-            quit_now = getattr(window, "quit_now", None)
-            if callable(quit_now):
-                quit_now()
-
-        def failed(error: BaseException) -> None:
-            self.cma_progress_bar.hide()
-            self.cma_install.setEnabled(True)
-            self.ctx.notify("error", str(error))
-
-        self.ctx.run(run(), done, failed)
 
     # --- Divers -----------------------------------------------------------------------------------
 
@@ -791,44 +560,3 @@ class SettingsView(QWidget):
             )
 
         self.ctx.run(build(), done, lambda e: self.ctx.notify("error", str(e)))
-
-    def check_cma_update(self, *, quiet: bool = False) -> None:
-        async def fetch() -> UpdateInfo:
-            return await asyncio.to_thread(check_for_update)
-
-        def done(info: UpdateInfo) -> None:
-            self._cma_update = info
-            mode = update_mode()
-            asset = info.asset_for(mode)
-            installable = info.available and asset is not None and self.self_update_possible()
-            self.cma_install.setVisible(installable)
-            if info.latest is None:
-                self.cma_update_label.setText(tr("Aucune version publiée pour l'instant."))
-            elif info.available:
-                text = tr("Version {v} disponible.").format(v=info.latest)
-                if mode == "scoop":
-                    text += " " + tr("Mettez à jour avec Scoop : scoop update cloudflared-manage-access")
-                elif not installable:
-                    text += " " + tr(
-                        "Mise à jour automatique réservée à la version installée : "
-                        "téléchargez-la depuis la page de la release."
-                    )
-                self.cma_update_label.setText(text)
-                action = (
-                    (tr("Installer"), self.install_cma_update)
-                    if installable
-                    else (tr("Voir"), lambda: QDesktopServices.openUrl(QUrl(info.url or REPO_URL)))
-                )
-                self.ctx.notify(
-                    "info",
-                    tr("Une nouvelle version de CMA est disponible : {v}.").format(v=info.latest),
-                    action=action,
-                )
-            else:
-                self.cma_update_label.setText(tr("Vous utilisez la dernière version."))
-
-        def failed(error: BaseException) -> None:
-            if not quiet:
-                self.cma_update_label.setText(tr("Vérification impossible : {error}").format(error=error))
-
-        self.ctx.run(fetch(), done, failed)

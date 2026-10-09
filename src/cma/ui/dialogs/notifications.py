@@ -43,6 +43,10 @@ class NotificationsDialog(QDialog):
         self.table = data_table([tr("Heure"), tr("Niveau"), tr("Message")], tr("Notifications récentes"))
         for column, width in enumerate((80, 130)):
             self.table.horizontalHeader().resizeSection(column, width)
+        # Un message long passe à la ligne : la hauteur de ligne suit le texte (au moins celle d'une ligne normale).
+        self.table.setWordWrap(True)
+        self.table.verticalHeader().setMinimumSectionSize(36)
+        self.table.horizontalHeader().sectionResized.connect(lambda *_a: self.table.resizeRowsToContents())
         self.table.itemSelectionChanged.connect(self._update_actions)
         self.table.itemDoubleClicked.connect(lambda _item: self.run_action())
         layout.addWidget(self.table, 1)
@@ -76,6 +80,7 @@ class NotificationsDialog(QDialog):
                 if column == 1:
                     item.setForeground(QBrush(QColor(status_colors(tone, tokens)[0])))
                 self.table.setItem(row, column, item)
+        self.table.resizeRowsToContents()
         self.table.setVisible(bool(self.notices))
         self.empty.setVisible(not self.notices)
         self.clear_button.setEnabled(bool(self.notices))

@@ -194,6 +194,7 @@ def show_demo_cloud(view) -> None:
                     IngressRule("mongodb.exemple.fr", "tcp://localhost:27017"),
                     IngressRule("ssh.exemple.fr", "ssh://localhost:22"),
                     IngressRule("rdp.exemple.fr", "rdp://10.0.0.12:3389"),
+                    IngressRule("wiki.exemple.fr", "http://localhost:8080"),
                 ],
             ),
             TunnelView(
@@ -208,22 +209,126 @@ def show_demo_cloud(view) -> None:
         tokens=[RemoteServiceToken("r1", "Production", "8f3c2a1b.access", "2027-09-29T00:00:00Z")],
         zones=[Zone("z1", "exemple.fr"), Zone("z2", "lab.exemple.fr")],
     )
-    # Dernier relevé de la surveillance des services : un service en panne derrière un tunnel dégradé.
+    # Dernier relevé de la surveillance des services : un service en panne derrière un tunnel en ligne.
     from cma.core.hostprobe import HostProbe
     from cma.core.servicewatch import ServiceTarget
 
     view.ctx.services.record(
         [
             (
-                ServiceTarget("grafana.lab.exemple.fr", "", "http://localhost:3000", "t2", "labo"),
+                ServiceTarget("wiki.exemple.fr", "", "http://localhost:8080", "t1", "bureau"),
                 HostProbe("origin_down", 502),
-            )
+            ),
+            (
+                ServiceTarget("grafana.lab.exemple.fr", "", "http://localhost:3000", "t2", "labo"),
+                HostProbe("ok", 200),
+            ),
         ]
     )
     view.stack.setCurrentIndex(1)
     view.account.clear()
     view.account.addItem(account.name, account)
     view._fill(overview)
+
+
+def capture_guide(window, output: Path) -> None:
+    """Boîtes illustrant docs/GUIDE.md (thème clair) : test des noms d'hôte, réseaux privés, instantanés, partage.
+    Données fictives, aucun appel réseau : l'administration Cloudflare est remplacée par une façade inerte."""
+    from types import SimpleNamespace
+
+    from PySide6.QtWidgets import QDialog
+
+    from cma.core.cfadmin import PrivateNetwork
+    from cma.core.cfapi import Account, Tunnel
+    from cma.core.hostprobe import HostProbe
+    from cma.core.privnet import PrivateRoute, VirtualNetwork
+    from cma.core.servicewatch import ServiceTarget
+    from cma.core.snapshot import SnapshotChange
+    from cma.ui.dialogs.links import ShareDialog
+    from cma.ui.views.cloud.private_network import PrivateNetworkDialog
+    from cma.ui.views.cloud.services import ServiceTestsDialog
+    from cma.ui.views.cloud.snapshots import SnapshotsDialog
+
+    ctx = window.ctx
+    inert = SimpleNamespace(
+        private_network=lambda _t: None, snapshot=lambda _a: None, permissions=lambda: None
+    )
+    quiet = SimpleNamespace(
+        run=lambda *_a, **_k: None, notify=lambda *_a, **_k: None, paths=ctx.paths, config=ctx.config
+    )
+
+    def save(dialog: QDialog, name: str) -> None:
+        dialog.show()
+        for _ in range(5):
+            QApplication.processEvents()
+        dialog.grab().save(str(output / name))
+        dialog.close()
+        dialog.deleteLater()
+
+    bureau = ("t1", "bureau")
+    tests = [
+        (
+            ServiceTarget("wiki.exemple.fr", "", "http://localhost:8080", *bureau),
+            HostProbe("origin_down", 502),
+        ),
+        (ServiceTarget("mongodb.exemple.fr", "", "tcp://localhost:27017", *bureau), HostProbe("access", 302)),
+        (ServiceTarget("ssh.exemple.fr", "", "ssh://localhost:22", *bureau), HostProbe("access", 302)),
+        (
+            ServiceTarget("grafana.lab.exemple.fr", "", "http://localhost:3000", "t2", "labo"),
+            HostProbe("ok", 200),
+        ),
+        (
+            ServiceTarget("status.exemple.fr", "", "http://localhost:3001", *bureau),
+            HostProbe("challenge", 403),
+        ),
+    ]
+    save(ServiceTestsDialog(window, tests), "guide-test-noms.png")
+    network = PrivateNetworkDialog(window, quiet, inert, Tunnel("t1", "bureau", "healthy"))  # type: ignore[arg-type]
+    network.show_network(
+        PrivateNetwork(
+            [
+                PrivateRoute("r1", "10.0.0.0/24", "t1", "vn1", "default", "LAN bureau"),
+                PrivateRoute("r2", "192.168.50.0/24", "t1", "vn1", "default", "NAS"),
+            ],
+            [VirtualNetwork("vn1", "default", True)],
+            True,
+        )
+    )
+    save(network, "guide-reseaux-prives.png")
+    from cma.core.snapshot import save_snapshot
+    from cma.ui.views.cloud.snapshots import snapshot_dir
+
+    for day, policies in ((8, 3), (9, 2)):
+        save_snapshot(
+            snapshot_dir(ctx.paths),
+            {
+                "version": 1,
+                "taken_at": f"2026-10-0{day}T08:00:00Z",
+                "account": {"id": "acc", "name": "Exemple SAS"},
+                "tunnels": {"t1": {}, "t2": {}},
+                "apps": {"a1": {}, "a2": {}},
+                "policies": {f"p{i}": {} for i in range(policies)},
+                "service_tokens": {"s1": {}},
+            },
+        )
+    snapshots = SnapshotsDialog(window, quiet, inert, Account("acc", "Exemple SAS"))  # type: ignore[arg-type]
+    snapshots.fill_changes(
+        [
+            SnapshotChange(
+                "tunnels",
+                "t1",
+                "bureau",
+                "changed",
+                ("config.ingress[3].service : http://localhost:8080 → http://10.0.0.20:8080",),
+            ),
+            SnapshotChange("policies", "p2", "Prestataires", "removed"),
+            SnapshotChange("routes", "r2", "192.168.50.0/24", "added"),
+        ]
+    )
+    snapshots.status.setText("3 changements depuis le 08/10/2026 10:00.")
+    save(snapshots, "guide-instantanes.png")
+    profile = next(p for p in ctx.config().cloudflare_profiles if p.name == "MongoDB production")
+    save(ShareDialog(window, ctx, profile), "guide-partager.png")
 
 
 def main() -> int:
@@ -340,6 +445,8 @@ def main() -> int:
                     app.processEvents()
                 window.grab().save(str(output / f"cloud-connexion-{suffix}.png"))
                 window.cloud.stack.setCurrentIndex(1)
+        if theme_name == Theme.LIGHT:
+            capture_guide(window, output)
         window.quitting = True
         window.close()
         window.deleteLater()

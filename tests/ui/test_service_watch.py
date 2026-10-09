@@ -7,7 +7,8 @@ from datetime import datetime
 
 import pytest
 
-import cma.ui.views.cloud.view as cloud_module
+import cma.ui.views.cloud.cards as cards_module
+import cma.ui.views.cloud.tunnels_tab as tunnels_module
 from cma.core.hostprobe import HostProbe
 from cma.core.servicewatch import ServiceResult, ServiceTarget
 from cma.ui.views.cloud.cards import SERVICE_ROLE
@@ -77,7 +78,7 @@ def test_cards_show_the_last_test_and_test_all(qtbot, gui, cf, monkeypatch):
     view.connect_account()
     qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
     bureau = view.tree.topLevelItem(0)
-    rows = {bureau.child(i).data(0, cloud_module.RULE_ROLE).hostname: bureau.child(i) for i in range(3)}
+    rows = {bureau.child(i).data(0, cards_module.RULE_ROLE).hostname: bureau.child(i) for i in range(3)}
     assert rows["grafana.exemple.fr"].data(0, SERVICE_ROLE) is None
     assert view.test_all_button.isEnabled()
 
@@ -89,7 +90,7 @@ def test_cards_show_the_last_test_and_test_all(qtbot, gui, cf, monkeypatch):
         return [(t, HostProbe("origin_down", 502) if t.web else HostProbe("access", 302)) for t in targets]
 
     monkeypatch.setattr(view.admin, "probe_services", probe_services)
-    monkeypatch.setattr(cloud_module, "show_service_tests", lambda _p, results: shown.append(len(results)))
+    monkeypatch.setattr(tunnels_module, "show_service_tests", lambda _p, results: shown.append(len(results)))
     view.test_all_hostnames()
     qtbot.waitUntil(lambda: shown == [3], timeout=5000)
     assert tested == [["ssh.exemple.fr", "rdp.exemple.fr", "grafana.exemple.fr"]]

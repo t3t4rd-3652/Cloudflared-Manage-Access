@@ -8,6 +8,9 @@ Application de bureau pour ouvrir, d'un clic, des accès locaux à vos applicati
 Chaque connexion affiche son état réel (à l'écoute, dégradée, en reconnexion, en erreur), se reconnecte
 seule si besoin, et vos secrets restent dans le coffre du système, jamais dans un fichier ni sur une ligne de commande.
 
+Pas à pas, par tâche (accès RDP, publication, panne d'un service, renouvellement d'un token, réseaux privés,
+partage) : [docs/GUIDE.md](docs/GUIDE.md).
+
 ## Installation
 
 Sous Windows, téléchargez la dernière [release](https://github.com/t3t4rd-3652/Cloudflared-Manage-Access/releases) :
@@ -121,11 +124,23 @@ Avec un jeton d'API Cloudflare, CMA gère aussi le côté serveur :
 - Options d'origine d'un nom d'hôte publié : certificat auto-signé (Proxmox…), en-tête Host, nom du certificat.
 - Service tokens créés depuis CMA, rangés directement dans le coffre : leur secret n'est jamais affiché. CMA prévient
   avant leur expiration ; **Prolonger** repousse l'échéance, **Changer le secret** en crée un nouveau sans toucher aux profils.
+- **Surveillance** des tunnels et des services publiés : chaque nom d'hôte HTTP est testé depuis Internet toutes les
+  15 minutes (même CMA fermé, par une tâche planifiée) ; une panne (502, tunnel sans connecteur, DNS) est notifiée
+  avec le conseil qui va avec. **Tester depuis Internet** et **Tester tous les noms d'hôte** à la demande.
+- DNS des noms d'hôte vérifié et corrigeable, règles d'ingress complètes (chemins, ordre, règle finale), trafic des
+  dernières 24 heures par nom d'hôte.
+- **Réseaux privés** d'un tunnel (WARP) : routes vers des plages d'adresses, routage WARP.
+- Menu **Outils** : journal d'audit du compte, **instantanés** de la configuration comparés champ par champ,
+  permissions du jeton vérifiées une à une. Plusieurs jetons d'API pour plusieurs comptes Cloudflare.
 - Permissions du jeton d'API et détails dans [docs/SECURITE.md](docs/SECURITE.md).
 
 ### Au quotidien
 
-- **Ctrl+K** : palette pour trouver et lancer n'importe quel accès, serveur ou action au clavier.
+- **Ctrl+K** : palette pour trouver et lancer n'importe quel accès, serveur, action, tunnel ou nom d'hôte au clavier.
+- **Liens `cma://`** : `cma://connect/<profil>` ouvre un accès depuis un favori ou une documentation ; un profil se
+  partage par un lien ou un fichier `.cma`, sans aucun secret.
+- Reprise après la mise en veille ou une coupure du réseau : les connexions repartent sans attendre.
+- Historique des notifications de la session dans la barre d'état, avec le nombre d'alertes non lues.
 - **Espaces de travail** : plusieurs accès ouverts d'un coup (« le matin »), et « Connecter tous les favoris ».
 - **Tester le service** : vérifie que le service distant répond vraiment, pas seulement que le port local est ouvert.
 - **Diagnostiquer…** : cloudflared, port local, DNS, proxy, HTTPS et Access, authentification ; rapport copiable.
@@ -155,6 +170,9 @@ cma status                   sessions ouvertes par l'application
 cma disconnect --group Prod  ferme les connexions du groupe
 cma disconnect --all         ferme toutes les connexions
 cma quit                     ferme l'application
+cma tunnels [--json]         état des tunnels du compte Cloudflare (code 2 si l'un est en panne)
+cma tunnels --services       teste aussi les services publiés depuis Internet
+cma snapshot                 instantané de la configuration Cloudflare, comparé au précédent (code 2 si changé)
 cma doctor                   crée un rapport de diagnostic (zip, sans secrets)
 ```
 

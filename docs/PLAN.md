@@ -1,6 +1,7 @@
 # Plan du projet
 
-État au 2026-10-09, version **2.9.0** (P8 : lecture du compte en parallèle, test depuis Internet, historique des notifications) ; P9 à P12 en cours. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+État au 2026-10-09, version **2.9.0** (P8 : lecture du compte en parallèle, test depuis Internet, historique des notifications) ; P9 à P12 réalisés,
+non publiés. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -336,6 +337,12 @@ le navigateur, et un double-clic sur un fichier `.cma`.
 4. **Plusieurs comptes Cloudflare** : jetons d'API nommés, bascule depuis l'en-tête de la vue.
 
 ### P12 — Qualité et documentation (au fil des versions)
+
+**État au 2026-10-09 : réalisé.** Onglet Tunnels sorti de `cloud/view.py` (1 159 → 615 lignes), éditeur de profil
+sorti de `profiles.py` (937 → 342), mises à jour sorties de `settings.py` (834 → 578) ; guide `docs/GUIDE.md` avec
+ses captures (`guide-*.png`, produites par `scripts/capture_screenshots.py`) ; messages longs repliés. La
+surveillance des services est testée de bout en bout contre le faux serveur (cibles, relevés, CLI, tâche planifiée,
+interface) ; la requête HTTPS elle-même l'est contre un serveur local (`test_hostprobe.py`).
 
 1. **Découper les grosses vues** : onglet Tunnels dans `cloud/tunnels_tab.py`, `profiles.py` en liste et éditeur,
    `settings.py` en une section par module.

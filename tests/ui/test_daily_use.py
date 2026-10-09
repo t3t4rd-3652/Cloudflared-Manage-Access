@@ -160,22 +160,19 @@ def test_token_switcher_in_the_view(qtbot, gui, cf):
     view.token_field.set_text(TOKEN)
     view.connect_account()
     qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
-    assert [view.token_choice.itemText(i) for i in range(view.token_choice.count())] == [
-        "Mon compte",
-        "Ajouter un jeton…",
-    ]
-    # « Ajouter un jeton… » : page de connexion, avec retour possible.
-    view.token_choice.setCurrentIndex(1)
-    view._token_chosen(1)
+    assert not view.token_choice.isVisibleTo(view)  # un seul jeton : pas de choix
+    # « Ajouter un jeton d'API… » (menu Outils) : page de connexion, avec retour possible.
+    add = next(a for a in view.tools.menu.actions() if a.text() == "Ajouter un jeton d'API…")
+    add.trigger()
     assert view.stack.currentIndex() == 0 and view.cancel_add.isVisibleTo(view)
     view.cancel_add.click()
     assert view.stack.currentIndex() == 1
-    view._token_chosen(1)
+    add.trigger()
     view.token_field.set_text(OTHER_TOKEN)
     view.token_name.setText("Client X")
     view.connect_account()
     qtbot.waitUntil(lambda: view.token_choice.count() == 3 and view.stack.currentIndex() == 1, timeout=10000)
-    assert view.token_choice.currentText() == "Client X"
+    assert view.token_choice.currentText() == "Client X" and view.token_choice.isVisibleTo(view)
     # Retour au premier jeton : relu aussitôt.
     view.token_choice.setCurrentIndex(0)
     view._token_chosen(0)

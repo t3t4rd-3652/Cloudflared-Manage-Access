@@ -6,13 +6,19 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from PySide6.QtCore import Qt as Qt_
+from PySide6.QtWidgets import QTreeWidgetItem as QTreeWidgetItem_
 
 import cma.ui.views.cloud.apps_tab as apps_module
+import cma.ui.views.cloud.cards as cards_module
+import cma.ui.views.cloud.dialogs as dialogs_module
 import cma.ui.views.cloud.helpers as cloud_helpers
 import cma.ui.views.cloud.tokens_tab as tokens_module
+import cma.ui.views.cloud.tunnels_tab as tunnels_module
 import cma.ui.views.cloud.view as cloud_module
 from cma.core.cfadmin import NewTunnel, PublishRequest
 from cma.core.cfapi import TOKEN_SECRET_KEY, Tunnel
+from cma.core.cfapi import IngressRule as IngressRule_
 from cma.core.models import AuthMode
 from cma.core.policies import AccessGroup, AccessPolicy, PolicyRule
 from cma.ui.views.cloud import (
@@ -114,7 +120,7 @@ def test_cloud_view_full_flow(qtbot, gui, cf, monkeypatch):
     request = PublishRequest(
         Tunnel("t2", "labo", "down"), "pg.lab.exemple.fr", "tcp://localhost:5432", token_id=token.id
     )
-    monkeypatch.setattr(view, "ask_publish", lambda: request)
+    monkeypatch.setattr(view.tunnels_tab, "ask_publish", lambda: request)
     view.publish()
     qtbot.waitUntil(lambda: "pg.lab.exemple.fr" in names(ctx), timeout=10000)
     profile = next(p for p in ctx.config().cloudflare_profiles if p.hostname == "pg.lab.exemple.fr")
@@ -123,6 +129,7 @@ def test_cloud_view_full_flow(qtbot, gui, cf, monkeypatch):
 
     # Retrait du nom d'hôte publié.
     monkeypatch.setattr(cloud_module, "confirm", lambda *_a: True)
+    monkeypatch.setattr(tunnels_module, "confirm", lambda *_a: True)
     view.tree.clearSelection()
     view.unpublish_selected()  # rien de sélectionné : refus
     view.tree.topLevelItem(1).child(0).setSelected(True)
@@ -151,16 +158,16 @@ def test_cloud_view_checks_tunnel_connectors(qtbot, gui, cf, monkeypatch):
     qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
     shown: list[tuple[str, int]] = []
     monkeypatch.setattr(
-        cloud_module,
+        tunnels_module,
         "show_connectors",
         lambda _p, tunnel, connectors: shown.append((tunnel.name, len(connectors))),
     )
     for index in (0, 1):
-        view.check_connectors(view.tree.topLevelItem(index).data(0, cloud_module.TUNNEL_ROLE))
+        view.check_connectors(view.tree.topLevelItem(index).data(0, cards_module.TUNNEL_ROLE))
     qtbot.waitUntil(lambda: len(shown) == 2, timeout=10000)
     assert sorted(shown) == [("bureau", 1), ("labo", 0)]
 
-    tunnel = view.tree.topLevelItem(0).data(0, cloud_module.TUNNEL_ROLE)
+    tunnel = view.tree.topLevelItem(0).data(0, cards_module.TUNNEL_ROLE)
     healthy = ConnectorsDialog(
         view, tunnel, ctx.core.manager.cloudflare.api().tunnel_connectors("acc1", "t1")
     )
@@ -184,15 +191,15 @@ def connected_view(qtbot, gui, cf):
 def test_cloud_view_edits_a_published_service(qtbot, gui, cf, monkeypatch):
     _ctx, view = connected_view(qtbot, gui, cf)
     bureau = view.tree.topLevelItem(0)
-    tunnel = bureau.data(0, cloud_module.TUNNEL_ROLE)
-    rule = bureau.child(0).data(0, cloud_module.RULE_ROLE)
+    tunnel = bureau.data(0, cards_module.TUNNEL_ROLE)
+    rule = bureau.child(0).data(0, cards_module.RULE_ROLE)
     assert rule.hostname == "ssh.exemple.fr"
 
-    monkeypatch.setattr(cloud_module, "ask_service", lambda *_a: None)
+    monkeypatch.setattr(tunnels_module, "ask_service", lambda *_a: None)
     view.edit_service(tunnel, rule)  # annulé : rien n'est envoyé
     assert not any(method == "PUT" for method, _ in cf.state.requests)
     origin = {"noTLSVerify": True, "httpHostHeader": "pve.local", "originServerName": ""}
-    monkeypatch.setattr(cloud_module, "ask_service", lambda *_a: ("https://localhost:8006", origin))
+    monkeypatch.setattr(tunnels_module, "ask_service", lambda *_a: ("https://localhost:8006", origin))
     view.edit_service(tunnel, rule)
     qtbot.waitUntil(
         lambda: cf.state.configs["t1"]["ingress"][0]["service"] == "https://localhost:8006", timeout=10000
@@ -216,7 +223,7 @@ def test_cloud_view_edits_a_published_service(qtbot, gui, cf, monkeypatch):
     assert dialog.result() == 1 and dialog.value() == "tcp://localhost:22"
     assert dialog.origin() == {"noTLSVerify": False, "httpHostHeader": "", "originServerName": ""}
     with_origin = EditServiceDialog(
-        view, tunnel, cloud_module.IngressRule("a.fr", "https://x", origin={"noTLSVerify": True})
+        view, tunnel, IngressRule_("a.fr", "https://x", origin={"noTLSVerify": True})
     )
     assert with_origin.no_tls_verify.isChecked() and not with_origin.ok_button.isEnabled()
 
@@ -330,10 +337,11 @@ def test_cloud_view_account_policies_and_cleanup(qtbot, gui, cf, monkeypatch):
 
     # Ménage : renommer et supprimer un tunnel arrêté, supprimer une application et un token.
     monkeypatch.setattr(cloud_module, "confirm", lambda *_a: True)
+    monkeypatch.setattr(tunnels_module, "confirm", lambda *_a: True)
     monkeypatch.setattr(tokens_module, "confirm", lambda *_a: True)
     monkeypatch.setattr(apps_module, "confirm", lambda *_a: True)
-    labo = view.tree.topLevelItem(1).data(0, cloud_module.TUNNEL_ROLE)
-    monkeypatch.setattr(cloud_module, "ask_tunnel_name", lambda _p, _existing, current: current + "-2")
+    labo = view.tree.topLevelItem(1).data(0, cards_module.TUNNEL_ROLE)
+    monkeypatch.setattr(tunnels_module, "ask_tunnel_name", lambda _p, _existing, current: current + "-2")
     view.rename_tunnel(labo)
     qtbot.waitUntil(lambda: cf.state.tunnels[1]["name"] == "labo-2", timeout=10000)
     view.delete_tunnel(labo)
@@ -342,7 +350,7 @@ def test_cloud_view_account_policies_and_cleanup(qtbot, gui, cf, monkeypatch):
     notes: list[tuple[str, str]] = []
     ctx._notifier = lambda level, text, **_k: notes.append((level, text))
     view.delete_tunnel(
-        view.tree.topLevelItem(0).data(0, cloud_module.TUNNEL_ROLE)
+        view.tree.topLevelItem(0).data(0, cards_module.TUNNEL_ROLE)
     )  # connecteur actif : refus
     qtbot.waitUntil(lambda: any(level == "error" for level, _ in notes), timeout=10000)
     assert len(cf.state.tunnels) == 1
@@ -415,11 +423,11 @@ def test_cloud_view_creates_a_tunnel(qtbot, gui, cf, monkeypatch):
 
     asked: list[list[str]] = []
     created: list[NewTunnel] = []
-    monkeypatch.setattr(cloud_module, "ask_tunnel_name", lambda _p, existing: asked.append(existing))
+    monkeypatch.setattr(tunnels_module, "ask_tunnel_name", lambda _p, existing: asked.append(existing))
     view.create_tunnel()  # annulé
     assert asked == [["bureau", "labo"]] and len(cf.state.tunnels) == 2
-    monkeypatch.setattr(cloud_module, "ask_tunnel_name", lambda *_a: "nouveau")
-    monkeypatch.setattr(cloud_module, "show_new_tunnel", lambda _p, result: created.append(result))
+    monkeypatch.setattr(tunnels_module, "ask_tunnel_name", lambda *_a: "nouveau")
+    monkeypatch.setattr(tunnels_module, "show_new_tunnel", lambda _p, result: created.append(result))
     view.create_tunnel()
     qtbot.waitUntil(lambda: bool(created) and view.tree.topLevelItemCount() == 3, timeout=10000)
 
@@ -554,7 +562,7 @@ def test_publish_summary_lists_each_step():
             PublishStep("profile", False),
         ),
     )
-    assert cloud_module.publish_summary(result) == (
+    assert dialogs_module.publish_summary(result) == (
         "Nom d'hôte publié ; protection Access non créée ; profil CMA non créé.\nrefusé"
     )
 
@@ -562,11 +570,11 @@ def test_publish_summary_lists_each_step():
 def test_cloud_presentation_helpers():
     from datetime import datetime, timedelta
 
-    assert cloud_module.service_icon("ssh://localhost:22") == "terminal-2"
-    assert cloud_module.service_icon("tcp://localhost:27017") == "database"
-    assert cloud_module.service_icon("tcp://localhost:9000") == "plug-connected"
-    assert cloud_module.service_icon("https://intranet") == "world-www"
-    assert cloud_module.service_icon("http_status:404") == "link"
+    assert cards_module.service_icon("ssh://localhost:22") == "terminal-2"
+    assert cards_module.service_icon("tcp://localhost:27017") == "database"
+    assert cards_module.service_icon("tcp://localhost:9000") == "plug-connected"
+    assert cards_module.service_icon("https://intranet") == "world-www"
+    assert cards_module.service_icon("http_status:404") == "link"
     soon = (datetime.now() + timedelta(days=10)).strftime("%Y-%m-%d")
     past = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     later = (datetime.now() + timedelta(days=400)).strftime("%Y-%m-%d")
@@ -608,7 +616,7 @@ def test_ingress_rules_from_the_tunnel_menu(qtbot, gui, cf, monkeypatch):
     qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
     bureau = view.tree.topLevelItem(0)
     first = bureau.child(0)
-    host = first.data(0, cloud_module.RULE_ROLE).hostname
+    host = first.data(0, cards_module.RULE_ROLE).hostname
 
     # Menu d'une règle : les actions de règle, « Monter » désactivé pour la première.
     actions = {a.text(): a for a in view.tree_menu(first).actions() if a.text()}
@@ -620,7 +628,7 @@ def test_ingress_rules_from_the_tunnel_menu(qtbot, gui, cf, monkeypatch):
         return sum(1 for records in cf.state.dns.values() for r in records if r.get("name") == host)
 
     # Ajouter /api sur le même nom d'hôte : une règle de plus, un seul enregistrement DNS pour ce nom.
-    monkeypatch.setattr(cloud_module, "ask_path_rule", lambda *_a: ("/api", "http://localhost:8080"))
+    monkeypatch.setattr(tunnels_module, "ask_path_rule", lambda *_a: ("/api", "http://localhost:8080"))
     actions["Ajouter une règle avec chemin…"].trigger()
     qtbot.waitUntil(lambda: view.tree.topLevelItem(0).childCount() == 4, timeout=10000)
     assert cnames() == 1
@@ -630,13 +638,13 @@ def test_ingress_rules_from_the_tunnel_menu(qtbot, gui, cf, monkeypatch):
 
     # La faire passer devant la règle du nom d'hôte seul.
     for _ in range(3):
-        view.move_rule(bureau.data(0, cloud_module.TUNNEL_ROLE), added.data(0, cloud_module.RULE_ROLE), -1)
+        view.move_rule(bureau.data(0, cards_module.TUNNEL_ROLE), added.data(0, cards_module.RULE_ROLE), -1)
         qtbot.wait(50)
     qtbot.waitUntil(lambda: view.tree.topLevelItem(0).child(0).text(0) == host + "/api", timeout=10000)
 
     # Règle finale : 503.
-    monkeypatch.setattr(cloud_module, "ask_catch_all", lambda *_a: "http_status:503")
-    view.edit_catch_all(view.tree.topLevelItem(0).data(0, cloud_module.TUNNEL_ROLE))
+    monkeypatch.setattr(tunnels_module, "ask_catch_all", lambda *_a: "http_status:503")
+    view.edit_catch_all(view.tree.topLevelItem(0).data(0, cards_module.TUNNEL_ROLE))
     qtbot.waitUntil(
         lambda: cf.state.configs["t1"]["ingress"][-1]["service"] == "http_status:503", timeout=10000
     )
@@ -645,6 +653,7 @@ def test_ingress_rules_from_the_tunnel_menu(qtbot, gui, cf, monkeypatch):
     view.tree.topLevelItem(0).child(0).setSelected(True)
     told: list[str] = []
     monkeypatch.setattr(cloud_module, "confirm", lambda _p, _h, text, *_a: told.append(text) or True)
+    monkeypatch.setattr(tunnels_module, "confirm", lambda _p, _h, text, *_a: told.append(text) or True)
     view.unpublish_selected()
     qtbot.waitUntil(lambda: view.tree.topLevelItem(0).childCount() == 3, timeout=10000)
     assert "reste publié" in told[0]
@@ -823,14 +832,15 @@ def test_dns_checks_in_the_tunnels_tab(qtbot, gui, cf, monkeypatch):
     qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
     assert view.stat_hostnames.detail.text() == "1 DNS à corriger"
     bureau = view.tree.topLevelItem(0)
-    rows = {bureau.child(i).data(0, cloud_module.RULE_ROLE).hostname: bureau.child(i) for i in range(3)}
+    rows = {bureau.child(i).data(0, cards_module.RULE_ROLE).hostname: bureau.child(i) for i in range(3)}
     grafana = rows["grafana.exemple.fr"]
-    assert grafana.data(0, cloud_module.DNS_ROLE).state == "missing"
-    assert "DNS manquant" in grafana.data(0, cloud_module.Qt.ItemDataRole.AccessibleTextRole)
+    assert grafana.data(0, cards_module.DNS_ROLE).state == "missing"
+    assert "DNS manquant" in grafana.data(0, Qt_.ItemDataRole.AccessibleTextRole)
     assert "Corriger le DNS…" not in [a.text() for a in view.tree_menu(rows["ssh.exemple.fr"]).actions()]
     fix = next(a for a in view.tree_menu(grafana).actions() if a.text() == "Corriger le DNS…")
     told: list[str] = []
     monkeypatch.setattr(cloud_module, "confirm", lambda _p, _h, text, *_a: told.append(text) or True)
+    monkeypatch.setattr(tunnels_module, "confirm", lambda _p, _h, text, *_a: told.append(text) or True)
     fix.trigger()
     qtbot.waitUntil(lambda: any(r["name"] == "grafana.exemple.fr" for r in cf.state.dns["z1"]), timeout=10000)
     assert "ne mène nulle part" in told[0] and "visera ce tunnel (bureau)" in told[0]
@@ -902,7 +912,7 @@ def test_test_from_internet(qtbot, gui, cf, monkeypatch):
         calls.append((hostname, kwargs.get("token")))
         return HostProbe("origin_down", 502)
 
-    monkeypatch.setattr(cloud_module, "probe_hostname_async", fake_probe)
+    monkeypatch.setattr(tunnels_module, "probe_hostname_async", fake_probe)
     notes: list[tuple[str, str]] = []
     monkeypatch.setattr(ctx, "notify", lambda level, text, **_k: notes.append((level, text)))
     token = ServiceToken(name="Robot", client_id="robot.access")
@@ -927,5 +937,5 @@ def test_test_from_internet(qtbot, gui, cf, monkeypatch):
     view.test_from_internet(IngressRule("ssh.exemple.fr", "ssh://localhost:22"))
     qtbot.waitUntil(lambda: len(notes) == 2, timeout=5000)
     assert calls[-1] == ("ssh.exemple.fr", None) and "Service non HTTP" in notes[-1][1]
-    menu = [a.text() for a in view.tree_menu(cloud_module.QTreeWidgetItem()).actions()]
+    menu = [a.text() for a in view.tree_menu(QTreeWidgetItem_()).actions()]
     assert menu == []  # ni tunnel ni règle : menu vide

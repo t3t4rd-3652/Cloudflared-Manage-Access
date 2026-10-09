@@ -37,9 +37,16 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
   destinataire s'il l'a déjà.
 - **Palette Ctrl+K** : tunnels, noms d'hôte, applications Access et service tokens du compte lu, avec un saut vers
   l'objet.
-- **Plusieurs jetons d'API** (plusieurs comptes ou plusieurs connexions Cloudflare) : choix du jeton dans l'en-tête
-  de la vue Cloudflare, « Ajouter un jeton… » avec un nom ; chaque jeton retrouve son dernier compte. Le jeton
-  existant devient « Principal », sans migration.
+- **Plusieurs jetons d'API** (plusieurs comptes ou plusieurs connexions Cloudflare) : « Outils › Ajouter un jeton
+  d'API… » avec un nom, puis choix du jeton dans l'en-tête de la vue Cloudflare ; chaque jeton retrouve son dernier
+  compte. Le jeton existant devient « Principal », sans migration.
+- **Guide d'utilisation** par tâche ([docs/GUIDE.md](docs/GUIDE.md)) : accès RDP, publication, panne d'un service,
+  renouvellement d'un token, réseaux privés, changements du compte, partage, plusieurs comptes.
+
+### Modifié
+- Les messages longs passent à la ligne dans l'historique des notifications.
+- Vues découpées : onglet Tunnels (`cloud/tunnels_tab.py`), éditeur de profil (`profile_editor.py`), mises à jour
+  des Paramètres (`settings_updates.py`). `cloud/view.py` passe de 1 159 à 615 lignes.
 
 ## [2.9.0] - 2026-10-09
 

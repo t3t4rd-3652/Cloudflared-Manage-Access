@@ -28,6 +28,8 @@ class AccountTools:
         self.menu.addAction(tr("Journal d'audit du compte…"), self.open_audit_log)
         self.menu.addAction(tr("Instantanés de la configuration…"), self.open_snapshots)
         self.menu.addAction(tr("Permissions du jeton…"), self.open_permissions)
+        self.menu.addSeparator()
+        self.menu.addAction(tr("Ajouter un jeton d'API…"), view.start_add_token)
         self.button.setMenu(self.menu)
 
     def account(self) -> Account | None:
