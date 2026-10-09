@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -26,43 +25,30 @@ from PySide6.QtWidgets import (
 )
 
 from cma import APP_NAME, __version__
-from cma.core.availability import AvailabilityLog
 from cma.core.cfapi import Tunnel
 from cma.core.commands import execute
 from cma.core.events import Notification
 from cma.core.expiry import TokenExpiry, expiring_tokens
-from cma.core.hostprobe import HostProbe
 from cma.core.links import Link, LinkError, is_link, parse_link, profile_from_share, read_share
 from cma.core.models import Config
-from cma.core.monitoring import (
-    Event,
-    is_muted,
-    record_services,
-    record_tunnels,
-    send_events,
-    service_key,
-    tunnel_key,
-)
 from cma.core.secrets import EncryptedFileSecretStore
-from cma.core.servicewatch import ServiceChange, ServiceResult, ServiceTarget, troubled_services_summary
+from cma.core.servicewatch import ServiceResult, troubled_services_summary
 from cma.core.sessions import SessionInfo, SessionKind, SessionState
-from cma.core.tunnelwatch import TunnelChange, TunnelWatch, troubled_summary
+from cma.core.tunnelwatch import troubled_summary
 from cma.i18n import tr
 from cma.ui.a11y import apply_accessible_names
 from cma.ui.context import GuiContext
-from cma.ui.dialogs.diagnose import open_diagnosis
-from cma.ui.dialogs.history import show_history
 from cma.ui.dialogs.links import ask_import_shared, ask_link_connect
 from cma.ui.dialogs.notifications import show_notifications
 from cma.ui.dialogs.palette import CommandPalette, PaletteEntry
-from cma.ui.dialogs.workspaces import launch_workspace
 from cma.ui.format import expiry_alert
 from cma.ui.icons import app_icon, set_icon, token_icon
 from cma.ui.lock import IdleWatcher, LockPanel
+from cma.ui.monitor import Monitor
 from cma.ui.notices import NoticeLog
-from cma.ui.states import RUNNING, TO_CHECK, sessions_summary
+from cma.ui.palette_entries import build_palette_entries
+from cma.ui.states import TO_CHECK, sessions_summary
 from cma.ui.views.cloud import CloudView
-from cma.ui.views.cloud.search import palette_entries as cloud_palette_entries
 from cma.ui.views.dashboard import DashboardView
 from cma.ui.views.logs import LogsView
 from cma.ui.views.profiles import CloudflareProfilesView
@@ -107,9 +93,6 @@ def explain_tray(parent: QWidget, text: str) -> None:
 
 
 log = logging.getLogger(__name__)
-
-TUNNEL_WATCH_MS = 5 * 60 * 1000  # relevé de l'état des tunnels du compte
-SERVICE_WATCH_MS = 15 * 60 * 1000  # test des services publiés depuis Internet
 
 
 class MainWindow(QMainWindow):
@@ -243,25 +226,20 @@ class MainWindow(QMainWindow):
         self._expiry_timer.timeout.connect(self.check_token_expiry)
         self._expiry_timer.start()
         QTimer.singleShot(5_000, self.check_token_expiry)
-        # Tunnels du compte Cloudflare : relevé peu après l'affichage, puis toutes les 5 minutes.
-        self.tunnel_watch = TunnelWatch()
-        self._watched_account: str | None = None
-        self._tunnel_check_running = False
-        self._tunnel_timer = QTimer(self)
-        self._tunnel_timer.setInterval(TUNNEL_WATCH_MS)
-        self._tunnel_timer.timeout.connect(self.check_tunnels)
-        self._tunnel_timer.start()
-        QTimer.singleShot(20_000, self.check_tunnels)
-        # Journal de disponibilité (incidents, taux), partagé avec la tâche planifiée.
-        self.availability = AvailabilityLog(ctx.paths.data_dir / "availability.json")
-        # Services publiés : test complet peu après, puis toutes les 15 minutes.
-        self._service_check_running = False
-        self._service_account: str | None = None
-        self._service_timer = QTimer(self)
-        self._service_timer.setInterval(SERVICE_WATCH_MS)
-        self._service_timer.timeout.connect(self.check_services)
-        self._service_timer.start()
-        QTimer.singleShot(60_000, self.check_services)
+        # Surveillance du compte (tunnels, services, disponibilité, alertes) : objet à part (ADR 0001). Les anciens
+        # noms restent sur la fenêtre pour la palette, la zone de notification et les tests.
+        self.monitor = Monitor(
+            ctx, self, open_tunnel=lambda tunnel, diagnose: self.open_tunnel(tunnel, diagnose=diagnose)
+        )
+        self.monitor.notice.connect(lambda level, text, action: self.notify(level, text, action=action))
+        self.monitor.troubled.connect(self._on_troubled)
+        self.monitor.services_checked.connect(self.cloud.show_service_results)
+        self.tunnel_watch = self.monitor.tunnel_watch
+        self.availability = self.monitor.availability
+        self.check_tunnels = self.monitor.check_tunnels
+        self.check_services = self.monitor.check_services
+        self.report_tunnel_changes = self.monitor.report_tunnel_changes
+        self.report_service_changes = self.monitor.report_service_changes
         # Sortie de veille, retour du réseau : les connexions en attente repartent sans attendre leur délai.
         self.wake = WakeWatcher(self)
         self.wake.resumed.connect(self.resume_sessions)
@@ -343,154 +321,8 @@ class MainWindow(QMainWindow):
         CommandPalette(self, self.palette_entries()).exec()
 
     def palette_entries(self) -> list[PaletteEntry]:
-        """Toutes les commandes de la palette Ctrl+K, le verbe suivant l'état réel de chaque accès."""
-        config = self.ctx.config()
-        dashboard = self.dashboard
-        running = {r.info.profile_id for r in dashboard.cards.values() if r.info.state in RUNNING}
-        entries: list[PaletteEntry] = []
-        section = tr("Accès Cloudflare")
-        for profile in sorted(config.cloudflare_profiles, key=lambda p: (not p.favorite, p.name.lower())):
-            if profile.id in running:
-                entries.append(
-                    PaletteEntry(
-                        section,
-                        tr("Arrêter « {name} »").format(name=profile.name),
-                        lambda p=profile: self.ctx.run(self.ctx.manager.stop_profile(p.id)),
-                        profile.hostname,
-                        "player-stop-filled",
-                        profile.group,
-                    )
-                )
-            else:
-                entries.append(
-                    PaletteEntry(
-                        section,
-                        tr("Connecter « {name} »").format(name=profile.name),
-                        lambda p=profile: dashboard.start_cloudflare(p.id),
-                        profile.hostname,
-                        "player-play-filled",
-                        profile.group,
-                    )
-                )
-            entries.append(
-                PaletteEntry(
-                    section,
-                    tr("Diagnostiquer « {name} »").format(name=profile.name),
-                    lambda p=profile: open_diagnosis(self, self.ctx, p.id),
-                    profile.hostname,
-                    "bug",
-                    profile.group,
-                )
-            )
-            entries.append(
-                PaletteEntry(
-                    section,
-                    tr("Modifier « {name} »").format(name=profile.name),
-                    lambda p=profile: self.open_profile(p.id),
-                    profile.hostname,
-                    "pencil",
-                    profile.group,
-                )
-            )
-        section = tr("Serveurs SSH")
-        for server in sorted(config.ssh_profiles, key=lambda p: (not p.favorite, p.name.lower())):
-            target = f"{server.user}@{server.host}" if server.host else server.user
-            entries.append(
-                PaletteEntry(
-                    section,
-                    tr("Ouvrir le serveur « {name} »").format(name=server.name),
-                    lambda s=server: self.open_ssh_server(s.id),
-                    target,
-                    "server",
-                    server.group,
-                )
-            )
-            for forward in server.saved_forwards:
-                name = f"{server.name} › {forward.short_label}"
-                entries.append(
-                    PaletteEntry(
-                        section,
-                        tr("Connecter « {name} »").format(name=name),
-                        lambda s=server, f=forward: dashboard.start_forward(s.id, f),
-                        forward.describe(),
-                        "arrows-right-left",
-                        server.group,
-                    )
-                )
-        section = tr("Groupes et espaces de travail")
-        if config.favorite_items():
-            entries.append(
-                PaletteEntry(
-                    section, tr("Connecter tous les favoris"), dashboard.launch_favorites, icon="star"
-                )
-            )
-        for workspace in sorted(config.workspaces, key=lambda w: w.name.lower()):
-            entries.append(
-                PaletteEntry(
-                    section,
-                    tr("Connecter l'espace « {name} »").format(name=workspace.name),
-                    lambda w=workspace: launch_workspace(self.ctx, w),
-                    tr("{n} élément(s)").format(n=len(workspace.items)),
-                    "layout-dashboard",
-                )
-            )
-        for group in sorted({p.group for p in config.cloudflare_profiles if p.group}, key=str.lower):
-            entries.append(
-                PaletteEntry(
-                    section,
-                    tr("Connecter le groupe « {name} »").format(name=group),
-                    lambda g=group: dashboard.start_group(g),
-                    icon="player-play-filled",
-                )
-            )
-        section = tr("Actions")
-        entries += [
-            PaletteEntry(
-                section,
-                tr("Nouvel accès Cloudflare"),
-                self.new_cloudflare_profile,
-                icon="plus",
-            ),
-            PaletteEntry(
-                section,
-                tr("Nouveau serveur SSH"),
-                self.new_ssh_server,
-                icon="plus",
-            ),
-            PaletteEntry(
-                section,
-                tr("Gérer les espaces de travail…"),
-                dashboard.manage_workspaces,
-                icon="layout-dashboard",
-            ),
-            PaletteEntry(
-                section,
-                tr("Historique des sessions…"),
-                lambda: show_history(self, self.ctx),
-                icon="history",
-            ),
-            PaletteEntry(section, tr("Notifications récentes…"), self.open_notifications, icon="bell"),
-        ]
-        if self.can_lock():
-            entries.append(PaletteEntry(section, tr("Verrouiller CMA"), self.lock_now, "Ctrl+L", "lock"))
-        if running:
-            entries.append(
-                PaletteEntry(
-                    section,
-                    tr("Tout arrêter"),
-                    lambda: self.ctx.run(self.ctx.manager.stop_all()),
-                    icon="player-stop-filled",
-                )
-            )
-        entries += cloud_palette_entries(self.cloud, lambda: self.show_view("cloud"))
-        section = tr("Aller à")
-        for key, item in self._nav_items.items():
-            entries.append(
-                PaletteEntry(
-                    section, item.text(), lambda k=key: self.show_view(k), icon="arrow-right", keywords=key
-                )
-            )
-        return entries
+        """Toutes les commandes de la palette Ctrl+K (`cma.ui.palette_entries`)."""
+        return build_palette_entries(self)
 
     def current_view_key(self) -> str:
         item = self.nav.currentItem()
@@ -550,69 +382,6 @@ class MainWindow(QMainWindow):
         self._show_troubled_tunnels()  # la carte « Santé du compte » montre aussi les tokens à renouveler
         return fresh
 
-    def check_tunnels(self) -> bool:
-        """Relève l'état des tunnels (une requête) ; renvoie False quand la surveillance n'a rien à faire."""
-        settings = self.ctx.config().settings
-        admin = self.ctx.manager.cloudflare
-        account = settings.cloudflare_account_id
-        if self._tunnel_check_running or not settings.watch_tunnels or not account or not admin.has_token():
-            if self.tunnel_watch.troubled and not self._tunnel_check_running:
-                # Surveillance coupée ou jeton oublié : un ancien relevé ne doit pas rester affiché.
-                self.tunnel_watch.forget()
-                self._show_troubled_tunnels()
-            return False
-        if account != self._watched_account:
-            self.tunnel_watch.forget()
-            self._watched_account = account
-        self._tunnel_check_running = True
-
-        def done(tunnels: list[Tunnel]) -> None:
-            self._tunnel_check_running = False
-            if self.ctx.config().settings.cloudflare_account_id == account:
-                self.report_tunnel_changes(self.tunnel_watch.update(tunnels))
-                self._record(record_tunnels(self.availability, self.ctx.config(), tunnels))
-                self._show_troubled_tunnels()
-
-        def failed(error: BaseException) -> None:
-            # Réseau coupé, jeton révoqué… : pas d'alerte toutes les 5 minutes, la vue Cloudflare le dira.
-            self._tunnel_check_running = False
-            log.info("Surveillance des tunnels : relevé impossible (%s)", error)
-
-        self.ctx.run(admin.tunnel_states(), done, failed)
-        return True
-
-    def check_services(self) -> bool:
-        """Teste depuis Internet les noms d'hôte HTTP des tunnels en service ; False quand il n'y a rien à faire."""
-        settings = self.ctx.config().settings
-        admin = self.ctx.manager.cloudflare
-        account = settings.cloudflare_account_id
-        watch = self.ctx.services
-        if self._service_check_running or not settings.watch_services or not account or not admin.has_token():
-            if watch.troubled and not self._service_check_running:
-                watch.forget()
-                self._show_troubled_tunnels()
-            return False
-        if account != self._service_account:
-            watch.forget()
-            self._service_account = account
-        self._service_check_running = True
-
-        def done(results: list[tuple[ServiceTarget, HostProbe]]) -> None:
-            self._service_check_running = False
-            if self.ctx.config().settings.cloudflare_account_id != account:
-                return
-            self.report_service_changes(watch.update(results))
-            self._record(record_services(self.availability, self.ctx.config(), results))
-            self._show_troubled_tunnels()
-            self.cloud.show_service_results()
-
-        def failed(error: BaseException) -> None:
-            self._service_check_running = False
-            log.info("Surveillance des services : relevé impossible (%s)", error)
-
-        self.ctx.run(admin.check_services(), done, failed)
-        return True
-
     def resume_sessions(self, reason: str) -> None:
         """Relance les sessions en attente ou abandonnées, et refait les relevés du compte (après la veille, ils
         datent)."""
@@ -627,48 +396,15 @@ class MainWindow(QMainWindow):
                 self.notify("info", text.format(n=count))
 
         self.ctx.run(self.ctx.manager.resume_after_network(), done)
-        QTimer.singleShot(15_000, self.check_tunnels)
-
-    def _record(self, events: list[Event]) -> None:
-        """Journal enregistré ; les nouveaux incidents et les retours partent vers les canaux d'alerte."""
-        try:
-            self.availability.save()
-        except OSError as exc:
-            log.warning("Journal de disponibilité non enregistré : %s", exc)
-        config = self.ctx.config()
-        if not events or not config.settings.alert_channels:
-            return
-
-        async def send() -> list[str]:
-            return await asyncio.to_thread(send_events, events, config, self.ctx.core.secrets)
-
-        def done(errors: list[str]) -> None:
-            for error in errors:
-                log.warning("Alerte non envoyée : %s", error)
-            if errors:
-                self.notify("warning", tr("Alerte non envoyée : {error}").format(error=errors[0]))
-
-        self.ctx.run(send(), done)
-
-    def report_service_changes(self, changes: list[ServiceChange]) -> None:
-        config = self.ctx.config()
-        for change in changes:
-            if is_muted(config, service_key(change.target), change.target.tunnel_id):
-                continue
-            action = None if change.recovered else (tr("Voir…"), lambda: self.open_tunnel(None))
-            self.notify(change.level, change.message(), action=action)
+        QTimer.singleShot(15_000, self.monitor.check_tunnels)
 
     def _show_troubled_tunnels(self) -> None:
+        """Relit les pannes en cours (sourdine, réglages, échéances de tokens) ; voir `_on_troubled`."""
+        self.monitor.refresh()
+
+    def _on_troubled(self, troubled: list[Tunnel], services: list[ServiceResult]) -> None:
         """« Cloudflare · 1 ! » dans la navigation tant qu'un tunnel ou un service publié est en panne ; la zone de
-        notification suit."""
-        # Ce qui est en sourdine (maintenance) ne compte pas comme une panne à signaler.
-        config = self.ctx.config()
-        troubled = [t for t in self.tunnel_watch.troubled if not is_muted(config, tunnel_key(t.id))]
-        services: list[ServiceResult] = [
-            r
-            for r in self.ctx.services.troubled
-            if not is_muted(config, service_key(r.target), r.target.tunnel_id)
-        ]
+        notification et la carte « Santé du compte » suivent."""
         item = self._nav_items.get("cloud")
         if item is not None:
             base = str(item.data(Qt.ItemDataRole.UserRole + 1)[0])
@@ -680,19 +416,17 @@ class MainWindow(QMainWindow):
             item.setToolTip(" · ".join(parts) or base)
         self.tunnels_troubled.emit(troubled)
         self.services_troubled.emit(services)
-        self.dashboard.health.update_state(troubled, services, expiring_tokens(config, datetime.now(UTC)))
+        self.dashboard.health.update_state(
+            troubled, services, expiring_tokens(self.ctx.config(), datetime.now(UTC))
+        )
 
-    def report_tunnel_changes(self, changes: list[TunnelChange]) -> None:
-        config = self.ctx.config()
-        for change in changes:
-            if is_muted(config, tunnel_key(change.tunnel.id)):
-                continue
-            action = (
-                None
-                if change.recovered
-                else (tr("Diagnostiquer…"), lambda t=change.tunnel: self.open_tunnel(t, diagnose=True))
-            )
-            self.notify(change.level, change.message(), action=action)
+    @property
+    def _tunnel_check_running(self) -> bool:
+        return self.monitor.tunnel_check_running
+
+    @property
+    def _service_check_running(self) -> bool:
+        return self.monitor.service_check_running
 
     def open_tunnel(self, tunnel: Tunnel | None, *, diagnose: bool = False) -> None:
         """Vue Cloudflare, onglet Tunnels, relue ; avec `diagnose`, l'état des connecteurs du tunnel s'ouvre."""

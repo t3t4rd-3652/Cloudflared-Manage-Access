@@ -429,7 +429,9 @@ async def test_resume_after_network(manager, store):
     session = await wait_state(manager, info.id, {SessionState.RECONNECTING})
     session.backoff.failures = 5  # le prochain délai serait de 32 s
     FAKE_ENV["FAKE_CF_MODE"] = "ok"
-    given_up = add(store, CloudflareProfile(name="Abandon", hostname="b.ex.fr", local_port=free_port()))
+    # Le port de la session en panne est libre entre deux tentatives : en choisir un autre, explicitement.
+    other = find_free_port(port_range=(30000, 30999), avoid={waiting.local_port or 0})
+    given_up = add(store, CloudflareProfile(name="Abandon", hostname="b.ex.fr", local_port=other))
     abandoned = await manager.start_cloudflare(given_up.id)
     stale = await wait_state(manager, abandoned.id, {SessionState.LISTENING})
     stale.gave_up = True

@@ -1,7 +1,7 @@
 # Plan du projet
 
 État au 2026-10-09, version **2.10.0** (P9 à P12 : surveillance des services, compte Cloudflare plus complet, usage quotidien, qualité
-et guide) ; P13 à P16 réalisés, non publiés. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+et guide) ; P13 à P16 réalisés, non publiés ; P17 à P22 en cours. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -408,6 +408,86 @@ jetable dans 198.18.250.0/24, Access exigé au niveau du tunnel si la permission
 2. Noms accessibles vérifiés sur les boîtes ajoutées depuis la 2.9.
 3. Recette en écriture étendue (routes privées, Access exigé au niveau du tunnel, ménage).
 
+### P17 — Architecture : la surveillance hors de la fenêtre, carte des modules (2.11)
+
+Statut : FAIT
+
+Réalisé : `ui/monitor.py` et `ui/palette_entries.py` sortis de `main_window.py` (990 → 728 lignes), test du
+`Monitor` sans fenêtre, `ARCHITECTURE.md` complété (modules et schéma de la surveillance). Un test instable de la
+reprise réseau corrigé au passage (deux sessions pouvaient recevoir le même port).
+
+- **Objectif** : `main_window.py` (990 lignes) ne porte plus la surveillance ; la documentation d'architecture décrit
+  les modules ajoutés depuis la 2.3.
+- **Tâches** : `cma.ui.monitor.Monitor` (minuteurs, relevés, journal, alertes, sourdine, signaux) selon
+  l'[ADR 0001](adr/0001-surveillance-hors-de-la-fenetre.md) ; délégations depuis la fenêtre ; `docs/ARCHITECTURE.md`
+  complété (surveillance, sécurité, outils du compte, liens, import SSH).
+- **Fichiers** : `src/cma/ui/monitor.py` (nouveau), `src/cma/ui/main_window.py`, `docs/ARCHITECTURE.md`, tests.
+- **Critère de fin** : `main_window.py` sous 800 lignes ; suite complète verte ; un test de `Monitor` sans fenêtre.
+- **Risques** : ordre des connexions de signaux (badge, zone de notification) ; tests qui remplacent des méthodes
+  de la fenêtre.
+
+### P18 — Disponibilité : graphique et rapport (2.11)
+
+Statut : À FAIRE
+
+- **Objectif** : voir d'un coup d'œil l'évolution d'un service, et remettre un rapport de disponibilité.
+- **Tâches** : graphique par jour (taux de disponibilité en barres, temps de réponse en courbe) dans la boîte
+  Disponibilité, dessiné avec Qt sans dépendance ; « Exporter le rapport… » en CSV et en HTML autonome
+  (imprimable) sur 7, 30 ou 90 jours ; `cma availability [--days N] [--json]`.
+- **Fichiers** : `src/cma/core/availability.py` (séries par jour, rapport), `src/cma/ui/views/cloud/availability.py`,
+  `src/cma/cli.py`, tests.
+- **Critère de fin** : tests du rapport (CSV, HTML, JSON) et du graphique ; capture vérifiée en clair et en sombre.
+- **Risques** : HTML à échapper (noms d'hôte) ; jours sans relevé à distinguer d'une panne.
+
+### P19 — Automatisation en ligne de commande (2.11)
+
+Statut : À FAIRE
+
+- **Objectif** : ce que fait l'interface pour la sécurité et les alertes, faisable depuis un script ou un
+  planificateur.
+- **Tâches** : `cma review [--json]` (bilan de sécurité, code 2 si un constat élevé non ignoré),
+  `cma alerts test` (un test vers chaque canal actif, code 1 si un canal échoue) ; README.
+- **Fichiers** : `src/cma/cli.py`, `README.md`, tests d'intégration contre le faux serveur.
+- **Critère de fin** : codes de retour et sorties JSON testés.
+- **Risques** : coffre portable non déverrouillé en ligne de commande (même repli que `cma tunnels`).
+
+### P20 — Du serveur SSH à Cloudflare : publier un port découvert (2.11)
+
+Statut : À FAIRE
+
+- **Objectif** : un port trouvé sur un serveur (onglet Ports) se publie en un clic sur un tunnel du compte.
+- **Tâches** : « Publier sur Cloudflare… » sur un port découvert : boîte de publication préremplie (service
+  `http://localhost:<port>` ou le schéma détecté, nom d'hôte proposé d'après le conteneur ou le service) ; message
+  clair si aucun jeton d'API.
+- **Fichiers** : `src/cma/ui/views/ssh/ports_tab.py`, `src/cma/ui/views/cloud/dialogs.py` (valeurs initiales), tests.
+- **Critère de fin** : test d'interface de bout en bout contre le faux serveur (port → règle publiée).
+- **Risques** : cloudflared doit tourner sur ce serveur pour que `localhost` soit le bon hôte : la boîte le dit.
+
+### P21 — Expérience : « Quoi de neuf », raccourcis, démarrage (2.11)
+
+Statut : À FAIRE
+
+- **Objectif** : après une mise à jour, savoir ce qui a changé ; retrouver les raccourcis ; démarrer au moins aussi
+  vite.
+- **Tâches** : boîte « Quoi de neuf » une fois par nouvelle version (section du CHANGELOG, embarqué dans les
+  paquets) et depuis l'aide ; « Raccourcis clavier » (F1, palette) ; outils du compte importés à la demande ;
+  mesure du démarrage avant et après.
+- **Fichiers** : `src/cma/ui/dialogs/whatsnew.py`, `src/cma/core/changelog.py`, `packaging/` (CHANGELOG embarqué),
+  `src/cma/ui/main_window.py`, tests.
+- **Critère de fin** : tests de lecture du CHANGELOG ; médiane de `startup_benchmark.py` pas plus lente qu'avant.
+- **Risques** : CHANGELOG absent d'un paquet (repli silencieux) ; nouvelle installation (rien à montrer).
+
+### P22 — Documentation et captures (2.11)
+
+Statut : À FAIRE
+
+- **Objectif** : guide, README et captures à jour de P13 à P21.
+- **Tâches** : captures régénérées (carte « Santé du compte », bilan, disponibilité) ; guide (rapports, automatisation,
+  publication depuis SSH) ; README ; SECURITE.
+- **Fichiers** : `docs/`, `README.md`, `scripts/capture_screenshots.py`.
+- **Critère de fin** : captures regardées en clair et en sombre ; liens du guide valides.
+- **Risques** : aucun sur le code.
+
 ### Dette technique à surveiller
 
 - La couverture du cœur est juste au-dessus du seuil : chaque nouveau module de `cma.core` arrive avec ses tests.
@@ -418,3 +498,21 @@ jetable dans 198.18.250.0/24, Access exigé au niveau du tunnel si la permission
   découper seulement si une vue grossit encore.
 - La suite de tests tourne en parallèle (pytest-xdist) en local, sous Windows et macOS en CI ; Linux reste en
   série pour garder la pile d'un éventuel plantage natif de Qt.
+
+## Progression
+
+| Phase | Statut | Commit | Tests | Date |
+|---|---|---|---|---|
+| P13 | FAIT | aa772f8 | 486 ✓ | 2026-10-09 |
+| P14 | FAIT | 1d7c59d | 497 ✓ | 2026-10-09 |
+| P15 | FAIT | c6a10e3 | 504 ✓ | 2026-10-09 |
+| P16 | FAIT | 595f332 | 505 ✓ | 2026-10-09 |
+| P17 | EN COURS | — | — | — |
+| P18 | À FAIRE | — | — | — |
+| P19 | À FAIRE | — | — | — |
+| P20 | À FAIRE | — | — | — |
+| P21 | À FAIRE | — | — | — |
+| P22 | À FAIRE | — | — | — |
+
+**Prochaine action exacte :** créer `src/cma/ui/monitor.py` (P17) en y déplaçant `check_tunnels`, `check_services`,
+`_record`, `report_*_changes` et `_show_troubled_tunnels` de `src/cma/ui/main_window.py`.

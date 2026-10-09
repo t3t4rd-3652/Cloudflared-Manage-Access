@@ -40,7 +40,13 @@ Deux règles structurent le code :
 | `src/cma/core/cloudflared/` | Commande sans shell, analyse des journaux, session, binaire et téléchargement vérifié. |
 | `src/cma/core/ssh/` | Connexions asyncssh (rebond ProxyJump compris), clés d'hôte, clés, redirections locales, inverses et SOCKS 5, découverte de ports (Linux et Windows), transfert de fichiers SFTP (`sftp.py`). |
 | `src/cma/core/cfapi.py` | Client de l'API Cloudflare v4 : comptes, zones, tunnels, DNS, Access, service tokens. |
-| `src/cma/core/cfadmin.py` | Relie l'API à la configuration et au coffre : import de profils, tokens, publication, tunnels. |
+| `src/cma/core/cfadmin.py` | Relie l'API à la configuration et au coffre : import de profils, tokens, publication, tunnels, jetons d'API nommés, lecture du compte en parallèle. |
+| `src/cma/core/dnscheck.py`, `hostprobe.py` | DNS des noms d'hôte publiés ; test d'un nom d'hôte depuis Internet (Access, vérification de navigateur, 1033, 502…). |
+| `src/cma/core/tunnelwatch.py`, `servicewatch.py` | Ce qui a changé d'un relevé à l'autre : tunnels (état de l'API), services publiés (tests depuis Internet). |
+| `src/cma/core/availability.py`, `alerts.py`, `monitoring.py` | Journal de disponibilité (incidents, taux, 90 jours), alertes vers ntfy, Slack, Teams, Discord ou un webhook, sourdine ; suites d'un relevé communes à l'interface et à la tâche planifiée. |
+| `src/cma/core/security.py` | Bilan de sécurité du compte (analyse pure) : constats, gravité, correction possible. |
+| `src/cma/core/privnet.py`, `audit.py`, `traffic.py`, `snapshot.py`, `permissions.py` | Outils du compte : réseaux privés (WARP), journal d'audit, trafic GraphQL, instantanés comparés, permissions du jeton vérifiées en lecture. |
+| `src/cma/core/links.py`, `sshconfig.py` | Liens `cma://` et profils partagés sans secret ; import de `~/.ssh/config`. |
 | `src/cma/core/policies.py` | Politiques Access : conversion depuis et vers l'API, saisie une règle par ligne. |
 | `src/cma/core/expiry.py` | Échéance des service tokens : dates de l'API, tokens à renouveler. |
 | `src/cma/core/tunnelhealth.py` | Diagnostic d'un tunnel d'après ses connecteurs. |
@@ -51,8 +57,10 @@ Deux règles structurent le code :
 | `src/cma/core/manager.py` | Orchestrateur : profils vers sessions, actions exposées à l'interface et à la CLI. |
 | `src/cma/core/engine.py` | Boucle asyncio dans un thread. |
 | `src/cma/core/instance.py` | Verrou d'instance unique et canal de commande local. |
-| `src/cma/platform/` | Job Object Windows, démarrage automatique, lanceurs (terminal, RDP, Compass). |
+| `src/cma/platform/` | Job Object Windows, démarrage automatique, lanceurs (terminal, RDP, Compass), tâche planifiée, notification système, liens `cma://`, nom du réseau Wi-Fi. |
 | `src/cma/ui/` | Interface : fenêtre, vues, boîtes de dialogue (palette Ctrl+K, espaces de travail, diagnostic), thème, verrouillage, zone de notification. |
+| `src/cma/ui/monitor.py`, `wake.py` | Surveillance du compte côté Qt (minuteurs, signaux ; [ADR 0001](adr/0001-surveillance-hors-de-la-fenetre.md)) ; sortie de veille et retour du réseau. |
+| `src/cma/ui/views/cloud/` | Vue Cloudflare : `view.py` (compte, en-tête, tuiles), onglets `tunnels_tab.py`, `apps_tab.py`, `tokens_tab.py`, menu Outils (`account_tools.py`) et ses boîtes. |
 | `src/cma/i18n.py`, `i18n_<code>.py` | Traduction : source en français, catalogues anglais, allemand et espagnol vérifiés par test, repli sur l'anglais. |
 | `server/` | `ports-report` (Linux), `ports-report.ps1` (Windows) et l'installeur du helper Docker. |
 | `src/cma/ui/a11y.py` | Noms accessibles déduits des formulaires, et contrôle automatique en test. |
@@ -98,6 +106,24 @@ Chaînage par Cloudflare : `SshConnectionManager` demande au `SessionManager` d'
 asyncssh et cryptography coûtent près de 400 ms à l'import et ne servent pas avant la première connexion SSH
 ou le premier export chiffré. Les modules SSH passent donc par un proxy (`cma.core.ssh._lazy`) qui les importe
 au premier usage, et l'application les précharge dans un thread 300 ms après l'affichage de la fenêtre.
+
+## Surveillance du compte
+
+```text
+Monitor (ui/monitor.py)                tâche planifiée (cma tunnels --notify, CMA fermé)
+  ├─ toutes les 5 min : tunnel_states()     ├─ tunnel_states() + check_services()
+  ├─ toutes les 15 min : check_services()   │
+  │   (jeton de la surveillance, lecture)   │
+  ▼                                         ▼
+TunnelWatch / ServiceWatch          core/monitoring.record_tunnels / record_services
+  (changements → notifications)        → availability.json (incidents, taux)
+  │                                    → send_events → canaux d'alerte (sauf sourdine)
+  ▼                                         │
+troubled(tunnels, services) ──► navigation « Cloudflare · N ! », zone de notification, carte « Santé du compte »
+```
+
+La tâche planifiée n'écrit le journal que si CMA est fermé ; elle s'en sert de mémoire pour ne prévenir qu'au début
+et à la fin d'une panne. Un objet en sourdine est relevé et journalisé, sans notification ni alerte.
 
 ## Threads
 
