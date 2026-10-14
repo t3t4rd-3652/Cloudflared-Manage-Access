@@ -39,7 +39,7 @@ def test_private_routes_and_warp_routing(cf, api):
     assert list_virtual_networks(api, "acc1")[0].is_default
     route = create_route(api, "acc1", "t1", "10.0.0.7/24", comment="LAN bureau")
     assert (route.network, route.tunnel_id, route.virtual_network_name) == ("10.0.0.0/24", "t1", "default")
-    create_route(api, "acc1", "t2", "192.168.50.23")
+    create_route(api, "acc1", "t2", "192.0.2.23")
     assert [r.network for r in list_routes(api, "acc1", "t1")] == ["10.0.0.0/24"]
     assert len(list_routes(api, "acc1")) == 2
     with pytest.raises(CloudflareApiError, match="already exists"):
@@ -290,6 +290,8 @@ async def test_cli_review_and_alerts(cf, admin, paths, secrets, store, capsys):
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_POST(self) -> None:
+            # Lire le corps avant de répondre : sinon, sous Windows, la fermeture envoie un RST au client.
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
             received.append(self.path)
             self.send_response(200 if self.path == "/ok" else 500)
             self.end_headers()

@@ -15,7 +15,7 @@ from typing import Any
 
 from cma import APP_NAME, __version__
 from cma.core.availability import AvailabilityLog, Incident, ReportRow, report
-from cma.i18n import tr
+from cma.i18n import get_language, tr
 
 
 def _percent(value: float | None) -> str:
@@ -135,7 +135,7 @@ def report_html(
         meta = f"{account} · {meta}"
     lines = [
         "<!doctype html>",
-        '<html lang="fr"><head><meta charset="utf-8">',
+        f'<html lang="{get_language()}"><head><meta charset="utf-8">',
         f"<title>{e(heading)}</title><style>{STYLE}</style></head><body>",
         f"<h1>{e(heading)}</h1>",
         f'<p class="meta">{e(meta)}</p>',

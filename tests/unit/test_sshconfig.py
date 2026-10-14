@@ -23,7 +23,7 @@ Host bastion
     IdentityFile ~/.ssh/id_bastion
 
 Host nas nas-alias
-    HostName 192.168.50.23
+    HostName 192.0.2.23
     User admin
     ProxyJump alice@bastion:2222
     ForwardAgent yes
@@ -65,7 +65,7 @@ def test_parse_ssh_config(tmp_path):
     bastion, nas, _alias, prod, _invalide, routeur = entries
     assert (bastion.target, bastion.user, bastion.port) == ("bastion.exemple.fr", "alice", 2222)
     assert bastion.identity.endswith("id_bastion") and "~" not in bastion.identity
-    assert (nas.target, nas.proxy_jump, nas.ignored) == ("192.168.50.23", "bastion", ["forwardagent"])
+    assert (nas.target, nas.proxy_jump, nas.ignored) == ("192.0.2.23", "bastion", ["forwardagent"])
     assert (prod.user, prod.cloudflare_hostname) == (
         "deploy",
         "ssh.exemple.fr",

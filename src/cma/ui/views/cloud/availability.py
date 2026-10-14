@@ -121,18 +121,22 @@ class UptimeChart(QWidget):
             painter.drawPolyline(points)
         painter.end()
 
+    def text_at(self, x: float) -> str | None:
+        """Détail du jour sous l'abscisse `x` (info-bulle du survol) ; None hors des barres."""
+        index = int(x / max(1.0, self.width() / max(1, len(self.series))))
+        if not 0 <= index < len(self.series):
+            return None
+        day = self.series[index]
+        if day.uptime is None:
+            return tr("{day} : aucun relevé").format(day=_day(day.day))
+        text = tr("{day} : {percent} · {n} tests").format(
+            day=_day(day.day), percent=percent(Stats(day.uptime, None, None, 1)), n=day.checks
+        )
+        return text + (f" · {day.mean_ms:.0f} ms" if day.mean_ms is not None else "")
+
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        index = int(event.position().x() / max(1.0, self.width() / max(1, len(self.series))))
-        if 0 <= index < len(self.series):
-            day = self.series[index]
-            if day.uptime is None:
-                text = tr("{day} : aucun relevé").format(day=_day(day.day))
-            else:
-                text = tr("{day} : {percent} · {n} tests").format(
-                    day=_day(day.day), percent=percent(Stats(day.uptime, None, None, 1)), n=day.checks
-                )
-                if day.mean_ms is not None:
-                    text += f" · {day.mean_ms:.0f} ms"
+        text = self.text_at(event.position().x())
+        if text is not None:
             QToolTip.showText(event.globalPosition().toPoint(), text, self)
         super().mouseMoveEvent(event)
 

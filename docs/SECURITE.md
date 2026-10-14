@@ -68,10 +68,10 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
 - Supprimer une application Access rend son nom d'hôte joignable sans authentification s'il est publié : la
   confirmation le dit. Supprimer un tunnel n'est possible qu'une fois son connecteur arrêté.
 - « Oublier le jeton… » le retire du coffre, après confirmation. Révoquez-le aussi dans le tableau de bord Cloudflare si besoin.
-- La ligne de commande (`cma tunnels`, `review`, `availability`, `snapshot`, `alerts test`) lit le jeton dans le coffre
-  (celui de la surveillance pour `cma tunnels`, le jeton actif pour le reste) ; elle n'en accepte aucun en argument
-  et ne l'affiche jamais. `cma review` ne fait que lire : les corrections du bilan se font dans l'interface, après
-  confirmation.
+- En ligne de commande, `cma tunnels` (jeton de la surveillance), `cma review` et `cma snapshot` (jeton actif)
+  lisent le jeton d'API dans le coffre ; `cma alerts test` y lit les adresses des canaux d'alerte ; `cma
+  availability` ne lit que `availability.json`. Aucune n'accepte de jeton en argument ni n'en affiche.
+  `cma review` ne fait que lire : les corrections du bilan se font dans l'interface, après confirmation.
 
 ## Mise à jour de CMA
 

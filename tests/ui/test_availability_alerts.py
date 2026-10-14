@@ -217,6 +217,23 @@ def test_availability_chart_and_export(qtbot, tmp_path, monkeypatch):
     from PySide6.QtTest import QTest
 
     QTest.mouseMove(dialog.chart, QPoint(dialog.chart.width() - 3, 30))
+    # Survol : le dernier jour (aujourd'hui) a ses tests ; hors des barres, rien.
+    chart = dialog.chart
+    last = chart.text_at(chart.width() - 3)
+    assert last is not None and "tests" in last and "%" in last
+    assert chart.text_at(chart.width() + 50) is None
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    event = QMouseEvent(
+        QMouseEvent.Type.MouseMove,
+        QPointF(chart.width() - 3, 30),
+        QPointF(chart.mapToGlobal(QPoint(chart.width() - 3, 30))),
+        Qt.MouseButton.NoButton,
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    chart.mouseMoveEvent(event)  # l'info-bulle s'affiche sans erreur
 
     html_path = tmp_path / "rapport.html"
     monkeypatch.setattr(availability_module, "ask_report_path", lambda _p, _d: html_path)

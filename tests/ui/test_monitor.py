@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from PySide6.QtWidgets import QApplication
+
 from cma.core.cfapi import Tunnel
 from cma.core.hostprobe import HostProbe
 from cma.core.monitoring import mute, tunnel_key
@@ -11,8 +13,12 @@ from cma.core.servicewatch import ServiceTarget
 from cma.ui.monitor import Monitor
 
 
-def test_monitor_alone(qtbot, gui, monkeypatch):
-    ctx, _window = gui
+def test_monitor_alone(qtbot, gui_context, monkeypatch):
+    ctx = gui_context
+    from cma.ui.main_window import MainWindow
+
+    # Aucune fenêtre principale : le Monitor se suffit à lui-même (ADR 0001).
+    assert not any(isinstance(w, MainWindow) for w in QApplication.topLevelWidgets())
     opened: list[tuple[object, bool]] = []
     monitor = Monitor(
         ctx, None, open_tunnel=lambda tunnel, diagnose: opened.append((tunnel, diagnose)), start=False

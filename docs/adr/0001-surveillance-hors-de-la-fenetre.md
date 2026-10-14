@@ -15,7 +15,8 @@ Un objet Qt dédié, `cma.ui.monitor.Monitor` (un `QObject` sans widget), porte 
 
 - ses minuteurs (tunnels toutes les 5 minutes, services toutes les 15), `check_tunnels` et `check_services` ;
 - `TunnelWatch`, le journal de disponibilité, l'envoi des alertes, le filtre de sourdine ;
-- des signaux : `tunnels_troubled`, `services_troubled`, `notice(level, text, action)` et `changed`.
+- des signaux : `troubled(tunnels, services)` (pannes à afficher, sourdine déduite), `notice(level, text,
+  action)` (notification à relayer) et `services_checked()` (un relevé des services vient d'aboutir).
 
 La fenêtre crée le `Monitor`, relaie ses signaux (navigation, zone de notification, carte de santé, bandeaux) et
 garde ses anciens noms (`window.check_tunnels`, `window.tunnel_watch`, `window.availability`…) par délégation,

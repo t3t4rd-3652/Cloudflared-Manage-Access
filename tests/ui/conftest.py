@@ -16,7 +16,8 @@ from cma.ui.theme import ThemeManager
 from tests.conftest import PersistentMemoryStore
 
 
-def build_gui(qapp, paths, prompter=None):
+def build_context(qapp, paths, prompter=None):
+    """Contexte graphique complet (moteur, pont, thème), sans fenêtre."""
     theme = ThemeManager(qapp)
     theme.set_theme(Theme.LIGHT)
     core = create_context(paths, prompter or NonInteractivePrompter(), secrets=PersistentMemoryStore())
@@ -25,9 +26,13 @@ def build_gui(qapp, paths, prompter=None):
     engine.start()
     bridge = EngineBridge(core.bus)
     core.store.add_listener(bridge.config_changed.emit)
-    ctx = GuiContext(
+    return GuiContext(
         core=core, engine=engine, runner=TaskRunner(engine), bridge=bridge, theme=theme, prompter=None
     )  # type: ignore[arg-type]
+
+
+def build_gui(qapp, paths, prompter=None):
+    ctx = build_context(qapp, paths, prompter)
     from cma.ui.main_window import MainWindow
 
     window = MainWindow(ctx)
@@ -40,6 +45,16 @@ def close_gui(ctx, window):
     ctx.engine.run_sync(ctx.core.manager.shutdown(), timeout=20)
     window.quitting = True
     window.close()
+    ctx.engine.stop()
+
+
+@pytest.fixture
+def gui_context(qapp, paths):
+    """Contexte graphique sans fenêtre principale (surveillance, boîtes isolées)."""
+    ctx = build_context(qapp, paths)
+    yield ctx
+    ctx.runner.close()
+    ctx.engine.run_sync(ctx.core.manager.shutdown(), timeout=20)
     ctx.engine.stop()
 
 

@@ -67,6 +67,18 @@ def test_report_formats(tmp_path):
     assert "Aucun incident sur la période." in empty
 
 
+def test_report_html_language(tmp_path):
+    from cma.i18n import get_language, set_language
+
+    previous = get_language()
+    set_language("de")
+    try:
+        page = report_html([], [], 7, now=NOW)
+    finally:
+        set_language(previous)
+    assert '<html lang="de">' in page and "Verfügbarkeit der letzten 7 Tage" in page
+
+
 def test_cli_availability(tmp_path, capsys):
     paths = AppPaths(tmp_path / "data")
     paths.ensure()

@@ -399,7 +399,7 @@ async def test_forward_reconnects_after_connection_loss(paths, store, secrets, b
     await wait_state(session, {SessionState.LISTENING})
     manager.ssh._connections[profile.id].abort()
     await wait_state(session, {SessionState.RECONNECTING})
-    await wait_state(session, {SessionState.LISTENING}, timeout=10)
+    await wait_state(session, {SessionState.LISTENING})
     # Le mot de passe est resté en mémoire pour la session : aucune nouvelle question.
     assert len(prompter.password_requests) == 1
     reader, writer = await asyncio.open_connection("127.0.0.1", local_port)

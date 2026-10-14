@@ -258,6 +258,14 @@ Tests et CI :
 - Comparer des chemins par leurs parties, pas par leur texte : le séparateur diffère sous Linux.
 - `pre-commit run --all-files` ne voit que les fichiers suivis : passer `--files` pour les nouveaux.
 - Ne jamais lancer `ruff --unsafe-fixes` : SIM118 a cassé `QStyleFactory.keys()`.
+- Un faux serveur HTTP de test (`http.server`) lit le corps de la requête avant de répondre
+  (`self.rfile.read(Content-Length)`) : sinon, sous Windows, la fermeture envoie un RST et le client reçoit
+  WinError 10053 ou 10054, de façon intermittente.
+- La CLI écrit dans une console UTF-8, mais une sortie redirigée sous Windows est en cp1252 : `cli.safe_output()`
+  (appelé par `run`) remplace l'impossible par « ? ». `capsys` capture en UTF-8 et ne voit pas ce cas : le tester
+  avec un `io.TextIOWrapper(..., encoding="cp1252")` (`test_redirected_output_never_breaks_on_symbols`).
+- Adresses d'exemple (tests, guide, captures) : `192.0.2.x` (RFC 5737), `10.0.0.x` ; jamais une adresse du réseau du
+  propriétaire.
 - En parallèle (`-n auto`), la machine est chargée : une poignée de main SSH vers le serveur de test peut dépasser
   10 s. Les attentes d'état des tests (`wait_state`, `wait_listening`) vont jusqu'à 45 s et rendent la main dès que
   l'état est atteint ; ne pas les raccourcir.

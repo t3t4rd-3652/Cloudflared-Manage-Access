@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import contextlib
 import getpass
+import io
 import json
 import sys
 from typing import Any
@@ -499,7 +500,16 @@ def connect_message(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def safe_output() -> None:
+    """Sortie redirigée vers un fichier ou un autre programme : sous Windows, elle est encodée en cp1252, qui ne
+    connaît ni « ✓ » ni « → ». Un caractère impossible devient « ? » au lieu d'arrêter la commande."""
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(errors="replace")
+
+
 def run(args: argparse.Namespace) -> int:
+    safe_output()
     paths = resolve_paths(args.data_dir)
     command = args.command
 

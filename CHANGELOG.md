@@ -51,9 +51,13 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
   permissions en lecture ; route jetable, Access exigé au niveau du tunnel et correction par le bilan en écriture.
 - La surveillance du compte (tunnels, services, journal de disponibilité, alertes) sort de la fenêtre principale
   dans `cma.ui.monitor` (ADR 0001) ; la palette de commandes dans `palette_entries.py`. `main_window.py` passe de
-  990 à 730 lignes.
+  990 à moins de 800 lignes.
 - Les outils du compte (bilan, disponibilité, journal d'audit, instantanés, permissions) ne sont chargés qu'à leur
-  ouverture : démarrage un peu plus rapide (médiane de 2,3 s à 2,1 s sur le poste de mesure).
+  ouverture, au lieu d'être importés au démarrage.
+
+### Corrigé
+- Une commande `cma` dont la sortie est redirigée (fichier, autre programme, tâche planifiée) ne s'arrête plus sur
+  un caractère que l'encodage de Windows ne connaît pas (un emoji dans un nom de profil, « ✓ ») : il devient « ? ».
 
 ## [2.10.0] - 2026-10-09
 

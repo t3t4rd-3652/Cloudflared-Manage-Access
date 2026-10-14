@@ -1,5 +1,6 @@
 """Ligne de commande (avec et sans instance), lanceurs externes, démarrage automatique."""
 
+import io
 import json
 import sys
 import time
@@ -7,6 +8,7 @@ import types
 
 import pytest
 
+import cma.cli as cli_module
 import cma.platform.autostart as autostart
 import cma.platform.launchers as launchers
 from cma.__main__ import main
@@ -107,6 +109,36 @@ def test_help_without_command(paths, capsys):
     args = build_parser().parse_args(["--data-dir", str(paths.data_dir)])
     args.command = "inconnue"
     assert run(args) == 2
+
+
+def test_account_commands_are_dispatched(paths, capsys, monkeypatch):
+    """`review`, `alerts test` et `availability` passent par l'aiguillage de `run`, options comprises. Le bilan et
+    les alertes sont remplacés : ils ouvriraient le vrai coffre du poste."""
+    calls: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(cli_module, "show_review", lambda _p, **kw: calls.append(("review", kw)) or 2)
+    monkeypatch.setattr(cli_module, "send_test_alerts", lambda _p, **kw: calls.append(("alerts", kw)) or 1)
+    assert cli(paths, "review", "--json", "--all") == 2
+    assert cli(paths, "alerts", "test") == 1
+    assert calls == [("review", {"as_json": True, "include_ignored": True}), ("alerts", {})]
+    assert cli(paths, "availability", "--days", "7", "--json") == 0
+    assert json.loads(capsys.readouterr().out)["days"] == 7
+
+
+def test_redirected_output_never_breaks_on_symbols(paths, monkeypatch):
+    """Sortie redirigée sous Windows (cp1252) : « → » ou « ✓ » deviennent « ? », la commande va au bout."""
+    from datetime import UTC, datetime
+
+    from cma.core.availability import AvailabilityLog
+
+    log = AvailabilityLog(paths.data_dir / "availability.json")
+    log.record_check("service:wiki", "wiki → test ✓", True, 12.0, datetime.now(UTC))
+    log.save()
+    raw = io.BytesIO()
+    stdout = io.TextIOWrapper(raw, encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", stdout)
+    assert cli(paths, "availability") == 0
+    stdout.flush()
+    assert "wiki ? test ?" in raw.getvalue().decode("cp1252")
 
 
 async def test_cli_prompter(monkeypatch, capsys):

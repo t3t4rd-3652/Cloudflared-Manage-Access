@@ -259,7 +259,8 @@ async def test_read_version_of_real_binary(paths):
     found = binary.detect(paths, None)
     if found is None:
         pytest.skip("cloudflared absent")
-    assert binary.parse_version(f"version {await binary.read_version(found)}")
+    # 60 s : sous la charge des tests en parallèle, le premier lancement de cloudflared dépasse parfois 15 s.
+    assert binary.parse_version(f"version {await binary.read_version(found, timeout=60)}")
 
 
 async def test_read_version_of_missing_binary(tmp_path):

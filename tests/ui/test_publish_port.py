@@ -34,7 +34,7 @@ def test_publish_a_discovered_port(qtbot, gui, cf, monkeypatch):
     ctx, window = gui
     notes: list[str] = []
     window.banners.show_message = lambda _level, text, **_k: notes.append(text)  # type: ignore[method-assign]
-    nas = SshProfile(name="NAS", host="192.168.50.23", user="admin")
+    nas = SshProfile(name="NAS", host="192.0.2.23", user="admin")
     ctx.update_config(lambda c: c.ssh_profiles.append(nas))
     port = RemotePort(3000, ("127.0.0.1",), container="grafana", scheme="http", http_code=200)
     window.ssh.discoveries[nas.id] = (DiscoveryResult(ports=[port]), datetime.now())

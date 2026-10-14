@@ -138,7 +138,7 @@ Les appareils munis du client WARP de votre organisation peuvent joindre des adr
 à travers un tunnel, sans nom d'hôte publié.
 
 1. **Cloudflare › Tunnels**, clic droit sur le tunnel › **Réseaux privés…**
-2. Saisissez la plage (`10.0.0.0/24`, ou une seule adresse `192.168.50.23`), le réseau virtuel et un commentaire,
+2. Saisissez la plage (`10.0.0.0/24`, ou une seule adresse `10.0.0.20`), le réseau virtuel et un commentaire,
    puis **Ajouter la route**. Le routage WARP du tunnel est activé avec la première route.
 
 ![Réseaux privés d'un tunnel](captures/guide-reseaux-prives.png)
@@ -210,7 +210,8 @@ dernier compte, et la surveillance suit le jeton choisi.
 La commande `cma` (installée avec l'application) lit les mêmes données que l'interface, avec le jeton d'API actif
 (celui de la surveillance pour `cma tunnels`, s'il est choisi).
 Chaque commande rend un code de retour exploitable par une tâche planifiée ou une supervision : 0 si tout va bien,
-2 si quelque chose demande votre attention, 1 en cas d'erreur.
+2 si quelque chose demande votre attention, 1 en cas d'erreur. Une option mal écrite est refusée avec un
+message d'usage et le code 2 : essayez la commande à la main avant de la planifier.
 
 | Commande | Ce qu'elle fait | Code 2 si… |
 | --- | --- | --- |

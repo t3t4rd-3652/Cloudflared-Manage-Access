@@ -18,7 +18,7 @@ Host bastion
     HostName bastion.exemple.fr
     User alice
 Host nas
-    HostName 192.168.50.23
+    HostName 192.0.2.23
     ProxyJump bastion
 Host deja
     HostName deja.exemple.fr

@@ -1,7 +1,7 @@
 # Plan du projet
 
 État au 2026-10-09, version **2.10.0** (P9 à P12 : surveillance des services, compte Cloudflare plus complet, usage quotidien, qualité
-et guide) ; P13 à P16 réalisés, non publiés ; P17 à P22 en cours. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+et guide) ; P13 à P22 réalisés le 2026-10-14, non publiés (2.11). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -473,7 +473,8 @@ Statut : FAIT
 
 ### P21 — Expérience : « Quoi de neuf », raccourcis, démarrage (2.11)
 
-Statut : FAIT (démarrage : médiane de 2339 ms à 2105 ms, dont `run_gui` de 1785 ms à 1545 ms, 7 essais)
+Statut : FAIT (démarrage inchangé : en mesures alternées avec l'état d'avant P21, médianes de 2664 ms contre
+2652 ms sur 5 tours, dans le bruit ; une première mesure non alternée, 2339 → 2105 ms, n'était que du bruit)
 
 - **Objectif** : après une mise à jour, savoir ce qui a changé ; retrouver les raccourcis ; démarrer au moins aussi
   vite.
@@ -521,7 +522,8 @@ titre de la carte « Santé du compte », trop grand, corrigé au passage)
 | P19 | FAIT | aa5464c | 512 ✓ | 2026-10-09 |
 | P20 | FAIT | 7105288 | 514 ✓ | 2026-10-09 |
 | P21 | FAIT | 0ee669c | 525 ✓ | 2026-10-09 |
-| P22 | FAIT | 3dacd6a | 525 ✓ | 2026-10-14 |
+| P22 | FAIT | 3dacd6a | 528 ✓ | 2026-10-14 |
 
-**Prochaine action exacte :** P13 à P22 terminées. Pousser `main`, suivre la CI, puis, sur demande, publier la
-2.11.0 (`__version__`, section `## [2.11.0]` du CHANGELOG, tag `v2.11.0`) et l'installer sur le poste.
+**Prochaine action exacte :** P13 à P22 terminées et poussées ; corrections de la vérification indépendante
+(CLI redirigée en cp1252, tests instables sous la charge, documentation) faites, suite verte trois fois. Sur
+demande : publier la 2.11.0 (`__version__`, section `## [2.11.0]` du CHANGELOG, tag `v2.11.0`) et l'installer.

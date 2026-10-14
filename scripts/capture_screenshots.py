@@ -350,7 +350,7 @@ def capture_guide(window, output: Path) -> None:
         PrivateNetwork(
             [
                 PrivateRoute("r1", "10.0.0.0/24", "t1", "vn1", "default", "LAN bureau"),
-                PrivateRoute("r2", "192.168.50.0/24", "t1", "vn1", "default", "NAS"),
+                PrivateRoute("r2", "192.168.10.0/24", "t1", "vn1", "default", "NAS"),
             ],
             [VirtualNetwork("vn1", "default", True)],
             True,
@@ -384,7 +384,7 @@ def capture_guide(window, output: Path) -> None:
                 ("config.ingress[3].service : http://localhost:8080 → http://10.0.0.20:8080",),
             ),
             SnapshotChange("policies", "p2", "Prestataires", "removed"),
-            SnapshotChange("routes", "r2", "192.168.50.0/24", "added"),
+            SnapshotChange("routes", "r2", "192.168.10.0/24", "added"),
         ]
     )
     snapshots.status.setText("3 changements depuis le 08/10/2026 10:00.")
