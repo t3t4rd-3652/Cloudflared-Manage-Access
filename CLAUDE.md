@@ -222,6 +222,22 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   prises à des moments différents ont déjà fait annoncer un gain qui n'était que du bruit.
 - **Boîtes modales et tests** : chaque boîte ouverte par la vue Cloudflare passe par une fonction de module
   (`ask_*`, `show_*`) que les tests remplacent ; `exec()` bloquerait le test jusqu'au délai de 180 s.
+- **Jours locaux de la disponibilité** (`cma.core.availability`, `availability.json` en version 2) : le jour d'un
+  relevé est sa date locale ; les jours enregistrés avant la version 2 (UTC) gardent leur date, sans conversion
+  possible. Le fuseau (`tz`) est un paramètre de `record`, `stats`, `daily`, `report`… pour les tests ; `tzdata`
+  n'est pas installé sous Windows : tester avec des fuseaux fixes (`timezone(timedelta(hours=…))`) ou une petite
+  classe `tzinfo` simulée (changement d'heure), jamais `ZoneInfo`.
+- **Maintenance, rappels et résumé** (`cma.core.monitoring`, `alertstate`, `digest`) : une maintenance hebdomadaire
+  (`MaintenanceWindow`) joue comme la sourdine (`is_muted`) ; les rappels (`alert_repeat_hours`) et le résumé du
+  lundi (`weekly_digest`, dû à partir de 9 h locales, une fois par semaine ISO) notent leur envoi dans
+  `alert_state.json` seulement quand un canal l'a reçu. Rien n'est rappelé pour un objet en sourdine ou en
+  maintenance. La tâche planifiée n'écrit cet état que si CMA est fermé, comme le journal. `cma alerts digest`
+  envoie le résumé sans toucher à l'état. Voir l'ADR 0002.
+- **Travail en agents parallèles** : chaque agent a son `git worktree` sous `.claude/worktrees/`, et lance les
+  tests depuis ce worktree avec `PYTHONPATH=src` et le `.venv` du dépôt principal. Les traductions passent par un
+  JSON que l'orchestrateur réapplique à l'intégration : les trois catalogues entrent en conflit à la fusion. Une
+  capture lancée par un script qui importe `tests/conftest.py` doit forcer `QT_QPA_PLATFORM=windows` : ce fichier
+  impose `offscreen`, sans police sur ce poste.
 
 ## Pièges déjà rencontrés
 

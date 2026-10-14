@@ -2,6 +2,32 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Ajouté
+- **Maintenance planifiée** (Paramètres › Général › Alertes › Maintenance et rappels) : un créneau hebdomadaire
+  (jour, début, fin, heure locale ; un créneau qui passe minuit se termine le lendemain) pour un tunnel, un nom
+  d'hôte ou tout le compte. Pendant le créneau, l'objet est toujours relevé, mais ne déclenche ni notification ni
+  alerte, comme avec la sourdine.
+- **Rappel d'une panne qui dure** (même section) : tant qu'une panne n'est pas finie, elle est rappelée sur les canaux
+  d'alerte toutes les N heures (de 1 à 168 ; « Jamais » par défaut). Aucun rappel pour un objet en sourdine ou en
+  maintenance.
+- **Résumé hebdomadaire** (case « Envoyer un résumé chaque lundi ») : disponibilité des 7 derniers jours de chaque
+  tunnel et service, incidents, durée des pannes et service tokens à renouveler, envoyés à chaque canal d'alerte le
+  lundi à partir de 9 h (heure locale), une fois par semaine, depuis CMA ouvert comme depuis la tâche planifiée.
+- **Pannes dans le menu de l'icône** (zone de notification) : un sous-menu « Pannes (N) » liste chaque tunnel et
+  service en panne ; **Ouvrir** mène à la vue Cloudflare, **Mettre en sourdine 1 h** coupe les alertes pour une
+  heure, **Relever maintenant** refait le relevé sans attendre.
+- **Ligne de commande** : `cma alerts digest` envoie tout de suite le résumé de la semaine à chaque canal actif ;
+  `cma availability --output FICHIER` écrit le rapport de disponibilité en HTML, CSV ou JSON selon l'extension
+  (`--days` choisit la période).
+
+### Modifié
+- La disponibilité est agrégée par **jour local** et non plus par jour UTC : un test à 23 h 30 compte pour son jour.
+  Les jours déjà enregistrés gardent leur date.
+- Les dates des derniers rappels et la semaine du dernier résumé sont gardées à part, dans `alert_state.json` du
+  dossier de données (aucun secret).
+
 ## [2.11.0] - 2026-10-14
 
 ### Ajouté

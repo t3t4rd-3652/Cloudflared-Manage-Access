@@ -629,7 +629,7 @@ def run(args: argparse.Namespace) -> int:
         if args.alerts_command == "digest":
             return send_digest(paths)
         if args.alerts_command != "test":
-            print(tr("Action attendue : cma alerts test"), file=sys.stderr)
+            print(tr("Action attendue : cma alerts test ou cma alerts digest"), file=sys.stderr)
             return 1
         return send_test_alerts(paths)
 

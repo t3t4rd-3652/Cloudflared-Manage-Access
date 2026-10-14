@@ -132,9 +132,10 @@ Avec un jeton d'API Cloudflare, CMA gère aussi le côté serveur :
   avec le conseil qui va avec. **Tester depuis Internet** et **Tester tous les noms d'hôte** à la demande. La carte
   **Santé du compte** de la page Sessions résume tunnels et services en panne, et service tokens à renouveler.
 - **Alertes** vers ntfy (téléphone), Slack, Microsoft Teams, Discord ou un webhook ; **sourdine** d'un tunnel ou d'un
-  nom d'hôte pendant une maintenance.
-- **Disponibilité** de chaque tunnel et service sur 90 jours : graphique jour par jour, temps de réponse, incidents,
-  rapport exportable en HTML ou en CSV.
+  nom d'hôte pendant une maintenance, **maintenances hebdomadaires** planifiées, rappel d'une panne qui dure et
+  **résumé du lundi** de la disponibilité.
+- **Disponibilité** de chaque tunnel et service sur 90 jours, par jour local : graphique jour par jour, temps de
+  réponse, incidents, rapport exportable en HTML ou en CSV (aussi en ligne de commande).
 - **Bilan de sécurité** : noms d'hôte publiés sans Access, politiques ouvertes à tout le monde, tokens expirés ou
   inutilisés, DNS vers un tunnel supprimé, règle finale ouverte… Ce que CMA sait corriger se corrige en lot, après
   une confirmation qui liste chaque action.
@@ -157,7 +158,8 @@ Avec un jeton d'API Cloudflare, CMA gère aussi le côté serveur :
   (sauf sur un réseau Wi-Fi donné), et « Connecter tous les favoris ».
 - **Tester le service** : vérifie que le service distant répond vraiment, pas seulement que le port local est ouvert.
 - **Diagnostiquer…** : cloudflared, port local, DNS, proxy, HTTPS et Access, authentification ; rapport copiable.
-- Icône dans la zone de notification, dont la couleur reflète l'état global, avec les favoris dans son menu.
+- Icône dans la zone de notification, dont la couleur reflète l'état global, avec les favoris dans son menu et, en
+  cas de panne, un sous-menu **Pannes** (ouvrir, mettre en sourdine 1 h, relever maintenant).
 - Notifications au lieu de fenêtres bloquantes, journaux en direct filtrables (thème sombre ci-dessous).
 - Thème clair, sombre ou système, style Windows 11, interface nette à toutes les échelles d'affichage.
 - Interface en français, anglais, allemand ou espagnol (Paramètres › Langue).
@@ -189,7 +191,9 @@ cma tunnels --services       teste aussi les services publiés depuis Internet
 cma snapshot                 instantané de la configuration Cloudflare, comparé au précédent (code 2 si changé)
 cma review [--json] [--all]  bilan de sécurité du compte (code 2 si un constat élevé n'est pas ignoré)
 cma availability [--days 30] disponibilité des tunnels et services relevés (code 2 si un incident est en cours)
+cma availability --output F  écrit le rapport dans le fichier F (.html, .csv ou .json selon l'extension)
 cma alerts test              envoie un test à chaque canal d'alerte actif (code 1 si l'un échoue)
+cma alerts digest            envoie tout de suite le résumé de la semaine (code 1 sans canal ou si l'un échoue)
 cma doctor                   crée un rapport de diagnostic (zip, sans secrets)
 ```
 

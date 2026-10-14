@@ -515,7 +515,7 @@ complète, documentation, vérification indépendante, release) est faite en P28
 
 ### P23 — Disponibilité par jour local (2.12)
 
-Statut : À FAIRE
+Statut : FAIT
 
 - **Objectif** : un jour du graphique et du rapport est un jour de l'heure locale, comme les incidents (dette notée
   en P22).
@@ -530,7 +530,7 @@ Statut : À FAIRE
 
 ### P24 — Maintenance planifiée et rappel des pannes longues (2.12)
 
-Statut : À FAIRE
+Statut : FAIT
 
 - **Objectif** : ne pas être alerté pendant une maintenance prévue chaque semaine ; ne pas oublier une panne qui
   dure.
@@ -548,7 +548,7 @@ Statut : À FAIRE
 
 ### P25 — Résumé hebdomadaire et exports en ligne de commande (2.12)
 
-Statut : À FAIRE
+Statut : FAIT
 
 - **Objectif** : recevoir chaque semaine l'état du compte sans ouvrir CMA ; produire un rapport sans interface.
 - **Tâches** : résumé hebdomadaire vers les canaux d'alerte (disponibilité des 7 derniers jours, incidents, tokens
@@ -562,7 +562,7 @@ Statut : À FAIRE
 
 ### P26 — La santé du compte dans la zone de notification (2.12)
 
-Statut : À FAIRE
+Statut : FAIT
 
 - **Objectif** : voir et traiter une panne depuis l'icône, sans ouvrir la fenêtre.
 - **Tâches** : sous-menu « Pannes (N) » quand un tunnel ou un service est en panne : chaque objet ouvre la vue
@@ -574,7 +574,7 @@ Statut : À FAIRE
 
 ### P27 — Accessibilité des boîtes récentes (2.12)
 
-Statut : À FAIRE
+Statut : FAIT
 
 - **Objectif** : les boîtes ajoutées de P13 à P22 sont utilisables au clavier et au lecteur d'écran, comme le reste.
 - **Tâches** : test qui ouvre le bilan de sécurité, la disponibilité, « Quoi de neuf », les raccourcis, la
@@ -586,7 +586,7 @@ Statut : À FAIRE
 
 ### P28 — Intégration, documentation, vérification et release 2.12 (2.12)
 
-Statut : À FAIRE
+Statut : EN COURS
 
 - **Objectif** : réunir P23 à P27, documenter, faire vérifier, publier.
 - **Tâches** : fusion des branches, catalogues de traduction, suite complète trois fois, CHANGELOG, guide (maintenance,
@@ -625,12 +625,12 @@ Statut : À FAIRE
 | P21 | FAIT | 0ee669c | 525 ✓ | 2026-10-09 |
 | P22 | FAIT | 3dacd6a | 525 ✓ | 2026-10-14 |
 | Vérification (2 juges) | FAIT | f8d5038, 04354de | 529 ✓ | 2026-10-14 |
-| P23 | À FAIRE | — | — | — |
-| P24 | À FAIRE | — | — | — |
-| P25 | À FAIRE | — | — | — |
-| P26 | À FAIRE | — | — | — |
-| P27 | À FAIRE | — | — | — |
-| P28 | À FAIRE | — | — | — |
+| P23 | FAIT | fdc9268 | 594 ✓ | 2026-10-14 |
+| P24 | FAIT | 39338dc | 594 ✓ | 2026-10-14 |
+| P25 | FAIT | d0a5112 | 594 ✓ | 2026-10-14 |
+| P26 | FAIT | bfb1fdf, 5917839 | 594 ✓ | 2026-10-14 |
+| P27 | FAIT | c9b5265, 66fef5e | 594 ✓ | 2026-10-14 |
+| P28 | EN COURS | — | — | — |
 
-**Prochaine action exacte :** lancer les agents A (P23), B (P24 puis P25), C (P26) et D (P27) en parallèle,
-chacun dans son `git worktree`, puis intégrer en P28.
+**Prochaine action exacte :** P28 — relire la documentation de P23 à P27, juge neutre, puis release 2.12.0 et
+installation. Intégration faite : 4 branches fusionnées (2bd7d72), 594 tests verts trois fois.

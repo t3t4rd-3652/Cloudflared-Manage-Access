@@ -59,7 +59,7 @@ CATALOG: dict[str, str] = {
     "Accès à ouvrir": "Zu öffnende Zugänge",
     "Actif": "Aktiv",
     "Action": "Aktion",
-    "Action attendue : cma alerts test": "Erwartete Aktion: cma alerts test",
+    "Action attendue : cma alerts test ou cma alerts digest": "Erwartete Aktion: cma alerts test oder cma alerts digest",
     "Action inconnue dans le lien : {action}": "Unbekannte Aktion im Link: {action}",
     "Action pour {name}": "Aktion für {name}",
     "Actions": "Aktionen",

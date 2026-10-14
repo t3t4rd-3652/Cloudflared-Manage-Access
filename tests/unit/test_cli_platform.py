@@ -121,7 +121,7 @@ def test_account_commands_are_dispatched(paths, capsys, monkeypatch):
     assert cli(paths, "alerts", "test") == 1
     assert calls == [("review", {"as_json": True, "include_ignored": True}), ("alerts", {})]
     assert cli(paths, "alerts") == 1  # sans action : message d'usage, rien n'est envoyé
-    assert "cma alerts test" in capsys.readouterr().err and len(calls) == 2
+    assert "cma alerts digest" in capsys.readouterr().err and len(calls) == 2
     assert cli(paths, "availability", "--days", "7", "--json") == 0
     assert json.loads(capsys.readouterr().out)["days"] == 7
 

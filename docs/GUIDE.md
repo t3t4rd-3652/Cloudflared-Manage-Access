@@ -94,6 +94,13 @@ d'hôte** pour un tableau récapitulatif, pannes en premier. Le conseil de la li
 Avec la permission « Analytics : Read » sur le jeton, chaque carte montre aussi le trafic des dernières 24 heures
 et le nombre d'erreurs 5xx renvoyées aux visiteurs.
 
+Sans ouvrir la fenêtre : tant qu'un tunnel ou un service est en panne, le menu de l'icône de la zone de notification
+(clic droit) contient un sous-menu **Pannes (N)**. Chaque tunnel et chaque service en panne y a son propre menu :
+**Ouvrir** affiche la vue Cloudflare, **Mettre en sourdine 1 h** coupe les alertes de cet objet pour une heure.
+**Relever maintenant**, en bas, refait le relevé des tunnels et des services sans attendre le prochain passage.
+
+![Menu de l'icône : tunnels et services en panne](captures/guide-menu-pannes.png)
+
 ## Être prévenu sur son téléphone, suivre la disponibilité
 
 **Paramètres › Général › Alertes › Ajouter un canal…** : choisissez le type et collez l'adresse.
@@ -112,15 +119,31 @@ ouvert comme depuis la tâche planifiée (Paramètres › Général › Cloudfla
 Une maintenance prévue ? Clic droit sur le tunnel ou le nom d'hôte › **Mettre en sourdine** : il reste relevé, mais
 ne déclenche ni notification ni alerte jusqu'à la fin de la sourdine.
 
+Une maintenance qui revient chaque semaine se déclare une fois pour toutes, dans **Paramètres › Général › Alertes ›
+Maintenance et rappels** : **Ajouter…** demande le jour, l'heure de début et l'heure de fin (heure locale ; si la
+fin est avant le début, la maintenance passe minuit et se termine le lendemain), puis l'objet visé (un tunnel, un nom
+d'hôte ou tout le compte) et un libellé facultatif. Pendant le créneau, l'objet est relevé comme d'habitude mais ne
+déclenche ni notification, ni alerte, ni rappel.
+
+![Alertes : résumé du lundi, rappels et maintenances prévues](captures/guide-maintenance.png)
+
+Dans la même section, **Rappeler une panne qui dure toutes les** renvoie un message sur les canaux d'alerte tant
+qu'une panne n'est pas finie (« Jamais » par défaut, jusqu'à 168 h). Un objet en sourdine ou en maintenance n'est
+pas rappelé. La case **Envoyer un résumé chaque lundi** envoie à chaque canal, le lundi à partir de 9 h (heure
+locale) et une fois par semaine, la disponibilité des 7 derniers jours, les incidents et les service tokens à
+renouveler ; `cma alerts digest` l'envoie à la demande. Quand CMA est fermé, la tâche planifiée envoie à sa place les
+rappels et le résumé.
+
 **Outils › Disponibilité…** montre, pour chaque tunnel et service, le taux de disponibilité sur 7 et 30 jours, le
 temps de réponse moyen et la liste des incidents (début, fin, durée, cause). Choisissez une ligne pour son
-graphique jour par jour (7, 30 ou 90 jours) : une barre par jour (verte à partir de 99,9 %, orange à partir de
+graphique jour par jour (7, 30 ou 90 jours) : une barre par jour local (verte à partir de 99,9 %, orange à partir de
 98 %, rouge en dessous) et la courbe du temps de réponse moyen.
 
 ![Disponibilité d'un service sur 30 jours](captures/guide-disponibilite.png)
 
 **Exporter le rapport…** enregistre la période choisie en page HTML autonome (à joindre à un compte rendu) ou en CSV
 pour un tableur : disponibilité, durée des pannes et incidents de chaque objet.
+En ligne de commande, `cma availability --output rapport.html` (ou `.csv`, `.json`) écrit le même rapport.
 
 ## Renouveler un service token
 
@@ -216,13 +239,15 @@ message d'usage et le code 2 : essayez la commande à la main avant de la planif
 | Commande | Ce qu'elle fait | Code 2 si… |
 | --- | --- | --- |
 | `cma tunnels [--services] [--json]` | état des tunnels, et avec `--services` le test de chaque nom d'hôte HTTP | un tunnel ou un service est en panne |
-| `cma availability [--days 1/7/30/90] [--json]` | disponibilité et incidents relevés par la surveillance | un incident est en cours |
+| `cma availability [--days 1/7/30/90] [--json] [--output FICHIER]` | disponibilité et incidents relevés par la surveillance ; `--output` écrit le rapport dans un fichier `.html`, `.csv` ou `.json` (selon l'extension) au lieu de l'afficher | un incident est en cours (code 1 si le fichier ne peut pas être écrit ou si l'extension est inconnue) |
 | `cma review [--json] [--all]` | bilan de sécurité du compte (`--all` : avec les constats ignorés) | un constat de gravité élevée n'est pas ignoré |
 | `cma snapshot` | instantané de la configuration, et ce qui a changé depuis le précédent | quelque chose a changé |
 | `cma alerts test` | un message de test vers chaque canal d'alerte actif | — (code 1 si un canal échoue) |
+| `cma alerts digest` | le résumé de la semaine, tout de suite, vers chaque canal d'alerte actif | — (code 1 sans canal actif ou si un canal échoue) |
 
 Exemples : `cma review` planifié chaque lundi, qui échoue si un constat élevé apparaît ;
-`cma availability --days 30 --json` en fin de mois pour alimenter un tableau de bord.
+`cma availability --days 30 --json` en fin de mois pour alimenter un tableau de bord ; `cma availability --days 30
+--output rapport.html` pour en tirer une page à joindre à un compte rendu.
 
 ## Raccourcis clavier et nouveautés
 

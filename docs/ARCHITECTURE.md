@@ -43,7 +43,8 @@ Deux règles structurent le code :
 | `src/cma/core/cfadmin.py` | Relie l'API à la configuration et au coffre : import de profils, tokens, publication, tunnels, jetons d'API nommés, lecture du compte en parallèle. |
 | `src/cma/core/dnscheck.py`, `hostprobe.py` | DNS des noms d'hôte publiés ; test d'un nom d'hôte depuis Internet (Access, vérification de navigateur, 1033, 502…). |
 | `src/cma/core/tunnelwatch.py`, `servicewatch.py` | Ce qui a changé d'un relevé à l'autre : tunnels (état de l'API), services publiés (tests depuis Internet). |
-| `src/cma/core/availability.py`, `alerts.py`, `monitoring.py` | Journal de disponibilité (incidents, taux, 90 jours), alertes vers ntfy, Slack, Teams, Discord ou un webhook, sourdine ; suites d'un relevé communes à l'interface et à la tâche planifiée. |
+| `src/cma/core/availability.py`, `alerts.py`, `monitoring.py` | Journal de disponibilité (incidents, taux par jour local, 90 jours), alertes vers ntfy, Slack, Teams, Discord ou un webhook, sourdine et maintenances hebdomadaires, rappels des pannes qui durent ; suites d'un relevé communes à l'interface et à la tâche planifiée. |
+| `src/cma/core/alertstate.py`, `digest.py` | État des envois (`alert_state.json` : derniers rappels, semaine du dernier résumé, [ADR 0002](adr/0002-etat-des-alertes-hors-de-la-configuration.md)) ; résumé hebdomadaire de la disponibilité, dû le lundi à partir de 9 h. |
 | `src/cma/core/security.py` | Bilan de sécurité du compte (analyse pure) : constats, gravité, correction possible. |
 | `src/cma/core/privnet.py`, `audit.py`, `traffic.py`, `snapshot.py`, `permissions.py` | Outils du compte : réseaux privés (WARP), journal d'audit, trafic GraphQL, instantanés comparés, permissions du jeton vérifiées en lecture. |
 | `src/cma/core/links.py`, `sshconfig.py` | Liens `cma://` et profils partagés sans secret ; import de `~/.ssh/config`. |
