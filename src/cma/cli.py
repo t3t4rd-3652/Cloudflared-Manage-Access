@@ -13,6 +13,7 @@ import getpass
 import io
 import json
 import sys
+from pathlib import Path
 from typing import Any
 
 from cma import APP_NAME, __version__
@@ -89,12 +90,23 @@ def build_parser() -> argparse.ArgumentParser:
     alerts = sub.add_parser("alerts", help=tr("canaux d'alerte"))
     alerts_sub = alerts.add_subparsers(dest="alerts_command", metavar="ACTION")
     alerts_sub.add_parser("test", help=tr("envoyer un test à chaque canal actif (code 1 si l'un échoue)"))
+    alerts_sub.add_parser(
+        "digest",
+        help=tr(
+            "envoyer tout de suite le résumé de la semaine à chaque canal actif (code 1 sans canal ou en échec)"
+        ),
+    )
     availability = sub.add_parser(
         "availability",
         help=tr("disponibilité des tunnels et services relevés (code 2 si un incident est en cours)"),
     )
     availability.add_argument("--days", type=int, default=30, choices=(1, 7, 30, 90))
     availability.add_argument("--json", action="store_true")
+    availability.add_argument(
+        "--output",
+        metavar="FICHIER",
+        help=tr("écrire le rapport dans un fichier .html, .csv ou .json (selon l'extension)"),
+    )
     sub.add_parser("doctor", help=tr("créer un rapport de diagnostic"))
     sub.add_parser("quit", help=tr("fermer l'application en cours (et toutes ses sessions)"))
     return parser
@@ -267,8 +279,16 @@ def _record_and_alert(
     tunnels: list[Any],
     tested: list[Any],
 ) -> None:
+    from cma.core.alertstate import AlertState, state_path
     from cma.core.availability import AvailabilityLog
-    from cma.core.monitoring import record_services, record_tunnels, send_events
+    from cma.core.monitoring import (
+        deliver_follow_up,
+        prepare_follow_up,
+        record_services,
+        record_tunnels,
+        send_events,
+        service_key,
+    )
     from cma.platform.notify import system_notification
 
     log = AvailabilityLog(paths.data_dir / "availability.json")
@@ -292,6 +312,17 @@ def _record_and_alert(
             text += " " + tr("Ouvrez CMA pour le diagnostic.")
         system_notification(APP_NAME, text)
     send_events(events, config, secrets)
+    # Rappels des pannes qui durent et résumé du lundi : la tâche n'écrit `alert_state.json` que si CMA est fermé,
+    # comme le journal (cette fonction n'est appelée que dans ce cas).
+    if config.settings.alert_channels:
+        plan = prepare_follow_up(
+            log,
+            config,
+            AlertState(state_path(paths.data_dir)),
+            check_digest=True,
+            tunnel_of={service_key(target): target.tunnel_id for target, _probe in tested},
+        )
+        deliver_follow_up(plan, config, secrets)
 
 
 def _admin(paths: AppPaths, secrets: SecretStore | None, base_url: str | None) -> Any:
@@ -385,14 +416,76 @@ def send_test_alerts(paths: AppPaths, *, secrets: SecretStore | None = None) -> 
     return 1 if failed else 0
 
 
-def show_availability(paths: AppPaths, *, days: int = 30, as_json: bool = False) -> int:
-    """Disponibilité lue dans le journal tenu par la surveillance. Code 2 si un incident est encore ouvert."""
+def send_digest(paths: AppPaths, *, secrets: SecretStore | None = None) -> int:
+    """Le résumé de la semaine, tout de suite, vers chaque canal actif. Code 0 si tous l'ont accepté ; 1 sinon (ou
+    sans canal). N'écrit pas `alert_state.json` : le résumé automatique du lundi part quand même."""
+    from cma.core.alerts import AlertError, send_alert
+    from cma.core.availability import AvailabilityLog
+    from cma.core.config_store import ConfigStore
+    from cma.core.digest import build_digest
+    from cma.core.monitoring import channels
+    from cma.core.secrets import open_secret_store
+
+    store = ConfigStore(paths)
+    store.load()
+    vault = secrets or portable_secret_store(paths) or open_secret_store()
+    config = store.snapshot()
+    targets = channels(config, vault)
+    if not targets:
+        print(
+            tr("Aucun canal d'alerte actif : ajoutez-en un dans Paramètres › Général › Alertes."),
+            file=sys.stderr,
+        )
+        return 1
+    alert = build_digest(AvailabilityLog(paths.data_dir / "availability.json"), config)
+    failed = 0
+    for name, kind, url, _recoveries in targets:
+        try:
+            send_alert(kind, url, alert)
+        except AlertError as exc:
+            failed += 1
+            print(f"✗ {name} : {exc}")
+        else:
+            print(f"✓ {name}")
+    return 1 if failed else 0
+
+
+def write_availability_report(path: Path, rows: list[Any], incidents: list[Any], days: int) -> None:
+    """Rapport de disponibilité dans un fichier : CSV (avec BOM pour Excel), JSON ou HTML selon l'extension."""
+    from cma.core.availability_report import report_csv, report_html, report_json
+    from cma.core.fsutil import atomic_write_text
+
+    suffix = path.suffix.lower()
+    if suffix == ".csv":
+        atomic_write_text(path, "﻿" + report_csv(rows, incidents))
+    elif suffix == ".json":
+        atomic_write_text(path, report_json(rows, incidents, days) + "\n")
+    elif suffix in (".html", ".htm"):
+        atomic_write_text(path, report_html(rows, incidents, days))
+    else:
+        raise ValueError(
+            tr("Extension inconnue « {suffix} » : utilisez .html, .csv ou .json.").format(suffix=suffix)
+        )
+
+
+def show_availability(
+    paths: AppPaths, *, days: int = 30, as_json: bool = False, output: str | None = None
+) -> int:
+    """Disponibilité lue dans le journal tenu par la surveillance. Code 2 si un incident est encore ouvert ; avec
+    `output`, le rapport est écrit dans ce fichier (le code de retour ne change pas, 1 si l'écriture échoue)."""
     from cma.core.availability import AvailabilityLog
     from cma.core.availability_report import build, report_json
 
     log = AvailabilityLog(paths.data_dir / "availability.json")
     rows, incidents = build(log, days)
-    if as_json:
+    if output:
+        try:
+            write_availability_report(Path(output), rows, incidents, days)
+        except (OSError, ValueError) as exc:
+            print(tr("Erreur : {error}").format(error=exc), file=sys.stderr)
+            return 1
+        print(tr("Rapport enregistré : {file}").format(file=output))
+    elif as_json:
         print(report_json(rows, incidents, days))
     elif not rows:
         print(tr("Aucun relevé : la surveillance remplit ce journal (CMA ouvert, ou la tâche planifiée)."))
@@ -533,13 +626,15 @@ def run(args: argparse.Namespace) -> int:
         return show_review(paths, as_json=args.json, include_ignored=args.all)
 
     if command == "alerts":
+        if args.alerts_command == "digest":
+            return send_digest(paths)
         if args.alerts_command != "test":
             print(tr("Action attendue : cma alerts test"), file=sys.stderr)
             return 1
         return send_test_alerts(paths)
 
     if command == "availability":
-        return show_availability(paths, days=args.days, as_json=args.json)
+        return show_availability(paths, days=args.days, as_json=args.json, output=args.output)
 
     if command == "snapshot":
         return take_snapshot_cli(paths)

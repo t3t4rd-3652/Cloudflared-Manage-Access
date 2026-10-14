@@ -4,8 +4,9 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from PySide6.QtCore import QTime
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -13,13 +14,15 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLineEdit,
+    QSpinBox,
     QTableWidgetItem,
+    QTimeEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from cma.core.alerts import KINDS, Alert, AlertError, kind_label, secret_key, send_alert
-from cma.core.models import AlertChannel, Config
+from cma.core.models import AlertChannel, Config, MaintenanceWindow
 from cma.i18n import tr
 from cma.ui.icons import app_icon
 from cma.ui.views.cloud.helpers import data_table, dialog_buttons
@@ -103,11 +106,95 @@ def ask_channel(parent: QWidget) -> tuple[AlertChannel, str] | None:
     return dialog.values() if dialog.exec() == QDialog.DialogCode.Accepted else None
 
 
+def weekday_name(weekday: int) -> str:
+    return (
+        tr("Lundi"),
+        tr("Mardi"),
+        tr("Mercredi"),
+        tr("Jeudi"),
+        tr("Vendredi"),
+        tr("Samedi"),
+        tr("Dimanche"),
+    )[weekday % 7]
+
+
+def target_text(target: str, objects: list[tuple[str, str]]) -> str:
+    """Objet visé par une maintenance : « Tout le compte », le libellé connu, sinon ce que la clé permet de dire."""
+    if not target:
+        return tr("Tout le compte")
+    known = dict(objects)
+    name = known[target] if target in known else target.split(":", 1)[-1]
+    return tr("Tunnel « {name} »").format(name=name) if target.startswith("tunnel:") else name
+
+
+class MaintenanceDialog(QDialog):
+    """Nouvelle maintenance hebdomadaire : jour, heures (locales), objet visé, libellé."""
+
+    def __init__(self, parent: QWidget | None, objects: list[tuple[str, str]]) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(tr("Nouvelle maintenance"))
+        self.setWindowIcon(app_icon())
+        self.setMinimumWidth(480)
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        self.day = QComboBox()
+        self.day.setAccessibleName(tr("Jour"))
+        for weekday in range(7):
+            self.day.addItem(weekday_name(weekday), weekday)
+        form.addRow(tr("Jour"), self.day)
+        self.start = QTimeEdit(QTime(2, 0))
+        self.start.setDisplayFormat("HH:mm")
+        self.start.setAccessibleName(tr("Début"))
+        self.end = QTimeEdit(QTime(4, 0))
+        self.end.setDisplayFormat("HH:mm")
+        self.end.setAccessibleName(tr("Fin"))
+        form.addRow(tr("Début"), self.start)
+        form.addRow(tr("Fin"), self.end)
+        self.hint = label(
+            tr("Heures locales. Si la fin est avant le début, la maintenance passe minuit."),
+            "meta",
+            wrap=True,
+        )
+        form.addRow("", self.hint)
+        self.target = QComboBox()
+        self.target.setAccessibleName(tr("Objet"))
+        self.target.addItem(tr("Tout le compte"), "")
+        for key, _name in objects:
+            self.target.addItem(target_text(key, objects), key)
+        form.addRow(tr("Objet visé"), self.target)
+        self.name = QLineEdit()
+        self.name.setAccessibleName(tr("Libellé"))
+        self.name.setMaxLength(120)
+        self.name.setPlaceholderText(tr("Mise à jour des serveurs…"))
+        form.addRow(tr("Libellé (facultatif)"), self.name)
+        layout.addLayout(form)
+        buttons, ok = dialog_buttons(self, tr("Ajouter"))
+        ok.clicked.connect(self.accept)
+        layout.addWidget(buttons)
+
+    def values(self) -> MaintenanceWindow:
+        return MaintenanceWindow(
+            weekday=int(self.day.currentData()),
+            start=self.start.time().toString("HH:mm"),
+            end=self.end.time().toString("HH:mm"),
+            target=str(self.target.currentData() or ""),
+            label=self.name.text().strip(),
+        )
+
+
+def ask_maintenance(parent: QWidget, objects: list[tuple[str, str]]) -> MaintenanceWindow | None:
+    """Fonction de module : les tests la remplacent pour ne pas ouvrir de boîte modale."""
+    dialog = MaintenanceDialog(parent, objects)
+    return dialog.values() if dialog.exec() == QDialog.DialogCode.Accepted else None
+
+
 class AlertsSection:
     def __init__(self, view: SettingsView, form: QFormLayout) -> None:
         self.view = view
         self.ctx = view.ctx
+        self._loading = False
         self.channels: list[AlertChannel] = []
+        self.windows: list[MaintenanceWindow] = []
         self.table = data_table([tr("Nom"), tr("Type"), tr("Retours"), tr("Actif")], tr("Canaux d'alerte"))
         self.table.setMinimumHeight(140)
         self.table.itemSelectionChanged.connect(self._update_actions)
@@ -130,8 +217,63 @@ class AlertsSection:
         form.addRow(row)
         self.status = label("", "meta", wrap=True)
         form.addRow(self.status)
+        self.digest = QCheckBox(tr("Envoyer un résumé chaque lundi"))
+        self.digest.setToolTip(
+            tr(
+                "Disponibilité des 7 derniers jours, incidents et service tokens à renouveler, le lundi à partir "
+                "de 9 h (heure locale), une fois par semaine. « cma alerts digest » l'envoie tout de suite."
+            )
+        )
+        self.digest.toggled.connect(lambda checked: self._set("weekly_digest", checked))
+        form.addRow(self.digest)
+        # Maintenance et rappels.
+        form.addRow(label(tr("Maintenance et rappels"), "section"))
+        form.addRow(
+            label(
+                tr(
+                    "Pendant une maintenance, l'objet visé est relevé mais ne déclenche ni notification ni alerte. "
+                    "Une panne qui dure est rappelée à intervalle régulier."
+                ),
+                "muted",
+                wrap=True,
+            )
+        )
+        self.repeat = QSpinBox()
+        self.repeat.setRange(0, 168)
+        self.repeat.setSuffix(" h")
+        self.repeat.setSpecialValueText(tr("Jamais"))
+        self.repeat.setAccessibleName(tr("Rappeler une panne qui dure toutes les"))
+        self.repeat.valueChanged.connect(lambda value: self._set("alert_repeat_hours", value))
+        form.addRow(tr("Rappeler une panne qui dure toutes les"), self.repeat)
+        self.window_table = data_table(
+            [tr("Jour"), tr("Début"), tr("Fin"), tr("Objet"), tr("Libellé")], tr("Maintenances prévues")
+        )
+        self.window_table.setMinimumHeight(120)
+        for column, width in enumerate((110, 80, 80, 260)):
+            self.window_table.setColumnWidth(column, width)
+        self.window_table.itemSelectionChanged.connect(self._update_actions)
+        form.addRow(self.window_table)
+        window_row = QHBoxLayout()
+        self.add_window_button = button(tr("Ajouter…"), "plus")
+        self.add_window_button.clicked.connect(self.add_window)
+        window_row.addWidget(self.add_window_button)
+        self.remove_window_button = button(tr("Retirer"), "trash", danger=True)
+        self.remove_window_button.clicked.connect(self.remove_window)
+        window_row.addWidget(self.remove_window_button)
+        window_row.addStretch()
+        form.addRow(window_row)
+
+    def _set(self, key: str, value: Any) -> None:
+        if self._loading:
+            return
+        self.ctx.update_config(lambda c: setattr(c.settings, key, value))
 
     def load(self, config: Config) -> None:
+        self._loading = True
+        self.digest.setChecked(config.settings.weekly_digest)
+        self.repeat.setValue(config.settings.alert_repeat_hours)
+        self._load_windows(config)
+        self._loading = False
         self.channels = list(config.settings.alert_channels)
         selected = self.selected()
         clear_items(self.table, len(self.channels))
@@ -160,6 +302,54 @@ class AlertsSection:
         chosen = self.selected() is not None
         for widget in (self.test_button, self.toggle_button, self.remove_button):
             widget.setEnabled(chosen)
+        self.remove_window_button.setEnabled(self.selected_window() is not None)
+
+    # --- Maintenances ------------------------------------------------------------------------------------------
+
+    def _load_windows(self, config: Config) -> None:
+        self.windows = list(config.settings.maintenance_windows)
+        objects = self.view.known_objects()
+        clear_items(self.window_table, len(self.windows))
+        for index, window in enumerate(self.windows):
+            values = (
+                weekday_name(window.weekday),
+                window.start,
+                window.end,
+                target_text(window.target, objects),
+                window.label,
+            )
+            for column, value in enumerate(values):
+                self.window_table.setItem(index, column, QTableWidgetItem(value))
+
+    def selected_window(self) -> MaintenanceWindow | None:
+        index = self.window_table.currentRow()
+        if 0 <= index < len(self.windows) and self.window_table.selectedItems():
+            return self.windows[index]
+        return None
+
+    def add_window(self) -> None:
+        window = ask_maintenance(self.view, self.view.known_objects())
+        if window is None:
+            return
+        self.ctx.update_config(lambda c: c.settings.maintenance_windows.append(window))
+        self.status.setText(
+            tr("Maintenance du {day} de {start} à {end} ajoutée.").format(
+                day=weekday_name(window.weekday).lower(), start=window.start, end=window.end
+            )
+        )
+
+    def remove_window(self) -> None:
+        index = self.window_table.currentRow()
+        if self.selected_window() is None:
+            return
+        self.ctx.update_config(
+            lambda c: setattr(
+                c.settings,
+                "maintenance_windows",
+                [w for i, w in enumerate(c.settings.maintenance_windows) if i != index],
+            )
+        )
+        self.status.setText(tr("Maintenance retirée."))
 
     def add(self) -> None:
         answer = ask_channel(self.view)

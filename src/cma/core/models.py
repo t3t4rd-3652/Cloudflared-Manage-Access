@@ -24,6 +24,7 @@ Name = Annotated[str, Field(min_length=1, max_length=120)]
 
 _HOSTNAME_RE = re.compile(r"^[A-Za-z0-9_](?:[A-Za-z0-9_.-]{0,251}[A-Za-z0-9_])?$")
 _HEADER_RE = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]+\s*:.*$")
+_CLOCK_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 _SSH_USER_RE = re.compile(r"^[A-Za-z0-9._@\\-]{1,64}$")
 
 
@@ -405,6 +406,25 @@ class AlertChannel(Model):
     recoveries: bool = True
 
 
+class MaintenanceWindow(Model):
+    """Maintenance prévue chaque semaine : pendant ce créneau (heure locale), l'objet visé est en sourdine. Si la fin
+    n'est pas après le début, le créneau passe minuit et se termine le lendemain."""
+
+    weekday: int = Field(ge=0, le=6)  # 0 : lundi … 6 : dimanche
+    start: str  # « HH:MM »
+    end: str  # « HH:MM »
+    # Vide : tout le compte ; sinon « tunnel:<id> » ou « service:<nom d'hôte et chemin> » (clés de la sourdine).
+    target: str = ""
+    label: str = Field(default="", max_length=120)
+
+    @field_validator("start", "end")
+    @classmethod
+    def _clock(cls, value: str) -> str:
+        if not _CLOCK_RE.match(value):
+            raise ValueError(tr("Heure invalide : attendu HH:MM, par exemple 02:30"))
+        return value
+
+
 class Theme(StrEnum):
     SYSTEM = "system"
     LIGHT = "light"
@@ -456,6 +476,11 @@ class Settings(Model):
     # → fin de la sourdine, ISO 8601 UTC).
     alert_channels: list[AlertChannel] = Field(default_factory=list[AlertChannel])
     muted: dict[str, str] = Field(default_factory=dict[str, str])
+    # Maintenances hebdomadaires (sourdine récurrente), rappel d'une panne qui dure (heures entre deux rappels,
+    # 0 : jamais) et résumé hebdomadaire envoyé aux canaux d'alerte le lundi.
+    maintenance_windows: list[MaintenanceWindow] = Field(default_factory=list[MaintenanceWindow])
+    alert_repeat_hours: int = Field(default=0, ge=0, le=168)
+    weekly_digest: bool = False
 
     @field_validator("language", mode="before")
     @classmethod

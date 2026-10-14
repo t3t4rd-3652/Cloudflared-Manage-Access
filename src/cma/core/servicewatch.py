@@ -186,6 +186,11 @@ class ServiceWatch:
         return self._results.get(hostname.lower() + path)
 
     @property
+    def results(self) -> list[ServiceResult]:
+        """Derniers résultats de tous les services testés."""
+        return list(self._results.values())
+
+    @property
     def troubled(self) -> list[ServiceResult]:
         """Services en panne au dernier relevé, du plus grave au moins grave."""
         bad = [r for r in self._results.values() if severity(r.probe.state) > 0]
