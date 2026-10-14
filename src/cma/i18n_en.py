@@ -1928,4 +1928,9 @@ CATALOG: dict[str, str] = {
     "état des tunnels du compte Cloudflare (code 2 si l'un est en panne)": "state of the Cloudflare account's tunnels (exit code 2 if one is down)",
     "— choisir un token —": "— choose a token —",
     "— choisir une clé —": "— choose a key —",
+    "Mettre en sourdine 1 h": "Mute for 1 hour",
+    "Pannes ({n})": "Outages ({n})",
+    "Relever maintenant": "Check now",
+    "Tunnel « {name} » — {status}": "Tunnel « {name} » — {status}",
+    "{hostname} — {state}": "{hostname} — {state}",
 }
