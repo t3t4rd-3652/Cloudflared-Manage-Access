@@ -216,6 +216,10 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
 - **« Quoi de neuf »** (`ui/dialogs/whatsnew.py`) : `Settings.last_seen_version` ; une première installation
   (assistant ou migration) note la version sans rien montrer ; CMA démarré dans la zone de notification reçoit une
   notification au lieu de la boîte. Le CHANGELOG manquant (installation par pip) n'est jamais une erreur.
+- **Mesure du démarrage** (`scripts/startup_benchmark.py`, `CMA_STARTUP_BENCHMARK=1`) : coffre vide en mémoire
+  (`ui/app._open_secret_store`), jamais le trousseau du poste, qui est global à l'utilisateur et contient le vrai
+  jeton. Comparer deux versions en mesures **alternées** (ancienne version dans un `git worktree`) : deux séries
+  prises à des moments différents ont déjà fait annoncer un gain qui n'était que du bruit.
 - **Boîtes modales et tests** : chaque boîte ouverte par la vue Cloudflare passe par une fonction de module
   (`ask_*`, `show_*`) que les tests remplacent ; `exec()` bloquerait le test jusqu'au délai de 180 s.
 
