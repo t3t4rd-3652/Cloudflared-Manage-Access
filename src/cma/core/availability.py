@@ -6,12 +6,18 @@ La surveillance prévient puis oubliait ; ce journal garde la mémoire, pour CMA
 - tests : agrégés par jour et par objet (réussis, total, somme et maximum du temps de réponse), d'où le taux de
   disponibilité et le temps moyen sur 7 ou 30 jours sans garder chaque test.
 Fichier `availability.json` du dossier de données, écrit d'un coup (écriture atomique).
+
+Les jours sont des jours **locaux** (fuseau `tz`, celui du poste si None), comme les incidents affichés : un test
+à 23 h 30 à Paris compte pour ce jour-là. Un jour de changement d'heure dure 23 ou 25 heures et reste un seul jour,
+car le jour se lit sur la date locale du relevé, jamais par un calcul de 24 heures. Le champ `version` du fichier
+vaut 2 depuis ce changement ; sans lui (version 1), les jours déjà agrégés étaient en UTC : ils gardent leur date,
+sans conversion possible (le détail des tests n'est pas gardé).
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from pathlib import Path
 from typing import Any, cast
 
@@ -19,10 +25,16 @@ from cma.core.fsutil import atomic_write_json, read_json_lenient
 
 KEEP_DAYS = 90
 MAX_INCIDENTS = 1000
+VERSION = 2  # 1 : jours UTC (sans champ `version`) ; 2 : jours locaux
 
 
 def _iso(moment: datetime) -> str:
     return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def local_date(moment: datetime, tz: tzinfo | None = None) -> date:
+    """Jour local d'un instant ; `tz` None : fuseau du poste (avec son heure d'été à cette date)."""
+    return moment.astimezone(tz).date()
 
 
 def _parse(value: str) -> datetime:
@@ -73,17 +85,26 @@ class AvailabilityLog:
             dict[str, dict[str, list[float]]], data.get("days") or {}
         )
         self.labels: dict[str, str] = cast(dict[str, str], data.get("labels") or {})
+        version = data.get("version")
+        # Version du fichier lu (1 : sans champ) ; un fichier plus récent n'est jamais rétrogradé à l'écriture.
+        self.version = version if isinstance(version, int) and not isinstance(version, bool) else 1
 
-    def save(self, now: datetime | None = None) -> None:
-        self.prune(now)
+    def save(self, now: datetime | None = None, tz: tzinfo | None = None) -> None:
+        self.prune(now, tz)
         atomic_write_json(
             self.path,
-            {"incidents": [asdict(i) for i in self.incidents], "days": self.days, "labels": self.labels},
+            {
+                "version": max(VERSION, self.version),
+                "incidents": [asdict(i) for i in self.incidents],
+                "days": self.days,
+                "labels": self.labels,
+            },
         )
 
-    def prune(self, now: datetime | None = None) -> None:
-        limit = (now or datetime.now(UTC)) - timedelta(days=KEEP_DAYS)
-        day_limit = limit.strftime("%Y-%m-%d")
+    def prune(self, now: datetime | None = None, tz: tzinfo | None = None) -> None:
+        moment = now or datetime.now(UTC)
+        limit = moment - timedelta(days=KEEP_DAYS)
+        day_limit = (local_date(moment, tz) - timedelta(days=KEEP_DAYS)).isoformat()
         self.incidents = [i for i in self.incidents if i.open or _parse(i.ended or i.started) >= limit][
             -MAX_INCIDENTS:
         ]
@@ -96,9 +117,15 @@ class AvailabilityLog:
     # --- Tests ----------------------------------------------------------------------------------------------
 
     def record_check(
-        self, key: str, label: str, ok: bool, ms: float | None, at: datetime | None = None
+        self,
+        key: str,
+        label: str,
+        ok: bool,
+        ms: float | None,
+        at: datetime | None = None,
+        tz: tzinfo | None = None,
     ) -> None:
-        day = (at or datetime.now(UTC)).astimezone(UTC).strftime("%Y-%m-%d")
+        day = local_date(at or datetime.now(UTC), tz).isoformat()
         counts = self.days.setdefault(key, {}).setdefault(day, [0, 0, 0.0, 0.0, 0])
         counts[0] += 1 if ok else 0
         counts[1] += 1
@@ -108,8 +135,8 @@ class AvailabilityLog:
             counts[4] += 1
         self.labels[key] = label
 
-    def stats(self, key: str, days: int, now: datetime | None = None) -> Stats:
-        first = ((now or datetime.now(UTC)) - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+    def stats(self, key: str, days: int, now: datetime | None = None, tz: tzinfo | None = None) -> Stats:
+        first = (local_date(now or datetime.now(UTC), tz) - timedelta(days=days - 1)).isoformat()
         rows = [v for d, v in self.days.get(key, {}).items() if d >= first]
         ok, total = sum(r[0] for r in rows), sum(r[1] for r in rows)
         timed = sum(r[4] for r in rows)
@@ -163,7 +190,7 @@ class AvailabilityLog:
 
 @dataclass(frozen=True)
 class DayStats:
-    day: str  # AAAA-MM-JJ (UTC)
+    day: str  # AAAA-MM-JJ (jour local)
     uptime: float | None  # None : aucun relevé ce jour-là (CMA arrêté, poste éteint), pas une panne
     mean_ms: float | None
     checks: int
@@ -179,13 +206,18 @@ class ReportRow:
     downtime: timedelta  # durée cumulée des incidents dans la période (bornée à la période)
 
 
-def daily(log: AvailabilityLog, key: str, days: int, now: datetime | None = None) -> list[DayStats]:
-    """Un point par jour, du plus ancien au plus récent, jours sans relevé compris."""
-    end = (now or datetime.now(UTC)).astimezone(UTC)
+def daily(
+    log: AvailabilityLog, key: str, days: int, now: datetime | None = None, tz: tzinfo | None = None
+) -> list[DayStats]:
+    """Un point par jour local, du plus ancien au plus récent, jours sans relevé compris.
+
+    Le calcul porte sur des dates : un jour de 23 ou 25 heures reste un seul point, jamais perdu ni doublé.
+    """
+    today = local_date(now or datetime.now(UTC), tz)
     rows = log.days.get(key, {})
     result: list[DayStats] = []
     for offset in range(days - 1, -1, -1):
-        day = (end - timedelta(days=offset)).strftime("%Y-%m-%d")
+        day = (today - timedelta(days=offset)).isoformat()
         counts = rows.get(day)
         if not counts or not counts[1]:
             result.append(DayStats(day, None, None, 0))
@@ -196,8 +228,13 @@ def daily(log: AvailabilityLog, key: str, days: int, now: datetime | None = None
     return result
 
 
-def report(log: AvailabilityLog, days: int, now: datetime | None = None) -> list[ReportRow]:
-    """Une ligne par tunnel et service relevé, les moins disponibles d'abord."""
+def report(
+    log: AvailabilityLog, days: int, now: datetime | None = None, tz: tzinfo | None = None
+) -> list[ReportRow]:
+    """Une ligne par tunnel et service relevé, les moins disponibles d'abord.
+
+    Les taux portent sur les `days` derniers jours locaux ; les pannes, sur les `days` dernières fois 24 heures.
+    """
     end = (now or datetime.now(UTC)).astimezone(UTC)
     start = end - timedelta(days=days)
     rows: list[ReportRow] = []
@@ -214,7 +251,7 @@ def report(log: AvailabilityLog, days: int, now: datetime | None = None) -> list
                 key,
                 log.label(key),
                 "tunnel" if key.startswith("tunnel:") else "service",
-                log.stats(key, days, end),
+                log.stats(key, days, end, tz),
                 len(incidents),
                 downtime,
             )
