@@ -6,15 +6,18 @@ dégradée ou en reconnexion, rouge avec « × » en cas d'erreur (§4.26) : la 
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 from cma.core.cfapi import Tunnel
 from cma.core.events import SshConnectionChanged
 from cma.core.models import CloudflareProfile, SshProfile
+from cma.core.monitoring import mute, service_key, tunnel_key
 from cma.core.servicewatch import ServiceResult, severity, troubled_services_summary
 from cma.core.sessions import SessionInfo, SessionState
-from cma.core.tunnelwatch import troubled_summary
+from cma.core.tunnelwatch import status_label, troubled_summary
 from cma.i18n import tr
 from cma.ui.context import GuiContext
 from cma.ui.dialogs.workspaces import launch_favorites, launch_workspace
@@ -122,11 +125,88 @@ class Tray(QObject):
             state = ssh_favorite(link.state if link is not None else None, forwards)
         return state.label, state.active
 
+    def _build_health_submenu(self) -> QMenu | None:
+        """Sous-menu des pannes (tunnels et services) : None si tout va bien.
+
+        Le sous-menu liste :
+        - chaque tunnel down ou degraded (avec un sous-menu « Ouvrir », « Mettre en sourdine 1 h »)
+        - chaque service en panne (avec les mêmes actions)
+        - « Relever maintenant » au bas
+        """
+        if not self.troubled and not self.services:
+            return None
+
+        health_menu = QMenu(tr("Pannes ({n})").format(n=len(self.troubled) + len(self.services)))
+        health_menu.setIcon(token_icon("alert-triangle"))
+
+        # Tunnels en panne
+        for tunnel in self.troubled:
+            label = tr("Tunnel « {name} » — {status}").format(
+                name=tunnel.name, status=status_label(tunnel.status)
+            )
+            tunnel_submenu = health_menu.addMenu(label)
+            tunnel_submenu.addAction(tr("Ouvrir"), lambda t=tunnel: self._open_tunnel_from_health(t))
+            tunnel_submenu.addAction(
+                tr("Mettre en sourdine 1 h"), lambda t=tunnel: self._mute_tunnel_for_one_hour(t)
+            )
+
+        # Services en panne
+        for service_result in self.services:
+            label = tr("{hostname} — {state}").format(
+                hostname=service_result.target.label,
+                state=service_result.probe.summary(service_result.target.label),
+            )
+            service_submenu = health_menu.addMenu(label)
+            service_submenu.addAction(
+                tr("Ouvrir"), lambda sr=service_result: self._open_cloud_from_health(sr)
+            )
+            service_submenu.addAction(
+                tr("Mettre en sourdine 1 h"), lambda sr=service_result: self._mute_service_for_one_hour(sr)
+            )
+
+        health_menu.addSeparator()
+        health_menu.addAction(tr("Relever maintenant"), self._check_health_now)
+
+        return health_menu
+
+    def _open_tunnel_from_health(self, tunnel: Tunnel) -> None:
+        """Ouvre la vue Cloudflare sur le tunnel en panne."""
+        self.window.bring_to_front()
+        self.window.open_tunnel(tunnel)
+
+    def _open_cloud_from_health(self, service_result: ServiceResult) -> None:
+        """Ouvre la vue Cloudflare pour le service en panne."""
+        self.window.bring_to_front()
+        self.window.show_view("cloud")
+
+    def _mute_tunnel_for_one_hour(self, tunnel: Tunnel) -> None:
+        """Met en sourdine le tunnel pendant 1 heure."""
+        key = tunnel_key(tunnel.id)
+        self.ctx.update_config(lambda c: mute(c, key, timedelta(hours=1)))
+        self.window.monitor.refresh()
+
+    def _mute_service_for_one_hour(self, service_result: ServiceResult) -> None:
+        """Met en sourdine le service pendant 1 heure."""
+        key = service_key(service_result.target)
+        self.ctx.update_config(lambda c: mute(c, key, timedelta(hours=1)))
+        self.window.monitor.refresh()
+
+    def _check_health_now(self) -> None:
+        """Relève l'état des tunnels et services maintenant."""
+        self.window.monitor.check_tunnels()
+        self.window.monitor.check_services()
+
     def _rebuild_menu(self) -> None:
         self.menu.clear()
         summary = sessions_summary(list(self.sessions.values()))
         header = self.menu.addAction(tr("CMA — {summary}").format(summary=summary))
         header.setEnabled(False)
+
+        # Sous-menu des pannes si présentes
+        health_submenu = self._build_health_submenu()
+        if health_submenu:
+            self.menu.addMenu(health_submenu)
+
         config = self.ctx.config()
         favorites: list[CloudflareProfile | SshProfile] = [
             p for p in config.cloudflare_profiles if p.favorite
