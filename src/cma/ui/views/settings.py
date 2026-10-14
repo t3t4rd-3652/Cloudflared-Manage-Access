@@ -69,6 +69,9 @@ class SettingsView(QWidget):
         # Aide (branchée par la fenêtre principale) : raccourcis clavier et « Quoi de neuf ».
         self.open_shortcuts: Callable[[], None] | None = None
         self.open_whats_new: Callable[[], None] | None = None
+        # Tunnels et noms d'hôte du dernier relevé (clé de sourdine, libellé), branchés par la fenêtre principale :
+        # ils sont proposés pour viser une maintenance.
+        self.known_objects: Callable[[], list[tuple[str, str]]] = list
         # Mises à jour (cloudflared, CMA) : module à part ; anciens noms gardés pour les boutons et la fenêtre.
         self.updates = UpdateActions(self)
         self.check_cloudflared_release = self.updates.check_cloudflared_release

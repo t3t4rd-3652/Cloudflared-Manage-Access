@@ -236,6 +236,7 @@ class MainWindow(QMainWindow):
         self.monitor.notice.connect(lambda level, text, action: self.notify(level, text, action=action))
         self.monitor.troubled.connect(self._on_troubled)
         self.monitor.services_checked.connect(self.cloud.show_service_results)
+        self.settings.known_objects = self.monitor.known_objects
         self.tunnel_watch = self.monitor.tunnel_watch
         self.availability = self.monitor.availability
         self.check_tunnels = self.monitor.check_tunnels

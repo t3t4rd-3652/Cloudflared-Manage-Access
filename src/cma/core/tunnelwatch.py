@@ -66,6 +66,11 @@ class TunnelWatch:
         self._tunnels: list[Tunnel] = []
 
     @property
+    def tunnels(self) -> list[Tunnel]:
+        """Tous les tunnels du dernier relevé."""
+        return list(self._tunnels)
+
+    @property
     def troubled(self) -> list[Tunnel]:
         """Tunnels dégradés ou hors ligne au dernier relevé, du plus grave au moins grave."""
         bad = [t for t in self._tunnels if severity(t.status) > 0]

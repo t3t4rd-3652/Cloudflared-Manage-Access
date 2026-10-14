@@ -267,8 +267,16 @@ def _record_and_alert(
     tunnels: list[Any],
     tested: list[Any],
 ) -> None:
+    from cma.core.alertstate import AlertState, state_path
     from cma.core.availability import AvailabilityLog
-    from cma.core.monitoring import record_services, record_tunnels, send_events
+    from cma.core.monitoring import (
+        deliver_follow_up,
+        prepare_follow_up,
+        record_services,
+        record_tunnels,
+        send_events,
+        service_key,
+    )
     from cma.platform.notify import system_notification
 
     log = AvailabilityLog(paths.data_dir / "availability.json")
@@ -292,6 +300,16 @@ def _record_and_alert(
             text += " " + tr("Ouvrez CMA pour le diagnostic.")
         system_notification(APP_NAME, text)
     send_events(events, config, secrets)
+    # Rappels des pannes qui durent et résumé du lundi : la tâche n'écrit `alert_state.json` que si CMA est fermé,
+    # comme le journal (cette fonction n'est appelée que dans ce cas).
+    if config.settings.alert_channels:
+        plan = prepare_follow_up(
+            log,
+            config,
+            AlertState(state_path(paths.data_dir)),
+            tunnel_of={service_key(target): target.tunnel_id for target, _probe in tested},
+        )
+        deliver_follow_up(plan, config, secrets)
 
 
 def _admin(paths: AppPaths, secrets: SecretStore | None, base_url: str | None) -> Any:

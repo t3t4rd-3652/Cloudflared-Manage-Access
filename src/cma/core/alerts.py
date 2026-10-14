@@ -12,7 +12,7 @@ import json
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from cma import APP_NAME, __version__
@@ -45,6 +45,17 @@ class Alert:
     title: str
     text: str
     level: str  # error, warning, success, info
+
+
+def elapsed_text(delta: timedelta) -> str:
+    """Durée lisible : « 12 min », « 5 h 20 », « 3 j 4 h » (au-delà de deux jours)."""
+    minutes = int(delta.total_seconds() // 60)
+    if minutes < 60:
+        return tr("{n} min").format(n=max(1, minutes))
+    hours, minutes = divmod(minutes, 60)
+    if hours < 48:
+        return tr("{h} h {m:02d}").format(h=hours, m=minutes)
+    return tr("{d} j {h} h").format(d=hours // 24, h=hours % 24)
 
 
 def build_request(kind: str, url: str, alert: Alert, now: datetime | None = None) -> urllib.request.Request:

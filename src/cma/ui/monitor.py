@@ -9,17 +9,22 @@ notification, carte « Santé du compte »). La logique partagée avec la tâche
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from cma.core.alertstate import AlertState, state_path
 from cma.core.availability import AvailabilityLog
 from cma.core.cfapi import Tunnel
 from cma.core.hostprobe import HostProbe
 from cma.core.monitoring import (
     Event,
+    deliver_follow_up,
     is_muted,
+    prepare_follow_up,
     record_services,
     record_tunnels,
     send_events,
@@ -62,6 +67,7 @@ class Monitor(QObject):
         self.availability = AvailabilityLog(ctx.paths.data_dir / "availability.json")
         self.tunnel_check_running = False
         self.service_check_running = False
+        self._follow_up_running = False
         self._tunnel_account: str | None = None
         self._service_account: str | None = None
         self._tunnel_timer = QTimer(self)
@@ -100,6 +106,7 @@ class Monitor(QObject):
             if self.ctx.config().settings.cloudflare_account_id == account:
                 self.report_tunnel_changes(self.tunnel_watch.update(tunnels))
                 self._record(record_tunnels(self.availability, self.ctx.config(), tunnels))
+                self._follow_up()
                 self.refresh()
 
         def failed(error: BaseException) -> None:
@@ -132,6 +139,7 @@ class Monitor(QObject):
                 return
             self.report_service_changes(watch.update(results))
             self._record(record_services(self.availability, self.ctx.config(), results))
+            self._follow_up()
             self.refresh()
             self.services_checked.emit()
 
@@ -164,6 +172,53 @@ class Monitor(QObject):
                 self.notice.emit("warning", tr("Alerte non envoyée : {error}").format(error=errors[0]), None)
 
         self.ctx.run(send(), done)
+
+    def _follow_up(self) -> None:
+        """Après un relevé : rappel des pannes qui durent (toutes les N heures). Le plan se prépare ici (rapide, sans
+        réseau), l'envoi et la note dans `alert_state.json` se font sur un autre fil ; un seul à la fois, pour qu'un
+        seul écrive le fichier."""
+        config = self.ctx.config()
+        settings = config.settings
+        if self._follow_up_running or not settings.alert_channels:
+            return
+        if settings.alert_repeat_hours <= 0:
+            return
+        tunnel_of = {service_key(r.target): r.target.tunnel_id for r in self.ctx.services.results}
+        plan = prepare_follow_up(
+            self.availability,
+            config,
+            AlertState(state_path(self.ctx.paths.data_dir)),
+            tunnel_of=tunnel_of,
+        )
+        if plan.empty:
+            with contextlib.suppress(OSError):
+                plan.state.save()  # rappels d'incidents clos oubliés
+            return
+        self._follow_up_running = True
+
+        async def send() -> list[str]:
+            return await asyncio.to_thread(
+                deliver_follow_up, plan, config, self.ctx.core.secrets, datetime.now(UTC)
+            )
+
+        def done(errors: list[str]) -> None:
+            self._follow_up_running = False
+            for error in errors:
+                log.warning("Rappel non envoyé : %s", error)
+            if errors:
+                self.notice.emit("warning", tr("Alerte non envoyée : {error}").format(error=errors[0]), None)
+
+        def failed(error: BaseException) -> None:
+            self._follow_up_running = False
+            log.warning("Rappel non envoyé : %s", error)
+
+        self.ctx.run(send(), done, failed)
+
+    def known_objects(self) -> list[tuple[str, str]]:
+        """(clé de sourdine, libellé) des tunnels et des noms d'hôte du dernier relevé, pour viser une maintenance."""
+        found = [(tunnel_key(t.id), t.name) for t in self.tunnel_watch.tunnels]
+        found += [(service_key(r.target), r.target.label) for r in self.ctx.services.results]
+        return sorted(found, key=lambda item: item[1].lower())
 
     def report_tunnel_changes(self, changes: list[TunnelChange]) -> None:
         config = self.ctx.config()
