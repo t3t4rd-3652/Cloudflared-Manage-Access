@@ -526,7 +526,7 @@ titre de la carte « Santé du compte », trop grand, corrigé au passage)
 | P20 | FAIT | 7105288 | 514 ✓ | 2026-10-09 |
 | P21 | FAIT | 0ee669c | 525 ✓ | 2026-10-09 |
 | P22 | FAIT | 3dacd6a | 525 ✓ | 2026-10-14 |
-| Vérification (2 juges) | FAIT | f8d5038, puis le commit suivant | 529 ✓ | 2026-10-14 |
+| Vérification (2 juges) | FAIT | f8d5038, 04354de | 529 ✓ | 2026-10-14 |
 
 **Prochaine action exacte :** P13 à P22 terminées et poussées ; corrections de la vérification indépendante
 (CLI redirigée en cp1252, tests instables sous la charge, documentation) faites, suite verte trois fois. Sur
