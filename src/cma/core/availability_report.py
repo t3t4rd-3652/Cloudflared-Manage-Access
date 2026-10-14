@@ -10,7 +10,7 @@ import csv
 import html
 import io
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from typing import Any
 
 from cma import APP_NAME, __version__
@@ -195,6 +195,6 @@ def _local(value: str) -> str:
 
 
 def build(
-    log: AvailabilityLog, days: int, now: datetime | None = None
+    log: AvailabilityLog, days: int, now: datetime | None = None, tz: tzinfo | None = None
 ) -> tuple[list[ReportRow], list[Incident]]:
-    return report(log, days, now), log.history(days=days, now=now)
+    return report(log, days, now, tz), log.history(days=days, now=now)

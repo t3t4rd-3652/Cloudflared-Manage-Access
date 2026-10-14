@@ -17,8 +17,10 @@ def sample_log(path) -> AvailabilityLog:
     log = AvailabilityLog(path)
     for hours in range(48):
         ok = hours not in (5, 6)
-        log.record_check("service:wiki", "wiki.<exemple>.fr", ok, 100.0 + hours, NOW - timedelta(hours=hours))
-    log.record_check("tunnel:t1", "bureau", True, None, NOW)
+        log.record_check(
+            "service:wiki", "wiki.<exemple>.fr", ok, 100.0 + hours, NOW - timedelta(hours=hours), UTC
+        )
+    log.record_check("tunnel:t1", "bureau", True, None, NOW, UTC)
     log.start("service", "service:wiki", "wiki.<exemple>.fr", "origin_down", NOW - timedelta(hours=6))
     log.end("service", "service:wiki", NOW - timedelta(hours=4, minutes=30))
     log.start("tunnel", "tunnel:t1", "bureau", "down", NOW - timedelta(minutes=20))
@@ -30,7 +32,7 @@ def sample_log(path) -> AvailabilityLog:
 
 def test_daily_series_keeps_empty_days(tmp_path):
     log = sample_log(tmp_path / "a.json")
-    series = daily(log, "service:wiki", 4, NOW)
+    series = daily(log, "service:wiki", 4, NOW, UTC)
     assert [d.day for d in series] == ["2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09"]
     assert series[0].uptime is None and series[0].checks == 0  # aucun relevé : pas une panne
     assert series[-1].checks == 13 and round(series[-1].uptime or 0, 3) == round(11 / 13, 3)
@@ -38,17 +40,17 @@ def test_daily_series_keeps_empty_days(tmp_path):
 
 def test_report_rows_and_downtime(tmp_path):
     log = sample_log(tmp_path / "a.json")
-    rows = {r.key: r for r in report(log, 1, NOW)}
+    rows = {r.key: r for r in report(log, 1, NOW, UTC)}
     assert rows["service:wiki"].downtime == timedelta(hours=1, minutes=30)
     assert rows["tunnel:t1"].downtime == timedelta(minutes=20) and rows["tunnel:t1"].kind == "tunnel"
     assert rows["service:vieux"].downtime == timedelta(hours=1)  # bornée au début de la période
-    ordered = [r.key for r in report(log, 1, NOW)]
+    ordered = [r.key for r in report(log, 1, NOW, UTC)]
     assert ordered[0] == "service:wiki"  # le moins disponible d'abord
 
 
 def test_report_formats(tmp_path):
     log = sample_log(tmp_path / "a.json")
-    rows, incidents = build(log, 30, NOW)
+    rows, incidents = build(log, 30, NOW, UTC)
     text = report_csv(rows, incidents)
     assert text.splitlines()[0].startswith("Objet;Type;Disponibilité")
     assert "wiki.<exemple>.fr;Service;95.83 %" in text and "en cours" in text
