@@ -2,7 +2,7 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
-## [Non publié]
+## [2.11.0] - 2026-10-14
 
 ### Ajouté
 - **Bilan de sécurité du compte** (Outils) : noms d'hôte publiés sans Access, politiques ouvertes à tout le monde,

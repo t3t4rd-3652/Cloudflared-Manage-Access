@@ -1,7 +1,7 @@
 # Plan du projet
 
-État au 2026-10-09, version **2.10.0** (P9 à P12 : surveillance des services, compte Cloudflare plus complet, usage quotidien, qualité
-et guide) ; P13 à P21 réalisés le 2026-10-09, P22 le 2026-10-14, non publiés (2.11). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+État au 2026-10-14, version **2.11.0** (P13 à P22 : bilan de sécurité, disponibilité et alertes, surveillance hors
+de la fenêtre, automatisation en ligne de commande, publication depuis SSH, « Quoi de neuf », documentation). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -528,6 +528,5 @@ titre de la carte « Santé du compte », trop grand, corrigé au passage)
 | P22 | FAIT | 3dacd6a | 525 ✓ | 2026-10-14 |
 | Vérification (2 juges) | FAIT | f8d5038, 04354de | 529 ✓ | 2026-10-14 |
 
-**Prochaine action exacte :** P13 à P22 terminées et poussées ; corrections de la vérification indépendante
-(CLI redirigée en cp1252, tests instables sous la charge, documentation) faites, suite verte trois fois. Sur
-demande : publier la 2.11.0 (`__version__`, section `## [2.11.0]` du CHANGELOG, tag `v2.11.0`) et l'installer.
+**Prochaine action exacte :** 2.11.0 publiée et installée le 2026-10-14. Prochain plan à proposer (P23 et
+suivantes) ; en attente côté propriétaire : soumission winget, signature du code.
