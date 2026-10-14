@@ -124,6 +124,33 @@ def test_health_submenu_mute_updates_config(qtbot, gui, monkeypatch):
     assert "tunnel:t1" in settings_after, "La cle du tunnel devrait etre dans muted"
 
 
+def test_health_menu_entries_are_wired(qtbot, gui, monkeypatch):
+    """Les entrées du vrai menu de l'icône déclenchent les bonnes actions (sans afficher le menu)."""
+    ctx, window = gui
+    tray = Tray(ctx, window)
+    opened: list[object] = []
+    monkeypatch.setattr(window, "open_tunnel", lambda t, **_kw: opened.append(t))
+    target = ServiceTarget("wiki.exemple.fr", "", "http://localhost:8080", "t1", "bureau")
+    tray._on_tunnels([Tunnel("t2", "labo", "down")])
+    tray._on_services([ServiceResult(target, HostProbe("origin_down", 502), datetime.now())])
+    health = next(a.menu() for a in tray.menu.actions() if a.menu() is not None and "Pannes" in a.text())
+    entries = {a.text(): a.menu() for a in health.actions() if a.menu() is not None}
+    assert set(entries) == {"Tunnel « labo » — Hors ligne", "wiki.exemple.fr — Service injoignable"}
+
+    def trigger(menu, text):
+        next(a for a in menu.actions() if a.text() == text).trigger()
+
+    trigger(entries["wiki.exemple.fr — Service injoignable"], "Ouvrir")
+    trigger(entries["Tunnel « labo » — Hors ligne"], "Ouvrir")
+    assert opened[0] is None and getattr(opened[1], "id", None) == "t2"
+    trigger(entries["wiki.exemple.fr — Service injoignable"], "Mettre en sourdine 1 h")
+    assert any(key.startswith("service:wiki.exemple.fr") for key in ctx.config().settings.muted)
+    # Reconstruit sans panne : le sous-menu disparaît.
+    tray._on_tunnels([])
+    tray._on_services([])
+    assert not any("Pannes" in a.text() for a in tray.menu.actions())
+
+
 def test_health_submenu_open_tunnel_calls_window_method(qtbot, gui, monkeypatch):
     """Ouvrir pour un tunnel appelle window.open_tunnel."""
     ctx, window = gui

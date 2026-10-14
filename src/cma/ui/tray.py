@@ -25,6 +25,7 @@ from cma.ui.icons import app_icon_with_status, token_icon
 from cma.ui.main_window import MainWindow
 from cma.ui.states import RUNNING, cloudflare_favorite, profile_session, sessions_summary, ssh_favorite
 from cma.ui.theme import LIGHT
+from cma.ui.views.cloud.services import probe_label
 
 
 class Tray(QObject):
@@ -39,6 +40,8 @@ class Tray(QObject):
         self.icon = QSystemTrayIcon(app_icon_with_status(None), self)
         self.icon.setToolTip(tr("CMA : {summary}").format(summary=sessions_summary([])))
         self.menu = QMenu()
+        # Sous-menu des pannes : enfant du menu (Qt le garde en vie), remplacé à chaque reconstruction.
+        self._health_menu: QMenu | None = None
         self.icon.setContextMenu(self.menu)
         self.icon.activated.connect(self._activated)
         ctx.bridge.session_changed.connect(self._on_session)
@@ -136,7 +139,7 @@ class Tray(QObject):
         if not self.troubled and not self.services:
             return None
 
-        health_menu = QMenu(tr("Pannes ({n})").format(n=len(self.troubled) + len(self.services)))
+        health_menu = QMenu(tr("Pannes ({n})").format(n=len(self.troubled) + len(self.services)), self.menu)
         health_menu.setIcon(token_icon("alert-triangle"))
 
         # Tunnels en panne
@@ -153,8 +156,7 @@ class Tray(QObject):
         # Services en panne
         for service_result in self.services:
             label = tr("{hostname} — {state}").format(
-                hostname=service_result.target.label,
-                state=service_result.probe.summary(service_result.target.label),
+                hostname=service_result.target.label, state=probe_label(service_result.probe)
             )
             service_submenu = health_menu.addMenu(label)
             service_submenu.addAction(
@@ -175,9 +177,9 @@ class Tray(QObject):
         self.window.open_tunnel(tunnel)
 
     def _open_cloud_from_health(self, service_result: ServiceResult) -> None:
-        """Ouvre la vue Cloudflare pour le service en panne."""
+        """Ouvre la vue Cloudflare (onglet Tunnels, relu) pour le service en panne, comme la carte « Santé du compte »."""
         self.window.bring_to_front()
-        self.window.show_view("cloud")
+        self.window.open_tunnel(None)
 
     def _mute_tunnel_for_one_hour(self, tunnel: Tunnel) -> None:
         """Met en sourdine le tunnel pendant 1 heure."""
@@ -198,14 +200,17 @@ class Tray(QObject):
 
     def _rebuild_menu(self) -> None:
         self.menu.clear()
+        if self._health_menu is not None:
+            self._health_menu.deleteLater()
+            self._health_menu = None
         summary = sessions_summary(list(self.sessions.values()))
         header = self.menu.addAction(tr("CMA — {summary}").format(summary=summary))
         header.setEnabled(False)
 
         # Sous-menu des pannes si présentes
-        health_submenu = self._build_health_submenu()
-        if health_submenu:
-            self.menu.addMenu(health_submenu)
+        self._health_menu = self._build_health_submenu()
+        if self._health_menu is not None:
+            self.menu.addMenu(self._health_menu)
 
         config = self.ctx.config()
         favorites: list[CloudflareProfile | SshProfile] = [
