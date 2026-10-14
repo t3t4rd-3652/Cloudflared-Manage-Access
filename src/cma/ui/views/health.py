@@ -32,7 +32,7 @@ class HealthCard(QFrame):
         row.addWidget(self.glyph, 0, Qt.AlignmentFlag.AlignTop)
         texts = QVBoxLayout()
         texts.setSpacing(2)
-        self.heading = label(tr("Santé du compte Cloudflare"), "title")
+        self.heading = label(tr("Santé du compte Cloudflare"), "section")
         texts.addWidget(self.heading)
         self.detail = label("", "meta", wrap=True)
         self.detail.setMinimumWidth(200)

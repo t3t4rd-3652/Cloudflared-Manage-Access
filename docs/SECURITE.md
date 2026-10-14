@@ -13,6 +13,7 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
 | Configuration `config.json` | Ne contient aucun secret. |
 | Instantanés `snapshots/*.json` | Configuration du compte Cloudflare (règles, politiques, DNS, Client ID des tokens) ; aucun jeton ni secret. Les 30 derniers par compte. |
 | Disponibilité `availability.json` | Incidents et taux des tunnels et services (noms d'hôte, états, durées) ; 90 jours au plus. |
+| Rapport de disponibilité exporté | Mêmes données (noms d'hôte, taux, incidents), aucun jeton ni secret. La page HTML est autonome : ni script ni ressource externe. |
 | Adresses des canaux d'alerte | Coffre du système (clé `alert:<id>`) : une adresse ntfy, Slack ou Teams vaut un jeton. |
 | Historique `history.json` | Nom des accès, horaires, compteurs et messages d'incident déjà masqués ; 90 jours au plus, effaçable depuis CMA. |
 | Journaux et rapport de diagnostic | Les secrets connus et les motifs habituels (en-tête `Cf-Access-Client-Secret`, `password=`…) sont masqués. |
@@ -67,6 +68,10 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
 - Supprimer une application Access rend son nom d'hôte joignable sans authentification s'il est publié : la
   confirmation le dit. Supprimer un tunnel n'est possible qu'une fois son connecteur arrêté.
 - « Oublier le jeton… » le retire du coffre, après confirmation. Révoquez-le aussi dans le tableau de bord Cloudflare si besoin.
+- La ligne de commande (`cma tunnels`, `review`, `availability`, `snapshot`, `alerts test`) lit le jeton dans le coffre
+  (celui de la surveillance pour `cma tunnels`, le jeton actif pour le reste) ; elle n'en accepte aucun en argument
+  et ne l'affiche jamais. `cma review` ne fait que lire : les corrections du bilan se font dans l'interface, après
+  confirmation.
 
 ## Mise à jour de CMA
 

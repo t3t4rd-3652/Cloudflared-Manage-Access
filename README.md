@@ -106,6 +106,9 @@ qui la corrige.
 - Passage par un profil Cloudflare pour les serveurs SSH publiés par Access, ou rebond par un autre serveur (ProxyJump).
 - Onglet **Fichiers** (SFTP) : parcourir le serveur, télécharger et envoyer fichiers ou dossiers, créer, renommer,
   supprimer, sur la connexion SSH du serveur.
+- **Publier sur Cloudflare** un port découvert : la boîte de publication s'ouvre préremplie (service d'après ce que
+  le port répond, nom d'hôte d'après le conteneur).
+- Import de `~/.ssh/config` : hôtes, utilisateurs, clés, rebonds (`ProxyJump`) et passages par cloudflared.
 
 ### Administration Cloudflare
 
@@ -126,7 +129,15 @@ Avec un jeton d'API Cloudflare, CMA gère aussi le côté serveur :
   avant leur expiration ; **Prolonger** repousse l'échéance, **Changer le secret** en crée un nouveau sans toucher aux profils.
 - **Surveillance** des tunnels et des services publiés : chaque nom d'hôte HTTP est testé depuis Internet toutes les
   15 minutes (même CMA fermé, par une tâche planifiée) ; une panne (502, tunnel sans connecteur, DNS) est notifiée
-  avec le conseil qui va avec. **Tester depuis Internet** et **Tester tous les noms d'hôte** à la demande.
+  avec le conseil qui va avec. **Tester depuis Internet** et **Tester tous les noms d'hôte** à la demande. La carte
+  **Santé du compte** de la page Sessions résume tunnels et services en panne, et service tokens à renouveler.
+- **Alertes** vers ntfy (téléphone), Slack, Microsoft Teams, Discord ou un webhook ; **sourdine** d'un tunnel ou d'un
+  nom d'hôte pendant une maintenance.
+- **Disponibilité** de chaque tunnel et service sur 90 jours : graphique jour par jour, temps de réponse, incidents,
+  rapport exportable en HTML ou en CSV.
+- **Bilan de sécurité** : noms d'hôte publiés sans Access, politiques ouvertes à tout le monde, tokens expirés ou
+  inutilisés, DNS vers un tunnel supprimé, règle finale ouverte… Ce que CMA sait corriger se corrige en lot, après
+  une confirmation qui liste chaque action.
 - DNS des noms d'hôte vérifié et corrigeable, règles d'ingress complètes (chemins, ordre, règle finale), trafic des
   dernières 24 heures par nom d'hôte.
 - **Réseaux privés** d'un tunnel (WARP) : routes vers des plages d'adresses, routage WARP.
@@ -137,11 +148,13 @@ Avec un jeton d'API Cloudflare, CMA gère aussi le côté serveur :
 ### Au quotidien
 
 - **Ctrl+K** : palette pour trouver et lancer n'importe quel accès, serveur, action, tunnel ou nom d'hôte au clavier.
+  **F1** : la liste des raccourcis clavier.
 - **Liens `cma://`** : `cma://connect/<profil>` ouvre un accès depuis un favori ou une documentation ; un profil se
   partage par un lien ou un fichier `.cma`, sans aucun secret.
 - Reprise après la mise en veille ou une coupure du réseau : les connexions repartent sans attendre.
 - Historique des notifications de la session dans la barre d'état, avec le nombre d'alertes non lues.
-- **Espaces de travail** : plusieurs accès ouverts d'un coup (« le matin »), et « Connecter tous les favoris ».
+- **Espaces de travail** : plusieurs accès ouverts d'un coup (« le matin »), au besoin dès le démarrage de CMA
+  (sauf sur un réseau Wi-Fi donné), et « Connecter tous les favoris ».
 - **Tester le service** : vérifie que le service distant répond vraiment, pas seulement que le port local est ouvert.
 - **Diagnostiquer…** : cloudflared, port local, DNS, proxy, HTTPS et Access, authentification ; rapport copiable.
 - Icône dans la zone de notification, dont la couleur reflète l'état global, avec les favoris dans son menu.
@@ -151,7 +164,8 @@ Avec un jeton d'API Cloudflare, CMA gère aussi le côté serveur :
 - Import et export des profils. Les secrets sont exclus par défaut, ou chiffrés par une phrase de passe.
 - Démarrage avec Windows, instance unique, rapport de diagnostic sans secrets.
 - Mise à jour en un clic (installeur, version portable Windows, AppImage Linux) : fichier vérifié par SHA-256, puis
-  relance. L'AppImage se met aussi à jour avec AppImageUpdate ou Gear Lever (zsync).
+  relance. L'AppImage se met aussi à jour avec AppImageUpdate ou Gear Lever (zsync). **Quoi de neuf** présente
+  ensuite les nouveautés, une fois.
 - Utilisable au clavier et avec un lecteur d'écran (NVDA, Narrateur) : chaque contrôle a un nom.
 
 ![Journaux en thème sombre](docs/captures/logs-sombre.png)

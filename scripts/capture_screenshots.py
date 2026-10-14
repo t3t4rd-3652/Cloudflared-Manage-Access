@@ -231,9 +231,68 @@ def show_demo_cloud(view) -> None:
     view._fill(overview)
 
 
+def show_demo_health(window) -> None:
+    """Carte « Santé du compte » de la page Sessions : un tunnel dégradé, un service en panne, un token à renouveler."""
+    from cma.core.cfapi import Tunnel
+    from cma.core.expiry import TokenExpiry
+    from cma.core.hostprobe import HostProbe
+    from cma.core.servicewatch import ServiceResult, ServiceTarget
+
+    token = next(t for t in window.ctx.config().tokens if t.name == "Laboratoire")
+    window.dashboard.health.update_state(
+        [Tunnel("t2", "labo", "degraded")],
+        [
+            ServiceResult(
+                ServiceTarget("wiki.exemple.fr", "", "http://localhost:8080", "t1", "bureau"),
+                HostProbe("origin_down", 502),
+                datetime.now(),
+            )
+        ],
+        [TokenExpiry(token, 12)],
+    )
+
+
+def demo_availability(path: Path) -> None:
+    """Journal de disponibilité fictif sur 30 jours : un relevé par heure, quelques pannes."""
+    from datetime import UTC
+
+    from cma.core.availability import AvailabilityLog
+
+    log = AvailabilityLog(path)
+    now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+    objects = (
+        (
+            "service:wiki.exemple.fr",
+            "wiki.exemple.fr",
+            "service",
+            160,
+            {(12, 9), (12, 10), (12, 11), (3, 14)},
+        ),
+        ("service:grafana.lab.exemple.fr", "grafana.lab.exemple.fr", "service", 90, {(20, 3), (20, 4)}),
+        ("tunnel:t1", "bureau", "tunnel", 0, set()),
+        ("tunnel:t2", "labo", "tunnel", 0, {(20, 2), (20, 3), (20, 4), (20, 5)}),
+    )
+    for key, name, kind, base_ms, outages in objects:
+        down_since = None
+        for hours in range(30 * 24, -1, -1):
+            at = now - timedelta(hours=hours)
+            day, hour = divmod(hours, 24)
+            ok = (day, hour) not in outages
+            ms = float(base_ms + (hours * 37) % 90 + (180 if day == 12 else 0)) if base_ms and ok else None
+            log.record_check(key, name, ok, ms, at)
+            if not ok and down_since is None:
+                down_since = at
+                log.start(kind, key, name, "origin_down" if kind == "service" else "down", at)
+            elif ok and down_since is not None:
+                down_since = None
+                log.end(kind, key, at)
+    log.save()
+
+
 def capture_guide(window, output: Path) -> None:
-    """Boîtes illustrant docs/GUIDE.md (thème clair) : test des noms d'hôte, réseaux privés, instantanés, partage.
-    Données fictives, aucun appel réseau : l'administration Cloudflare est remplacée par une façade inerte."""
+    """Boîtes illustrant docs/GUIDE.md (thème clair) : test des noms d'hôte, réseaux privés, instantanés, partage,
+    bilan de sécurité, disponibilité, publication d'un port découvert. Données fictives, aucun appel réseau :
+    l'administration Cloudflare est remplacée par une façade inerte."""
     from types import SimpleNamespace
 
     from PySide6.QtWidgets import QDialog
@@ -251,7 +310,10 @@ def capture_guide(window, output: Path) -> None:
 
     ctx = window.ctx
     inert = SimpleNamespace(
-        private_network=lambda _t: None, snapshot=lambda _a: None, permissions=lambda: None
+        private_network=lambda _t: None,
+        snapshot=lambda _a: None,
+        permissions=lambda: None,
+        security_review=lambda: None,
     )
     quiet = SimpleNamespace(
         run=lambda *_a, **_k: None, notify=lambda *_a, **_k: None, paths=ctx.paths, config=ctx.config
@@ -330,6 +392,50 @@ def capture_guide(window, output: Path) -> None:
     profile = next(p for p in ctx.config().cloudflare_profiles if p.name == "MongoDB production")
     save(ShareDialog(window, ctx, profile), "guide-partager.png")
 
+    from cma.core.security import Finding
+    from cma.ui.views.cloud.availability import AvailabilityDialog
+    from cma.ui.views.cloud.dialogs import PublishDialog
+    from cma.ui.views.cloud.security_review import SecurityReviewDialog
+
+    review = SecurityReviewDialog(window, quiet, inert)  # type: ignore[arg-type]
+    review.show_findings(
+        [
+            Finding("unprotected", "high", "wiki.exemple.fr", "wiki.exemple.fr", "protect", ("t1", "")),
+            Finding("dangling_dns", "medium", "ancien.exemple.fr", "d1", "delete_dns", ("z1",)),
+            Finding("exposed_catch_all", "medium", "labo", "t2", "catch_all_404"),
+            Finding("token_unused", "medium", "Prestataire 2025", "s9", "delete_token"),
+            Finding(
+                "access_not_required",
+                "low",
+                "mongodb.exemple.fr",
+                "mongodb.exemple.fr",
+                "require_access",
+                ("t1", "", "aud"),
+            ),
+            Finding("inactive_tunnel", "low", "ancien-nas", "t9"),
+        ]
+    )
+    review.table.selectRow(0)
+    save(review, "guide-bilan.png")
+
+    demo_availability(ctx.paths.data_dir / "availability.json")
+    availability = AvailabilityDialog(window, ctx.paths.data_dir / "availability.json")
+    availability.table.selectRow(availability.keys.index("service:wiki.exemple.fr"))
+    save(availability, "guide-disponibilite.png")
+
+    overview = window.cloud.overview
+    remote = {t.client_id for t in overview.tokens}
+    publish = PublishDialog(
+        window,
+        overview,
+        [t for t in ctx.config().tokens if t.client_id in remote],
+        hostname="grafana",
+        service="https://localhost:3000",
+        note="Le service est joint depuis le connecteur du tunnel : choisissez le tunnel dont cloudflared tourne "
+        "sur « NAS » (sinon, remplacez localhost par l'adresse du serveur).",
+    )
+    save(publish, "guide-publier-port.png")
+
 
 def main() -> int:
     output = Path(sys.argv[1] if len(sys.argv) > 1 else "docs/captures")
@@ -397,6 +503,7 @@ def main() -> int:
         window.set_cloudflared_status("cloudflared 2026.9.3")
         window.settings.data_dir.setText(r"C:\Users\<utilisateur>\AppData\Roaming\CloudflaredManager")
         suffix = "sombre" if theme_name == Theme.DARK else "clair"
+        show_demo_health(window)
         for key in ("dashboard", "profiles", "tokens", "ssh", "cloud", "logs", "settings"):
             window.show_view(key)
             if key == "profiles":

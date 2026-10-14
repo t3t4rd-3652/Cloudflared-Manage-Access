@@ -13,7 +13,8 @@ applications protégées par Cloudflare Access (`cloudflared access tcp`) et des
 Elle sait aussi administrer un compte Cloudflare (tunnels, noms d'hôte publiés, applications Access,
 service tokens) avec un jeton d'API.
 
-- Version courante : voir `src/cma/__init__.py` (2.10.0 au 2026-10-09). Historique utilisateur : `CHANGELOG.md`.
+- Version courante : voir `src/cma/__init__.py` (2.10.0 au 2026-10-09). Historique utilisateur : `CHANGELOG.md`,
+  embarqué dans les paquets (`cma/resources/CHANGELOG.md`) : la boîte « Quoi de neuf » en montre les sections.
 - Architecture, threads, cycle de vie des sessions : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - Sécurité et modèle de menace : [docs/SECURITE.md](docs/SECURITE.md). Scripts serveur : [docs/SERVEUR.md](docs/SERVEUR.md).
 - Conventions de code : [CONTRIBUTING.md](CONTRIBUTING.md) (identifiants en anglais, textes et commentaires en
@@ -54,7 +55,8 @@ Depuis Windows, l'environnement est `.venv` (uv n'est pas forcément dans le PAT
 ## Publier une version
 
 1. `__version__` dans `src/cma/__init__.py`, section `## [X.Y.Z] - date` dans `CHANGELOG.md` (à la place de
-   `## [Non publié]`), exemple `Get-FileHash` du `README.md`.
+   `## [Non publié]`), exemple `Get-FileHash` du `README.md`. Le titre doit garder la forme `## [X.Y.Z] - date` :
+   « Quoi de neuf » le lit (`cma.core.changelog`), et `tests/unit/test_changelog.py` exige la section de la version.
 2. Commit « Version X.Y.Z », tag `vX.Y.Z`, `git push origin main vX.Y.Z`.
 3. Le workflow `release.yml` enchaîne `windows` (onedir PyInstaller, zip portable, installeur Inno Setup, SBOM,
    manifestes winget et Scoop), `linux` (AppImage et tar.gz), `publish` (release GitHub « latest », notes
@@ -99,6 +101,7 @@ l'échec en annotations » (`check-runs` du commit, puis `annotations_url` du jo
 | 2026-10-08 | P7 : DNS des noms d'hôte vérifié et corrigeable, journal des accès pour un audit (période, CSV), onglet Applications sorti de `cloud/view.py`. Release **2.8.0**. |
 | 2026-10-09 | P8 : lecture du compte en parallèle (7-10 s → 2 s), test d'un nom d'hôte depuis Internet, historique des notifications. Release **2.9.0**. |
 | 2026-10-09 | P9 à P12 : surveillance des services publiés, reprise après la veille, réseaux privés WARP, journal d'audit, instantanés, permissions du jeton, trafic, liens `cma://` et partage, jetons d'API nommés, vues découpées, guide d'utilisation. Release **2.10.0**. |
+| 2026-10-09 → 10-14 | P13 à P22 (2.11, non publiée) : bilan de sécurité, Access exigé au niveau du tunnel, jeton de la surveillance, disponibilité (graphique, rapport HTML/CSV), alertes ntfy/Slack/Teams/Discord, sourdine, import de `~/.ssh/config`, carte « Santé du compte », surveillance sortie de la fenêtre (`ui/monitor.py`, ADR 0001), `cma review`, `cma availability`, `cma alerts test`, publication d'un port découvert, « Quoi de neuf », raccourcis (F1). |
 
 Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff-filter=D --name-only`).
 
@@ -204,6 +207,15 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   l'appel : une valeur par défaut figée empêche les tests de les remplacer.
 - **Import de `~/.ssh/config`** (`cma.core.sshconfig`) : le premier réglage d'un bloc l'emporte (comme ssh) ;
   blocs génériques et `Match` ignorés, `Include` suivi ; un hôte illisible (`%h`) est sauté, pas bloquant.
+- **Surveillance hors de la fenêtre** (`cma.ui.monitor.Monitor`, ADR 0001) : relevés des tunnels et services,
+  journal de disponibilité et alertes ; la fenêtre ne fait que l'afficher (signaux `troubled`, `notice`) et garde
+  les anciens noms par délégation (`window.check_tunnels`, `window.availability`…).
+- **Outils du compte chargés à la demande** (`cloud/account_tools.py`) : chaque boîte est importée à son ouverture
+  par une fonction de module du même nom (`show_security_review`…), que les tests remplacent. Ne pas remettre ces
+  imports en tête de module : ils pèsent sur le démarrage.
+- **« Quoi de neuf »** (`ui/dialogs/whatsnew.py`) : `Settings.last_seen_version` ; une première installation
+  (assistant ou migration) note la version sans rien montrer ; CMA démarré dans la zone de notification reçoit une
+  notification au lieu de la boîte. Le CHANGELOG manquant (installation par pip) n'est jamais une erreur.
 - **Boîtes modales et tests** : chaque boîte ouverte par la vue Cloudflare passe par une fonction de module
   (`ask_*`, `show_*`) que les tests remplacent ; `exec()` bloquerait le test jusqu'au délai de 180 s.
 

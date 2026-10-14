@@ -13,6 +13,8 @@ sécurité et les permissions du jeton d'API, [SECURITE.md](SECURITE.md).
 - [Savoir ce qui a changé sur le compte](#savoir-ce-qui-a-changé-sur-le-compte)
 - [Partager un accès avec un collègue](#partager-un-accès-avec-un-collègue)
 - [Travailler avec plusieurs comptes Cloudflare](#travailler-avec-plusieurs-comptes-cloudflare)
+- [Automatiser en ligne de commande](#automatiser-en-ligne-de-commande)
+- [Raccourcis clavier et nouveautés](#raccourcis-clavier-et-nouveautés)
 
 ## Ouvrir un accès Bureau à distance (RDP)
 
@@ -54,11 +56,24 @@ jeton d'API Cloudflare (**Cloudflare**, première visite).
 Ensuite, depuis le menu d'un nom d'hôte : **Modifier le service…**, **Ajouter une règle avec chemin…** (`/api`
 vers un autre service), **Monter** et **Descendre** pour l'ordre des règles, **Retirer ce nom d'hôte…**.
 
+### Depuis un port trouvé sur un serveur SSH
+
+**Serveurs SSH**, onglet **Ports distants** : après **Lister les ports**, choisissez un port puis **Publier sur
+Cloudflare…** (ou clic droit). La boîte de publication s'ouvre préremplie : le service d'après ce que le port
+répond (`https://localhost:3000`, `ssh://localhost:22`, `rdp://…`, sinon `tcp://…`) et un nom d'hôte d'après le
+conteneur ou le service (`grafana`).
+
+![Publication préremplie d'un port découvert](captures/guide-publier-port.png)
+
+Le service est joint depuis le connecteur du tunnel : choisissez le tunnel dont cloudflared tourne sur ce serveur.
+Si le connecteur est sur une autre machine, remplacez `localhost` par l'adresse du serveur.
+
 ## Un service ne répond plus (erreur 502, 1033…)
 
 CMA teste toutes les 15 minutes, depuis Internet, chaque nom d'hôte HTTP des tunnels en service (Paramètres ›
-Général › Cloudflare). Un nom en panne apparaît en notification, dans « Cloudflare · 1 ! » de la navigation et
-sur sa carte.
+Général › Cloudflare). Un nom en panne apparaît en notification, dans « Cloudflare · 1 ! » de la navigation,
+sur sa carte et dans la carte **Santé du compte** de la page Sessions (avec les tunnels en panne et les service
+tokens à renouveler ; **Voir** mène à l'objet).
 
 ![Cartes des noms d'hôte, dont un service injoignable](captures/cloud-clair.png)
 
@@ -98,7 +113,14 @@ Une maintenance prévue ? Clic droit sur le tunnel ou le nom d'hôte › **Mettr
 ne déclenche ni notification ni alerte jusqu'à la fin de la sourdine.
 
 **Outils › Disponibilité…** montre, pour chaque tunnel et service, le taux de disponibilité sur 7 et 30 jours, le
-temps de réponse moyen et la liste des incidents (début, fin, durée, cause).
+temps de réponse moyen et la liste des incidents (début, fin, durée, cause). Choisissez une ligne pour son
+graphique jour par jour (7, 30 ou 90 jours) : une barre par jour (verte à partir de 99,9 %, orange à partir de
+98 %, rouge en dessous) et la courbe du temps de réponse moyen.
+
+![Disponibilité d'un service sur 30 jours](captures/guide-disponibilite.png)
+
+**Exporter le rapport…** enregistre la période choisie en page HTML autonome (à joindre à un compte rendu) ou en CSV
+pour un tableur : disponibilité, durée des pannes et incidents de chaque objet.
 
 ## Renouveler un service token
 
@@ -128,6 +150,8 @@ Les politiques d'accès des appareils WARP se règlent dans Cloudflare Zero Trus
 **Outils › Bilan de sécurité…** liste ce qui expose un service (nom d'hôte publié sans Access, politique ouverte à
 tout le monde), ce qui traîne (token inutilisé depuis 90 jours, politique sans application, DNS vers un tunnel
 supprimé) et ce qui est cassé (token expiré, application sans politique).
+
+![Bilan de sécurité du compte](captures/guide-bilan.png)
 
 1. Choisissez un constat : son explication s'affiche dessous.
 2. Cochez ceux que CMA sait corriger, puis **Corriger la sélection…** : chaque action est listée avant d'être faite.
@@ -180,3 +204,29 @@ Un même jeton d'API peut donner accès à plusieurs comptes : le choix du compt
 Cloudflare. Pour un autre accès Cloudflare (un client, un compte personnel), **Outils › Ajouter un jeton d'API…** :
 collez le jeton et donnez-lui un nom. Le choix du jeton apparaît alors dans l'en-tête ; chaque jeton revient à son
 dernier compte, et la surveillance suit le jeton choisi.
+
+## Automatiser en ligne de commande
+
+La commande `cma` (installée avec l'application) lit les mêmes données que l'interface, avec le jeton d'API actif
+(celui de la surveillance pour `cma tunnels`, s'il est choisi).
+Chaque commande rend un code de retour exploitable par une tâche planifiée ou une supervision : 0 si tout va bien,
+2 si quelque chose demande votre attention, 1 en cas d'erreur.
+
+| Commande | Ce qu'elle fait | Code 2 si… |
+| --- | --- | --- |
+| `cma tunnels [--services] [--json]` | état des tunnels, et avec `--services` le test de chaque nom d'hôte HTTP | un tunnel ou un service est en panne |
+| `cma availability [--days 1/7/30/90] [--json]` | disponibilité et incidents relevés par la surveillance | un incident est en cours |
+| `cma review [--json] [--all]` | bilan de sécurité du compte (`--all` : avec les constats ignorés) | un constat de gravité élevée n'est pas ignoré |
+| `cma snapshot` | instantané de la configuration, et ce qui a changé depuis le précédent | quelque chose a changé |
+| `cma alerts test` | un message de test vers chaque canal d'alerte actif | — (code 1 si un canal échoue) |
+
+Exemples : `cma review` planifié chaque lundi, qui échoue si un constat élevé apparaît ;
+`cma availability --days 30 --json` en fin de mois pour alimenter un tableau de bord.
+
+## Raccourcis clavier et nouveautés
+
+**F1** ouvre la liste des raccourcis clavier (aussi dans **Paramètres › À propos**). Le plus utile : **Ctrl+K**, la
+palette de commandes, qui trouve par son nom tout accès, serveur, objet du compte ou action de CMA.
+
+Après une mise à jour, **Quoi de neuf** présente une fois les nouveautés des versions installées depuis la dernière
+ouverture. On le retrouve dans **Paramètres › À propos** et dans la palette.

@@ -57,7 +57,9 @@ def test_whats_new_dialog(gui):
 def test_announce_update_dialog_or_notice(gui, monkeypatch):
     _ctx, window = gui
     shown: list[list[Release]] = []
-    monkeypatch.setattr(whatsnew_module, "show_whats_new", lambda _p, releases, _lang="fr": shown.append(releases))
+    monkeypatch.setattr(
+        whatsnew_module, "show_whats_new", lambda _p, releases, _lang="fr": shown.append(releases)
+    )
     announce_update(window, [])
     assert shown == []
     # Fenêtre cachée (démarrage dans la zone de notification) : une notification dont l'action ouvre la boîte.

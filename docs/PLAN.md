@@ -13,8 +13,9 @@ anciens plans, qui ont tous été appliqués. L'historique des étapes est dans 
 | --- | --- |
 | Accès Cloudflare (`cloudflared access tcp`) | Complet : profils, groupes, favoris, service tokens partagés, proxy, en-têtes, reconnexion, état réel de l'écoute, test du service, diagnostic guidé. |
 | Redirections SSH | Complet : locales, SOCKS 5, inverses, rebond ProxyJump, passage par un profil Cloudflare, découverte des ports (Linux et Windows), clés d'hôte vérifiées. |
-| Administration Cloudflare | Lecture du compte (tunnels, noms d'hôte, applications Access, service tokens), publication d'un service de bout en bout, retrait d'un nom d'hôte, création de tokens, import en profils. |
-| Quotidien | Palette Ctrl+K, espaces de travail, zone de notification, CLI `cma`, démarrage avec le système, verrouillage, surveillance des tunnels du compte. |
+| Administration Cloudflare | Lecture du compte (tunnels, noms d'hôte, applications Access, service tokens), publication d'un service de bout en bout (aussi depuis un port découvert en SSH), retrait d'un nom d'hôte, création de tokens, import en profils, bilan de sécurité avec corrections, journal d'audit, instantanés. |
+| Surveillance | Tunnels et services publiés (CMA ouvert ou tâche planifiée), disponibilité sur 90 jours avec graphique et rapport HTML/CSV, alertes ntfy, Slack, Teams, Discord ou webhook, sourdine, carte « Santé du compte ». |
+| Quotidien | Palette Ctrl+K, raccourcis (F1), « Quoi de neuf » après une mise à jour, espaces de travail (au démarrage), zone de notification, CLI `cma` (dont `review`, `availability`, `alerts test`), démarrage avec le système, verrouillage. |
 | Secrets | Coffre du système, ou coffre chiffré en mode portable (phrase de passe mémorisable par DPAPI). Rien en clair dans la configuration, les arguments ou les journaux. |
 | Interface | Thèmes clair et sombre aux contrastes vérifiés, accessibilité contrôlée par test, français, anglais, allemand et espagnol. |
 
@@ -28,8 +29,8 @@ anciens plans, qui ont tous été appliqués. L'historique des étapes est dans 
 
 ### Qualité
 
-- Environ 390 tests (unitaires, intégration avec un faux cloudflared et un serveur SSH en mémoire, interface
-  pytest-qt). Couverture : 92 % sur `cma.core` (seuil 90 %), 88 % au total (seuil 80 %). Environ 45 s en
+- 525 tests (unitaires, intégration avec un faux cloudflared et un serveur SSH en mémoire, interface
+  pytest-qt). Couverture : 93 % sur `cma.core` (seuil 90 %), 90 % au total (seuil 80 %). Environ 50 s en
   parallèle (`pytest -n auto`), 3 min 30 en série.
 - CI à chaque push : lint, typage Windows et Linux, tests sous Windows et Linux (et macOS, non bloquant), vrai
   cloudflared, audit des dépendances, scripts serveur sur trois distributions, temps de démarrage, captures à
@@ -486,7 +487,8 @@ Statut : FAIT (démarrage : médiane de 2339 ms à 2105 ms, dont `run_gui` de 17
 
 ### P22 — Documentation et captures (2.11)
 
-Statut : EN COURS
+Statut : FAIT (captures régénérées et regardées en clair et en sombre, liens du guide et du README vérifiés ; le
+titre de la carte « Santé du compte », trop grand, corrigé au passage)
 
 - **Objectif** : guide, README et captures à jour de P13 à P21.
 - **Tâches** : captures régénérées (carte « Santé du compte », bilan, disponibilité) ; guide (rapports, automatisation,
@@ -518,8 +520,8 @@ Statut : EN COURS
 | P18 | FAIT | 4fc1068 | 511 ✓ | 2026-10-09 |
 | P19 | FAIT | aa5464c | 512 ✓ | 2026-10-09 |
 | P20 | FAIT | 7105288 | 514 ✓ | 2026-10-09 |
-| P21 | FAIT | — | 525 ✓ | 2026-10-09 |
-| P22 | EN COURS | — | — | — |
+| P21 | FAIT | 0ee669c | 525 ✓ | 2026-10-09 |
+| P22 | FAIT | — | 525 ✓ | 2026-10-14 |
 
-**Prochaine action exacte :** `scripts/capture_screenshots.py` (P22) pour les captures de la carte « Santé du
-compte », du bilan de sécurité et du graphique de disponibilité, puis le guide (`docs/GUIDE.md`).
+**Prochaine action exacte :** P13 à P22 terminées. Pousser `main`, suivre la CI, puis, sur demande, publier la
+2.11.0 (`__version__`, section `## [2.11.0]` du CHANGELOG, tag `v2.11.0`) et l'installer sur le poste.
