@@ -222,8 +222,9 @@ def test_publish_dialog_with_prefilled_values_accessibility(qtbot, gui):
     assert dialog.windowTitle()
     assert accessible_name(dialog.hostname) == "Nom d'hôte"
     assert accessible_name(dialog.service) == "Service"
-    assert accessible_name(dialog.tunnel) == "Tunnel"
-    assert accessible_name(dialog.zone) == "Domaine"
+    # Listes non modifiables : sous Linux et macOS, Qt annonce le texte affiché ; le nom posé est vérifié tel quel.
+    assert dialog.tunnel.accessibleName() == "Tunnel" and accessible_name(dialog.tunnel)
+    assert dialog.zone.accessibleName() == "Domaine" and accessible_name(dialog.zone)
     verify_tab_order(dialog, min_controls=2)
     dialog.deleteLater()
 

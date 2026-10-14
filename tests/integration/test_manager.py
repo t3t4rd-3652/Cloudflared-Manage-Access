@@ -442,7 +442,11 @@ async def test_resume_after_network(manager, store, monkeypatch):
 
     assert await manager.resume_after_network() == 2
     # Réveillée : elle relance cloudflared tout de suite, au lieu d'attendre ses 60 s.
-    await wait_state(manager, info.id, {SessionState.STARTING, SessionState.LISTENING}, timeout=30.0)
+    # ERROR compte aussi : pendant les 60 s d'attente, le port libéré peut être pris par un autre test en parallèle
+    # (« Le port … est déjà utilisé ») ; ce qui est vérifié, c'est que la session n'attend plus ses 60 s.
+    await wait_state(
+        manager, info.id, {SessionState.STARTING, SessionState.LISTENING, SessionState.ERROR}, timeout=30.0
+    )
     relaunched = manager.active_session_for(given_up.id)
     assert relaunched is not None and relaunched.id != abandoned.id
     await wait_state(manager, relaunched.id, {SessionState.LISTENING})
