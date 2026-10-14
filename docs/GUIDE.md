@@ -60,8 +60,8 @@ vers un autre service), **Monter** et **Descendre** pour l'ordre des règles, **
 
 **Serveurs SSH**, onglet **Ports distants** : après **Lister les ports**, choisissez un port puis **Publier sur
 Cloudflare…** (ou clic droit). La boîte de publication s'ouvre préremplie : le service d'après ce que le port
-répond (`https://localhost:3000`, `ssh://localhost:22`, `rdp://…`, sinon `tcp://…`) et un nom d'hôte d'après le
-conteneur ou le service (`grafana`).
+répond (`https://localhost:3000`, `ssh://localhost:22`, `rdp://…`, `smb://…`, sinon `tcp://…`) et un nom d'hôte
+d'après le conteneur ou le service (`grafana`).
 
 ![Publication préremplie d'un port découvert](captures/guide-publier-port.png)
 

@@ -310,4 +310,8 @@ async def test_cli_review_and_alerts(cf, admin, paths, secrets, store, capsys):
     out = capsys.readouterr().out
     assert "✓ Bon" in out and "✗ Mauvais : Le canal a refusé l'alerte (500)." in out
     assert received == ["/ok", "/ko"]
+    # Tous les canaux acceptent : code 0.
+    store.update(lambda c: setattr(c.settings, "alert_channels", [good]))
+    assert await asyncio.to_thread(send_test_alerts, paths, secrets=secrets) == 0
+    assert capsys.readouterr().out.strip() == "✓ Bon"
     server.shutdown()

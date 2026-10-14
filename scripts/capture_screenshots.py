@@ -239,17 +239,18 @@ def show_demo_health(window) -> None:
     from cma.core.servicewatch import ServiceResult, ServiceTarget
 
     token = next(t for t in window.ctx.config().tokens if t.name == "Laboratoire")
-    window.dashboard.health.update_state(
-        [Tunnel("t2", "labo", "degraded")],
-        [
-            ServiceResult(
-                ServiceTarget("wiki.exemple.fr", "", "http://localhost:8080", "t1", "bureau"),
-                HostProbe("origin_down", 502),
-                datetime.now(),
-            )
-        ],
-        [TokenExpiry(token, 12)],
-    )
+    tunnels = [Tunnel("t2", "labo", "degraded")]
+    services = [
+        ServiceResult(
+            ServiceTarget("wiki.exemple.fr", "", "http://localhost:8080", "t1", "bureau"),
+            HostProbe("origin_down", 502),
+            datetime.now(),
+        )
+    ]
+    # Comme un relevé de la surveillance : badge « Cloudflare · 2 ! » de la navigation, puis la carte, avec un
+    # token à renouveler (les tokens de démonstration n'expirent pas).
+    window._on_troubled(tunnels, services)
+    window.dashboard.health.update_state(tunnels, services, [TokenExpiry(token, 12)])
 
 
 def demo_availability(path: Path) -> None:

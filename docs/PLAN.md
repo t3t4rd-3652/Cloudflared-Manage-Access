@@ -1,7 +1,7 @@
 # Plan du projet
 
 État au 2026-10-09, version **2.10.0** (P9 à P12 : surveillance des services, compte Cloudflare plus complet, usage quotidien, qualité
-et guide) ; P13 à P22 réalisés le 2026-10-14, non publiés (2.11). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+et guide) ; P13 à P21 réalisés le 2026-10-09, P22 le 2026-10-14, non publiés (2.11). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -29,7 +29,7 @@ anciens plans, qui ont tous été appliqués. L'historique des étapes est dans 
 
 ### Qualité
 
-- 525 tests (unitaires, intégration avec un faux cloudflared et un serveur SSH en mémoire, interface
+- 529 tests (unitaires, intégration avec un faux cloudflared et un serveur SSH en mémoire, interface
   pytest-qt). Couverture : 93 % sur `cma.core` (seuil 90 %), 90 % au total (seuil 80 %). Environ 50 s en
   parallèle (`pytest -n auto`), 3 min 30 en série.
 - CI à chaque push : lint, typage Windows et Linux, tests sous Windows et Linux (et macOS, non bloquant), vrai
@@ -413,7 +413,7 @@ jetable dans 198.18.250.0/24, Access exigé au niveau du tunnel si la permission
 
 Statut : FAIT
 
-Réalisé : `ui/monitor.py` et `ui/palette_entries.py` sortis de `main_window.py` (990 → 728 lignes), test du
+Réalisé : `ui/monitor.py` et `ui/palette_entries.py` sortis de `main_window.py` (990 → 724 lignes, 766 après P20 et P21), test du
 `Monitor` sans fenêtre, `ARCHITECTURE.md` complété (modules et schéma de la surveillance). Un test instable de la
 reprise réseau corrigé au passage (deux sessions pouvaient recevoir le même port).
 
@@ -500,6 +500,9 @@ titre de la carte « Santé du compte », trop grand, corrigé au passage)
 
 ### Dette technique à surveiller
 
+- Disponibilité : le journal agrège les relevés par jour UTC (`AvailabilityLog`), alors que le graphique et les
+  incidents s'affichent en heure locale. Un incident vers minuit (heure de Paris) peut colorer la barre de la veille.
+  Le corriger demande d'agréger par jour local, donc de migrer `availability.json`.
 - La couverture du cœur est juste au-dessus du seuil : chaque nouveau module de `cma.core` arrive avec ses tests.
 - Logique des vues extraite le 2026-10-08 : `cma.ui.states` (états des sessions, de la liaison SSH et des
   favoris, autrefois recopiés dans le tableau de bord, la zone de notification et la vue SSH) et
@@ -522,7 +525,8 @@ titre de la carte « Santé du compte », trop grand, corrigé au passage)
 | P19 | FAIT | aa5464c | 512 ✓ | 2026-10-09 |
 | P20 | FAIT | 7105288 | 514 ✓ | 2026-10-09 |
 | P21 | FAIT | 0ee669c | 525 ✓ | 2026-10-09 |
-| P22 | FAIT | 3dacd6a | 528 ✓ | 2026-10-14 |
+| P22 | FAIT | 3dacd6a | 525 ✓ | 2026-10-14 |
+| Vérification (2 juges) | FAIT | f8d5038, puis le commit suivant | 529 ✓ | 2026-10-14 |
 
 **Prochaine action exacte :** P13 à P22 terminées et poussées ; corrections de la vérification indépendante
 (CLI redirigée en cp1252, tests instables sous la charge, documentation) faites, suite verte trois fois. Sur

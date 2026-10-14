@@ -120,8 +120,21 @@ def test_account_commands_are_dispatched(paths, capsys, monkeypatch):
     assert cli(paths, "review", "--json", "--all") == 2
     assert cli(paths, "alerts", "test") == 1
     assert calls == [("review", {"as_json": True, "include_ignored": True}), ("alerts", {})]
+    assert cli(paths, "alerts") == 1  # sans action : message d'usage, rien n'est envoyé
+    assert "cma alerts test" in capsys.readouterr().err and len(calls) == 2
     assert cli(paths, "availability", "--days", "7", "--json") == 0
     assert json.loads(capsys.readouterr().out)["days"] == 7
+
+
+def test_benchmark_never_opens_the_real_vault(paths, monkeypatch):
+    """`startup_benchmark.py` (CMA_STARTUP_BENCHMARK) : coffre vide en mémoire, jamais le trousseau du poste."""
+    from cma.core.secrets import MemorySecretStore
+    from cma.ui import app
+
+    monkeypatch.setenv("CMA_STARTUP_BENCHMARK", "1")
+    monkeypatch.setattr(app, "system_keyring", lambda: pytest.fail("trousseau du poste ouvert"))
+    store = app._open_secret_store(paths)
+    assert isinstance(store, MemorySecretStore) and store.get("cfapi:token") is None
 
 
 def test_redirected_output_never_breaks_on_symbols(paths, monkeypatch):

@@ -3,7 +3,7 @@
     uv run python scripts/startup_benchmark.py [--runs 5] [--limit-ms 4000]
 
 Chaque essai lance `python -m cma gui` dans un dossier de données vide, avec CMA_STARTUP_BENCHMARK=1 : l'application
-signale l'instant où elle est prête puis quitte. La médiane doit rester sous la limite ; le résultat est aussi écrit
+prend un coffre vide en mémoire (jamais le trousseau du poste), signale l'instant où elle est prête puis quitte. La médiane doit rester sous la limite ; le résultat est aussi écrit
 dans le résumé du job GitHub Actions s'il existe.
 """
 

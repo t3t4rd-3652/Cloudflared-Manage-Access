@@ -50,6 +50,9 @@ def install_qt_translation(app: QApplication, language: str) -> QTranslator | No
 
 
 def _open_secret_store(paths: AppPaths) -> SecretStore:
+    if os.environ.get("CMA_STARTUP_BENCHMARK"):
+        # Mesure du démarrage (scripts/startup_benchmark.py) : un coffre vide en mémoire, jamais celui du poste.
+        return MemorySecretStore(reason="mesure du démarrage")
     # Version portable : les secrets suivent le dossier data/ (coffre chiffré), pas le trousseau de ce poste.
     if system_keyring() is not None and not paths.portable:
         return open_secret_store()
