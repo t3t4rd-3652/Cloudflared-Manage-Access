@@ -521,7 +521,7 @@ titre de la carte « Santé du compte », trop grand, corrigé au passage)
 | P19 | FAIT | aa5464c | 512 ✓ | 2026-10-09 |
 | P20 | FAIT | 7105288 | 514 ✓ | 2026-10-09 |
 | P21 | FAIT | 0ee669c | 525 ✓ | 2026-10-09 |
-| P22 | FAIT | — | 525 ✓ | 2026-10-14 |
+| P22 | FAIT | 3dacd6a | 525 ✓ | 2026-10-14 |
 
 **Prochaine action exacte :** P13 à P22 terminées. Pousser `main`, suivre la CI, puis, sur demande, publier la
 2.11.0 (`__version__`, section `## [2.11.0]` du CHANGELOG, tag `v2.11.0`) et l'installer sur le poste.
