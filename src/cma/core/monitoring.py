@@ -7,8 +7,8 @@ sourdine, alertes vers l'extérieur.
   La sourdine d'un tunnel couvre aussi ses noms d'hôte.
 - Une maintenance hebdomadaire (`MaintenanceWindow`) met en sourdine, pendant son créneau, un objet ou tout le compte.
 - Les alertes partent vers chaque canal actif ; un canal en échec n'empêche pas les autres.
-- Une panne qui dure est rappelée toutes les N heures (état des envois dans `alert_state.json`, ADR 0002) : mêmes
-  règles CMA ouvert et tâche planifiée.
+- Une panne qui dure est rappelée toutes les N heures, et le résumé hebdomadaire part le lundi (état des envois dans
+  `alert_state.json`, ADR 0002) : mêmes règles CMA ouvert et tâche planifiée.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from cma.core.alerts import Alert, AlertError, elapsed_text, secret_key, send_al
 from cma.core.alertstate import AlertState
 from cma.core.availability import AvailabilityLog
 from cma.core.cfapi import Tunnel
+from cma.core.digest import build_digest, digest_due, week_id
 from cma.core.hostprobe import HostProbe
 from cma.core.models import Config, MaintenanceWindow
 from cma.core.secrets import SecretStore
@@ -240,7 +241,7 @@ def broadcast(
     return reached, errors
 
 
-# --- Rappels des pannes qui durent ---------------------------------------------------------
+# --- Rappels des pannes qui durent et résumé hebdomadaire ---------------------------------------------------------
 
 
 def reminder_events(
@@ -301,14 +302,16 @@ def send_reminders(
 
 @dataclass
 class FollowUp:
-    """Ce qu'un relevé laisse à envoyer en plus des pannes et des retours : les rappels."""
+    """Ce qu'un relevé laisse à envoyer en plus des pannes et des retours : rappels et résumé de la semaine."""
 
     state: AlertState
     reminders: list[Event]
+    digest: Alert | None = None
+    week: str = ""
 
     @property
     def empty(self) -> bool:
-        return not self.reminders
+        return not self.reminders and self.digest is None
 
 
 def prepare_follow_up(
@@ -316,14 +319,19 @@ def prepare_follow_up(
     config: Config,
     state: AlertState,
     *,
+    check_digest: bool,
     now: datetime | None = None,
     tz: tzinfo | None = None,
     tunnel_of: Mapping[str, str] | None = None,
 ) -> FollowUp:
-    """Rappels dus. Rapide et sans réseau : la fenêtre peut l'appeler sur son fil, puis envoyer
-    (`deliver_follow_up`) dans un autre."""
+    """Rappels dus et, si `check_digest` et que le résumé est dû cette semaine, son contenu. Rapide et sans réseau :
+    la fenêtre peut l'appeler sur son fil, puis envoyer (`deliver_follow_up`) dans un autre."""
     moment = now or datetime.now(UTC)
-    return FollowUp(state, reminder_events(log, config, state, moment, tz, tunnel_of))
+    plan = FollowUp(state, reminder_events(log, config, state, moment, tz, tunnel_of))
+    if check_digest and digest_due(config, state, moment, tz):
+        plan.digest = build_digest(log, config, moment, tz)
+        plan.week = week_id(moment.astimezone(tz))
+    return plan
 
 
 def deliver_follow_up(
@@ -333,8 +341,13 @@ def deliver_follow_up(
     now: datetime | None = None,
     sender: Sender | None = None,
 ) -> list[str]:
-    """Envoie les rappels, note ce qui est parti dans `alert_state.json` ; renvoie les erreurs."""
+    """Envoie rappels et résumé, note ce qui est parti dans `alert_state.json` ; renvoie les erreurs."""
     errors = send_reminders(plan.reminders, config, secrets, plan.state, now, sender)
+    if plan.digest is not None:
+        reached, failed = broadcast(plan.digest, config, secrets, sender)
+        errors += failed
+        if reached:
+            plan.state.mark_digest(plan.week)
     try:
         plan.state.save()
     except OSError as exc:

@@ -106,7 +106,7 @@ class Monitor(QObject):
             if self.ctx.config().settings.cloudflare_account_id == account:
                 self.report_tunnel_changes(self.tunnel_watch.update(tunnels))
                 self._record(record_tunnels(self.availability, self.ctx.config(), tunnels))
-                self._follow_up()
+                self._follow_up(digest=True)
                 self.refresh()
 
         def failed(error: BaseException) -> None:
@@ -139,7 +139,7 @@ class Monitor(QObject):
                 return
             self.report_service_changes(watch.update(results))
             self._record(record_services(self.availability, self.ctx.config(), results))
-            self._follow_up()
+            self._follow_up(digest=False)
             self.refresh()
             self.services_checked.emit()
 
@@ -173,21 +173,22 @@ class Monitor(QObject):
 
         self.ctx.run(send(), done)
 
-    def _follow_up(self) -> None:
-        """Après un relevé : rappel des pannes qui durent (toutes les N heures). Le plan se prépare ici (rapide, sans
-        réseau), l'envoi et la note dans `alert_state.json` se font sur un autre fil ; un seul à la fois, pour qu'un
-        seul écrive le fichier."""
+    def _follow_up(self, *, digest: bool) -> None:
+        """Après un relevé : rappel des pannes qui durent (toutes les N heures) et, après celui des tunnels, résumé du
+        lundi s'il est dû. Le plan se prépare ici (rapide, sans réseau), l'envoi et la note dans `alert_state.json`
+        se font sur un autre fil ; un seul à la fois, pour qu'un seul écrive le fichier."""
         config = self.ctx.config()
         settings = config.settings
         if self._follow_up_running or not settings.alert_channels:
             return
-        if settings.alert_repeat_hours <= 0:
+        if settings.alert_repeat_hours <= 0 and not (digest and settings.weekly_digest):
             return
         tunnel_of = {service_key(r.target): r.target.tunnel_id for r in self.ctx.services.results}
         plan = prepare_follow_up(
             self.availability,
             config,
             AlertState(state_path(self.ctx.paths.data_dir)),
+            check_digest=digest,
             tunnel_of=tunnel_of,
         )
         if plan.empty:
@@ -204,13 +205,13 @@ class Monitor(QObject):
         def done(errors: list[str]) -> None:
             self._follow_up_running = False
             for error in errors:
-                log.warning("Rappel non envoyé : %s", error)
+                log.warning("Rappel ou résumé non envoyé : %s", error)
             if errors:
                 self.notice.emit("warning", tr("Alerte non envoyée : {error}").format(error=errors[0]), None)
 
         def failed(error: BaseException) -> None:
             self._follow_up_running = False
-            log.warning("Rappel non envoyé : %s", error)
+            log.warning("Rappel ou résumé non envoyé : %s", error)
 
         self.ctx.run(send(), done, failed)
 

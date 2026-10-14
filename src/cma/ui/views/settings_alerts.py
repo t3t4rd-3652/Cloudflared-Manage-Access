@@ -217,6 +217,15 @@ class AlertsSection:
         form.addRow(row)
         self.status = label("", "meta", wrap=True)
         form.addRow(self.status)
+        self.digest = QCheckBox(tr("Envoyer un résumé chaque lundi"))
+        self.digest.setToolTip(
+            tr(
+                "Disponibilité des 7 derniers jours, incidents et service tokens à renouveler, le lundi à partir "
+                "de 9 h (heure locale), une fois par semaine. « cma alerts digest » l'envoie tout de suite."
+            )
+        )
+        self.digest.toggled.connect(lambda checked: self._set("weekly_digest", checked))
+        form.addRow(self.digest)
         # Maintenance et rappels.
         form.addRow(label(tr("Maintenance et rappels"), "section"))
         form.addRow(
@@ -261,6 +270,7 @@ class AlertsSection:
 
     def load(self, config: Config) -> None:
         self._loading = True
+        self.digest.setChecked(config.settings.weekly_digest)
         self.repeat.setValue(config.settings.alert_repeat_hours)
         self._load_windows(config)
         self._loading = False

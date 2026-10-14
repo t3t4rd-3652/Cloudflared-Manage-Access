@@ -113,7 +113,7 @@ def test_default_time_zone_is_local():
 def test_old_and_invalid_configuration():
     old = Config.model_validate({"settings": {"theme": "dark", "muted": {}}})
     assert old.settings.maintenance_windows == []
-    assert old.settings.alert_repeat_hours == 0
+    assert old.settings.alert_repeat_hours == 0 and old.settings.weekly_digest is False
     again = Config.model_validate(json.loads(old.model_dump_json()))
     assert again == old
     with pytest.raises(ValidationError):
@@ -296,12 +296,12 @@ def test_follow_up_writes_the_state_file(tmp_path: Path):
     now = T0 + timedelta(hours=3)
     path = state_path(tmp_path)
 
-    plan = prepare_follow_up(log, config, AlertState(path), now=now, tz=UTC)
-    assert not plan.empty
+    plan = prepare_follow_up(log, config, AlertState(path), check_digest=False, now=now, tz=UTC)
+    assert not plan.empty and plan.digest is None
     assert deliver_follow_up(plan, config, secrets, now, lambda _k, _u, a: sent.append(a.title)) == []
     assert sent == ["CMA — toujours en panne : bureau"]
     assert json.loads(path.read_text(encoding="utf-8"))["reminders"] == {"tunnel:t1": "2026-10-14T09:00:00Z"}
-    again = prepare_follow_up(log, config, AlertState(path), now=now, tz=UTC)
+    again = prepare_follow_up(log, config, AlertState(path), check_digest=False, now=now, tz=UTC)
     assert again.empty
 
 
@@ -316,6 +316,7 @@ def test_follow_up_survives_an_unwritable_state(tmp_path: Path):
         log,
         config,
         AlertState(blocker / STATE_FILE),
+        check_digest=False,
         now=T0 + timedelta(hours=2),
         tz=UTC,
     )

@@ -476,10 +476,11 @@ class Settings(Model):
     # → fin de la sourdine, ISO 8601 UTC).
     alert_channels: list[AlertChannel] = Field(default_factory=list[AlertChannel])
     muted: dict[str, str] = Field(default_factory=dict[str, str])
-    # Maintenances hebdomadaires (sourdine récurrente) et rappel d'une panne qui dure (heures entre deux rappels,
-    # 0 : jamais).
+    # Maintenances hebdomadaires (sourdine récurrente), rappel d'une panne qui dure (heures entre deux rappels,
+    # 0 : jamais) et résumé hebdomadaire envoyé aux canaux d'alerte le lundi.
     maintenance_windows: list[MaintenanceWindow] = Field(default_factory=list[MaintenanceWindow])
     alert_repeat_hours: int = Field(default=0, ge=0, le=168)
+    weekly_digest: bool = False
 
     @field_validator("language", mode="before")
     @classmethod

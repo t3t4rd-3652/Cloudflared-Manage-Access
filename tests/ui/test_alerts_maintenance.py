@@ -9,7 +9,9 @@ from datetime import UTC, datetime, timedelta
 import cma.ui.views.settings_alerts as alerts_module
 from cma.core.alertstate import AlertState, state_path
 from cma.core.cfapi import Tunnel
+from cma.core.hostprobe import HostProbe
 from cma.core.models import AlertChannel, MaintenanceWindow
+from cma.core.servicewatch import ServiceTarget
 from cma.ui.monitor import Monitor
 
 
@@ -17,19 +19,22 @@ def test_settings_section_loads_and_saves(qtbot, gui):
     ctx, window = gui
     section = window.settings.alerts
     assert section.repeat.value() == 0 and section.repeat.text() == "Jamais"
-    assert section.window_table.rowCount() == 0
+    assert not section.digest.isChecked() and section.window_table.rowCount() == 0
     assert not section.remove_window_button.isEnabled()
     section.repeat.setValue(6)
+    section.digest.setChecked(True)
     settings = ctx.config().settings
-    assert settings.alert_repeat_hours == 6
+    assert settings.alert_repeat_hours == 6 and settings.weekly_digest is True
     # Rechargé depuis la configuration : les valeurs reviennent.
     ctx.update_config(lambda c: setattr(c.settings, "alert_repeat_hours", 12))
     window.settings.load()
-    assert section.repeat.value() == 12
+    assert section.repeat.value() == 12 and section.digest.isChecked()
     # Le chargement n'écrit rien lui-même.
     before = ctx.config().settings.model_dump_json()
     window.settings.load()
     assert ctx.config().settings.model_dump_json() == before
+    section.digest.setChecked(False)
+    assert ctx.config().settings.weekly_digest is False
 
 
 def test_add_and_remove_maintenance_windows(qtbot, gui, monkeypatch):
@@ -119,11 +124,12 @@ def test_ask_maintenance_uses_the_dialog(qtbot, monkeypatch):
 # --- Monitor : rappels et résumé ---------------------------------------------------------------------------------
 
 
-def watched_monitor(ctx, monkeypatch, tunnels, repeat=1):
+def watched_monitor(ctx, monkeypatch, tunnels, repeat=1, digest=False):
     channel = AlertChannel(name="Téléphone", kind="ntfy")
     ctx.core.secrets.set(f"alert:{channel.id}", "https://ntfy.sh/x")
     ctx.update_config(lambda c: c.settings.alert_channels.append(channel))
     ctx.update_config(lambda c: setattr(c.settings, "alert_repeat_hours", repeat))
+    ctx.update_config(lambda c: setattr(c.settings, "weekly_digest", digest))
     ctx.update_config(lambda c: setattr(c.settings, "cloudflare_account_id", "acc1"))
     sent: list[str] = []
     monkeypatch.setattr("cma.core.monitoring.send_alert", lambda _k, _u, alert: sent.append(alert.title))
@@ -177,3 +183,44 @@ def test_monitor_without_reminder_setting_sends_nothing(qtbot, gui_context, monk
     qtbot.waitUntil(lambda: not monitor.tunnel_check_running, timeout=5000)
     qtbot.wait(200)
     assert sent == [] and not state_path(ctx.paths.data_dir).exists()
+
+
+def test_monitor_digest_only_after_tunnel_checks(qtbot, gui_context, monkeypatch):
+    import cma.core.monitoring as monitoring
+
+    ctx = gui_context
+    monitor, sent = watched_monitor(
+        ctx, monkeypatch, [[Tunnel("t1", "bureau", "healthy")]], repeat=0, digest=True
+    )
+    monday = datetime(2026, 10, 12, 9, 30, tzinfo=UTC)
+    real_due = monitoring.digest_due
+    monkeypatch.setattr(
+        monitoring, "digest_due", lambda c, s, _now=None, _tz=None: real_due(c, s, monday, UTC)
+    )
+    monkeypatch.setattr(monitoring, "week_id", lambda _local: "2026-W42")
+    target = ServiceTarget("wiki.exemple.fr", "", "http://x:1", "t1", "bureau")
+
+    async def services() -> list[tuple[ServiceTarget, HostProbe]]:
+        return [(target, HostProbe("ok", 200, ms=30.0))]
+
+    monkeypatch.setattr(ctx.manager.cloudflare, "check_services", services)
+    # Le relevé des services ne déclenche pas le résumé.
+    assert monitor.check_services() is True
+    qtbot.waitUntil(lambda: not monitor.service_check_running, timeout=5000)
+    qtbot.wait(200)
+    assert sent == []
+    # Celui des tunnels, si : une seule fois.
+    monitor.check_tunnels()
+    qtbot.waitUntil(lambda: len(sent) == 1, timeout=5000)
+    qtbot.waitUntil(lambda: not monitor._follow_up_running, timeout=5000)
+    assert sent[0].startswith("CMA — semaine du ")
+    assert AlertState(state_path(ctx.paths.data_dir)).digest_week == "2026-W42"
+    monitor.check_tunnels()
+    qtbot.waitUntil(lambda: not monitor.tunnel_check_running, timeout=5000)
+    qtbot.wait(200)
+    assert len(sent) == 1
+    # Les objets connus au dernier relevé servent à viser une maintenance.
+    assert monitor.known_objects() == [
+        ("tunnel:t1", "bureau"),
+        ("service:wiki.exemple.fr", "wiki.exemple.fr"),
+    ]
