@@ -498,6 +498,104 @@ titre de la carte « Santé du compte », trop grand, corrigé au passage)
 - **Critère de fin** : captures regardées en clair et en sombre ; liens du guide valides.
 - **Risques** : aucun sur le code.
 
+### Organisation de P23 à P28 : agents en parallèle
+
+P23 à P27 touchent des fichiers presque disjoints : chacune est confiée à un agent, dans sa propre copie du dépôt
+(`git worktree`), avec un modèle choisi selon la difficulté (Sonnet pour la logique et l'interface, Haiku pour les
+tâches cadrées). Les agents ne touchent ni au CHANGELOG, ni au plan, ni à la documentation : ils livrent un commit
+sur leur branche et leurs traductions dans un fichier JSON. L'intégration (fusion, catalogues de traduction, suite
+complète, documentation, vérification indépendante, release) est faite en P28, dans le dépôt principal.
+
+| Agent | Phases | Modèle | Fichiers principaux |
+| --- | --- | --- | --- |
+| A | P23 | Sonnet | `core/availability.py`, `core/availability_report.py` |
+| B | P24 puis P25 | Sonnet | `core/models.py`, `core/monitoring.py`, `core/alertstate.py`, `ui/monitor.py`, `ui/views/settings_alerts.py`, `cli.py` |
+| C | P26 | Haiku | `ui/tray.py` |
+| D | P27 | Haiku | `tests/ui/`, boîtes récentes (`ui/dialogs/`, `ui/views/cloud/`) |
+
+### P23 — Disponibilité par jour local (2.12)
+
+Statut : À FAIRE
+
+- **Objectif** : un jour du graphique et du rapport est un jour de l'heure locale, comme les incidents (dette notée
+  en P22).
+- **Tâches** : agrégats journaliers d'`AvailabilityLog` par date locale (fuseau explicite en paramètre, local par
+  défaut) ; `daily`, `report`, `stats` sur des jours locaux ; fichier existant relu sans perte (les jours déjà
+  agrégés en UTC gardent leur date ; un champ de version note le changement) ; passage à l'heure d'été sans jour
+  perdu ni doublé.
+- **Fichiers** : `src/cma/core/availability.py`, `src/cma/core/availability_report.py`, tests unitaires.
+- **Critère de fin** : un relevé à 23 h 30 à Paris (UTC+2) compte pour ce jour-là ; un ancien fichier se relit ;
+  tests des changements d'heure ; couverture du cœur ≥ 90 %.
+- **Risques** : changement d'heure (jour de 23 ou 25 heures) ; fichiers écrits par une version plus ancienne.
+
+### P24 — Maintenance planifiée et rappel des pannes longues (2.12)
+
+Statut : À FAIRE
+
+- **Objectif** : ne pas être alerté pendant une maintenance prévue chaque semaine ; ne pas oublier une panne qui
+  dure.
+- **Tâches** : fenêtres de maintenance hebdomadaires (`Settings.maintenance_windows` : jour, heure de début et de
+  fin en heure locale, objet visé ou tout le compte), prises en compte par `is_muted` ; rappel d'une panne toujours
+  en cours toutes les N heures (`Settings.alert_repeat_hours`, 0 : jamais), état des rappels dans
+  `alert_state.json` (ADR 0002) ; mêmes règles CMA ouvert et tâche planifiée ; section « Maintenance et rappels »
+  dans Paramètres › Général › Alertes.
+- **Fichiers** : `src/cma/core/models.py`, `src/cma/core/monitoring.py`, `src/cma/core/alertstate.py` (nouveau),
+  `src/cma/ui/monitor.py`, `src/cma/ui/views/settings_alerts.py`, `src/cma/cli.py`, tests.
+- **Critère de fin** : tests d'une fenêtre qui passe minuit, d'un rappel envoyé une seule fois par période, d'une
+  configuration ancienne relue ; boîte vérifiée en clair et en sombre.
+- **Risques** : fuseau et changement d'heure ; double envoi entre CMA ouvert et tâche planifiée (la tâche n'écrit
+  que si CMA est fermé, comme le journal de disponibilité).
+
+### P25 — Résumé hebdomadaire et exports en ligne de commande (2.12)
+
+Statut : À FAIRE
+
+- **Objectif** : recevoir chaque semaine l'état du compte sans ouvrir CMA ; produire un rapport sans interface.
+- **Tâches** : résumé hebdomadaire vers les canaux d'alerte (disponibilité des 7 derniers jours, incidents, tokens
+  à renouveler), le lundi à partir de 9 h, une fois par semaine (`alert_state.json`), réglage `weekly_digest` ;
+  `cma alerts digest` l'envoie tout de suite ; `cma availability --output rapport.html|.csv|.json`.
+- **Fichiers** : `src/cma/core/digest.py` (nouveau), `src/cma/core/models.py`, `src/cma/cli.py`,
+  `src/cma/ui/monitor.py`, `src/cma/ui/views/settings_alerts.py`, tests.
+- **Critère de fin** : contenu du résumé testé ; un seul envoi par semaine ; codes de retour et fichiers produits
+  par `--output` testés.
+- **Risques** : canal qui refuse un message long (Discord : 2000 caractères) : résumé tronqué proprement.
+
+### P26 — La santé du compte dans la zone de notification (2.12)
+
+Statut : À FAIRE
+
+- **Objectif** : voir et traiter une panne depuis l'icône, sans ouvrir la fenêtre.
+- **Tâches** : sous-menu « Pannes (N) » quand un tunnel ou un service est en panne : chaque objet ouvre la vue
+  Cloudflare dessus ; « Mettre en sourdine 1 h » ; « Relever maintenant ». Caché quand tout va bien.
+- **Fichiers** : `src/cma/ui/tray.py`, branchement dans `src/cma/ui/main_window.py`, tests.
+- **Critère de fin** : test du menu (construction séparée de son affichage) avec un tunnel et un service en panne,
+  puis sans panne.
+- **Risques** : menu modal dans les tests (séparer construction et `exec`).
+
+### P27 — Accessibilité des boîtes récentes (2.12)
+
+Statut : À FAIRE
+
+- **Objectif** : les boîtes ajoutées de P13 à P22 sont utilisables au clavier et au lecteur d'écran, comme le reste.
+- **Tâches** : test qui ouvre le bilan de sécurité, la disponibilité, « Quoi de neuf », les raccourcis, la
+  publication préremplie et les canaux d'alerte, et vérifie un nom accessible pour chaque contrôle interactif et un
+  ordre de tabulation sans piège ; corrections dans ces boîtes.
+- **Fichiers** : `tests/ui/test_a11y_recent.py` (nouveau), boîtes concernées.
+- **Critère de fin** : le test passe ; aucune régression de `tests/ui/test_a11y*`.
+- **Risques** : faible.
+
+### P28 — Intégration, documentation, vérification et release 2.12 (2.12)
+
+Statut : À FAIRE
+
+- **Objectif** : réunir P23 à P27, documenter, faire vérifier, publier.
+- **Tâches** : fusion des branches, catalogues de traduction, suite complète trois fois, CHANGELOG, guide (maintenance,
+  rappels, résumé, menu de l'icône), captures en clair et en sombre, vérification par un juge neutre, release 2.12.0
+  et installation sur le poste.
+- **Fichiers** : `docs/`, `CHANGELOG.md`, `README.md`, `scripts/capture_screenshots.py`.
+- **Critère de fin** : suite verte trois fois, CI verte, verdict du juge, version installée vérifiée.
+- **Risques** : conflits de fusion entre B et les autres (fichiers partagés limités au branchement).
+
 ### Dette technique à surveiller
 
 - Disponibilité : le journal agrège les relevés par jour UTC (`AvailabilityLog`), alors que le graphique et les
@@ -527,6 +625,12 @@ titre de la carte « Santé du compte », trop grand, corrigé au passage)
 | P21 | FAIT | 0ee669c | 525 ✓ | 2026-10-09 |
 | P22 | FAIT | 3dacd6a | 525 ✓ | 2026-10-14 |
 | Vérification (2 juges) | FAIT | f8d5038, 04354de | 529 ✓ | 2026-10-14 |
+| P23 | À FAIRE | — | — | — |
+| P24 | À FAIRE | — | — | — |
+| P25 | À FAIRE | — | — | — |
+| P26 | À FAIRE | — | — | — |
+| P27 | À FAIRE | — | — | — |
+| P28 | À FAIRE | — | — | — |
 
-**Prochaine action exacte :** 2.11.0 publiée et installée le 2026-10-14. Prochain plan à proposer (P23 et
-suivantes) ; en attente côté propriétaire : soumission winget, signature du code.
+**Prochaine action exacte :** lancer les agents A (P23), B (P24 puis P25), C (P26) et D (P27) en parallèle,
+chacun dans son `git worktree`, puis intégrer en P28.
