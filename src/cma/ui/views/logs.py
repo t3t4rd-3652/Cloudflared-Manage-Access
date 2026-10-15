@@ -255,6 +255,7 @@ class LogsView(QWidget):
         self.proxy = LogFilter(self.model)
         self.table = QTableView()
         self.table.setAccessibleName(tr("Journal"))
+        self.table.setTabKeyNavigation(False)  # Tab quitte le tableau au lieu de passer de case en case
         self.table.setModel(self.proxy)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)

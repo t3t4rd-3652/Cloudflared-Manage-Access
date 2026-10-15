@@ -97,6 +97,7 @@ class ShortcutsDialog(QDialog):
         rows = shortcut_rows(pages)
         self.table = QTableWidget(len(rows), 3)
         self.table.setAccessibleName(tr("Raccourcis clavier"))
+        self.table.setTabKeyNavigation(False)  # Tab quitte le tableau au lieu de passer de case en case
         self.table.setHorizontalHeaderLabels([tr("Où"), tr("Touches"), tr("Action")])
         self.table.verticalHeader().hide()
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)

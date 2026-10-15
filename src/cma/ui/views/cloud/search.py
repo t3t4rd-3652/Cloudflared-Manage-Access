@@ -43,6 +43,18 @@ def reveal_tunnel(view: CloudView, tunnel_id: str, rule: IngressRule | None = No
     return False
 
 
+def reveal_service(view: CloudView, hostname: str, path: str = "") -> bool:
+    """Sélectionne la règle d'un nom d'hôte publié (et son chemin) dans l'onglet Tunnels ; False si elle a disparu."""
+    overview = view.overview
+    if overview is None:
+        return False
+    for tunnel_view in overview.tunnels:
+        for rule in tunnel_view.hostnames:
+            if rule.hostname.lower() == hostname.lower() and rule.path == path:
+                return reveal_tunnel(view, tunnel_view.tunnel.id, rule)
+    return False
+
+
 def _reveal_row(
     view: CloudView, tab: int, table: QTableWidget, role: int, match: Callable[[object], bool]
 ) -> bool:

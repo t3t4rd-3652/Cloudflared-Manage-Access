@@ -6,7 +6,8 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QAbstractButton, QApplication, QWidget
 
 from cma.core.availability import AvailabilityLog
 from cma.core.cfapi import IngressRule
@@ -25,61 +26,58 @@ def describe(widgets) -> list[str]:
     return [f"{type(w).__name__} dans {type(w.parent()).__name__}" for w in widgets]
 
 
-def verify_tab_order(dialog: QWidget, min_controls: int = 2) -> None:
-    """Vérifier que la tabulation parcourt au moins min_controls distincts sans sortir de la boîte.
+def _focusable(dialog: QWidget) -> list[QWidget]:
+    """Contrôles que le clavier doit pouvoir atteindre : visibles, activés et acceptant le focus."""
+    return [
+        w
+        for w in dialog.findChildren(QWidget)
+        if w.focusPolicy() != Qt.FocusPolicy.NoFocus and w.isVisible() and w.isEnabled()
+    ]
 
-    - Donne le focus au premier contrôle interactif
-    - Appelle focusNextChild() jusqu'à max_steps fois
-    - Vérifie que le focus a visité au moins min_controls distincts
-    - Vérifie que le focus ne sort jamais de la boîte (reste sur les enfants)
+
+def verify_tab_order(dialog: QWidget, min_controls: int = 2) -> None:
+    """Vérifier, avec de vrais appuis sur Tab puis Maj+Tab, que le clavier atteint tous les boutons de la boîte.
+
+    - Le focus part du premier contrôle ; on appuie sur la touche au plus « contrôles + 2 » fois ;
+    - le focus ne sort jamais de la boîte ;
+    - chaque bouton visible et activé reçoit le focus (un tableau qui garde Tab pour passer de case en case
+      empêcherait d'atteindre les boutons qui le suivent) ;
+    - même exigence avec Maj+Tab.
+
+    `focusNextChild()` ne convient pas : il ne passe pas par la gestion de Tab du widget qui a le focus.
     """
-    dialog.setFocus()
     dialog.show()
     QApplication.processEvents()
+    controls = _focusable(dialog)
+    if not controls:
+        return  # pas de contrôle interactif : acceptable pour certaines boîtes
+    buttons = [w for w in controls if isinstance(w, QAbstractButton)]
+    inside = set(dialog.findChildren(QWidget))
 
-    # Trouver le premier contrôle interactif
-    initial_widget = None
-    for child in dialog.findChildren(QWidget):
-        if child.focusPolicy() != Qt.FocusPolicy.NoFocus and child.isVisible():
-            child.setFocus()
-            initial_widget = child
-            QApplication.processEvents()
-            break
-
-    if initial_widget is None:
-        # Pas de contrôle interactif trouvé, c'est acceptable pour certaines boîtes
-        return
-
-    visited_widgets = set()
-    current = QApplication.focusWidget()
-    if current is not None and current != dialog:
-        visited_widgets.add(id(current))
-
-    max_steps = 30  # Assez pour parcourir tous les contrôles + redondance
-    for _ in range(max_steps):
-        # Appeler focusNextChild pour passer au suivant
-        dialog.focusNextChild()
+    for label, key, modifier in (
+        ("Tab", Qt.Key.Key_Tab, Qt.KeyboardModifier.NoModifier),
+        ("Maj+Tab", Qt.Key.Key_Backtab, Qt.KeyboardModifier.ShiftModifier),
+    ):
+        controls[0].setFocus()
         QApplication.processEvents()
-
+        visited: set[QWidget] = set()
         current = QApplication.focusWidget()
-        if current is None:
-            break
-
-        # Vérifier que le focus ne sort pas de la boîte
-        if not (current == dialog or current in dialog.findChildren(QWidget)):
-            raise AssertionError(f"Focus sorti de la boîte : {type(current).__name__}")
-
-        visited_widgets.add(id(current))
-
-        # Si on est revenu au premier widget, on a fait une boucle complète
-        if current == initial_widget and len(visited_widgets) > 1:
-            break
-
-    # Vérifier qu'on a visité au moins min_controls distincts
-    if len(visited_widgets) < min_controls:
-        raise AssertionError(
-            f"Tabulation insuffisante : {len(visited_widgets)} contrôles visités, minimum {min_controls} attendus"
+        if current is not None:
+            visited.add(current)
+        for _ in range(len(controls) + 2):
+            current = QApplication.focusWidget()
+            assert current is not None, f"{label} : le focus a été perdu"
+            QTest.keyClick(current, key, modifier)
+            QApplication.processEvents()
+            current = QApplication.focusWidget()
+            assert current is not None, f"{label} : le focus a été perdu"
+            assert current in inside, f"{label} : focus sorti de la boîte ({type(current).__name__})"
+            visited.add(current)
+        assert len(visited) >= min_controls, (
+            f"{label} : {len(visited)} contrôles visités, {min_controls} attendus"
         )
+        missed = [b.text() or type(b).__name__ for b in buttons if b not in visited]
+        assert missed == [], f"{label} n'atteint pas les boutons {missed}"
 
 
 def test_whats_new_dialog_accessibility(qtbot, gui):

@@ -436,6 +436,89 @@ def capture_guide(window, output: Path) -> None:
         "sur « NAS » (sinon, remplacez localhost par l'adresse du serveur).",
     )
     save(publish, "guide-publier-port.png")
+    capture_guide_alerts(window, output)
+    capture_guide_health_menu(window, output)
+
+
+def capture_guide_alerts(window, output: Path) -> None:
+    """`guide-maintenance.png` : section « Maintenance et rappels » des Paramètres, avec trois fenêtres de
+    maintenance et un canal d'alerte d'exemple. La configuration de démonstration est rétablie ensuite : les
+    captures suivantes (thème sombre) ne doivent pas les montrer."""
+    from cma.core.models import AlertChannel, MaintenanceWindow
+    from cma.ui.views.common import FormCard
+    from cma.ui.views.settings import SettingsView
+
+    ctx = window.ctx
+    before = ctx.config().settings
+    saved = (
+        list(before.alert_channels),
+        list(before.maintenance_windows),
+        before.alert_repeat_hours,
+        before.weekly_digest,
+    )
+
+    def demo(config) -> None:
+        config.settings.alert_channels = [AlertChannel(name="Téléphone", kind="ntfy")]
+        config.settings.maintenance_windows = [
+            MaintenanceWindow(weekday=6, start="02:00", end="04:00", label="Mises à jour des serveurs"),
+            MaintenanceWindow(weekday=5, start="23:00", end="01:30", target="tunnel:t1", label="Sauvegarde"),
+            MaintenanceWindow(weekday=2, start="12:00", end="12:30", target="service:wiki.exemple.fr"),
+        ]
+        config.settings.alert_repeat_hours = 6
+        config.settings.weekly_digest = True
+
+    def restore(config) -> None:
+        config.settings.alert_channels, config.settings.maintenance_windows = saved[0], saved[1]
+        config.settings.alert_repeat_hours, config.settings.weekly_digest = saved[2], saved[3]
+
+    ctx.update_config(demo)
+    try:
+        view = SettingsView(ctx)
+        view.known_objects = lambda: [("tunnel:t1", "bureau"), ("service:wiki.exemple.fr", "wiki.exemple.fr")]
+        view.load()
+        view.resize(980, 900)
+        card = view.alerts.digest.parentWidget()
+        while card is not None and not isinstance(card, FormCard):
+            card = card.parentWidget()
+        if card is None:
+            raise RuntimeError("section Maintenance et rappels introuvable")
+        view.show()
+        for _ in range(8):
+            QApplication.processEvents()
+        card.resize(900, card.sizeHint().height())
+        for _ in range(4):
+            QApplication.processEvents()
+        card.grab().save(str(output / "guide-maintenance.png"))
+        view.hide()
+        view.deleteLater()
+    finally:
+        ctx.update_config(restore)
+
+
+def capture_guide_health_menu(window, output: Path) -> None:
+    """`guide-menu-pannes.png` : sous-menu « Pannes » de l'icône, avec le tunnel « labo » hors ligne et le service
+    `wiki.exemple.fr` injoignable (état injecté, aucun relevé réel)."""
+    from PySide6.QtCore import QPoint
+
+    from cma.core.cfapi import Tunnel
+    from cma.core.hostprobe import HostProbe
+    from cma.core.servicewatch import ServiceResult, ServiceTarget
+    from cma.ui.tray import Tray
+
+    tray = Tray(window.ctx, window)
+    target = ServiceTarget("wiki.exemple.fr", "", "http://localhost:8080", "t1", "bureau")
+    tray._on_services([ServiceResult(target, HostProbe("origin_down", 502), datetime.now())])
+    tray._on_tunnels([Tunnel("t2", "labo", "down")])
+    menu = tray._health_menu
+    if menu is None:
+        raise RuntimeError("sous-menu Pannes absent")
+    menu.popup(QPoint(300, 300))
+    for _ in range(10):
+        QApplication.processEvents()
+    menu.grab().save(str(output / "guide-menu-pannes.png"))
+    menu.hide()
+    tray.deleteLater()
+    QApplication.processEvents()
 
 
 def main() -> int:

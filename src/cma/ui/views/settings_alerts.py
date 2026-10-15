@@ -151,7 +151,10 @@ class MaintenanceDialog(QDialog):
         form.addRow(tr("Début"), self.start)
         form.addRow(tr("Fin"), self.end)
         self.hint = label(
-            tr("Heures locales. Si la fin est avant le début, la maintenance passe minuit."),
+            tr(
+                "Heures locales. Si la fin est avant le début, la maintenance passe minuit ; "
+                "si elle est égale au début, elle couvre la journée entière."
+            ),
             "meta",
             wrap=True,
         )

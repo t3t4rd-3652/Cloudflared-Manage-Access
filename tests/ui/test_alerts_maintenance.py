@@ -107,6 +107,8 @@ def test_maintenance_dialog(qtbot):
         "service:wiki.exemple.fr",
         "Sauvegarde",
     )
+    # L'aide dit les deux cas particuliers : fin avant le début (passe minuit), fin égale au début (journée entière).
+    assert "avant le début" in dialog.hint.text() and "égale au début" in dialog.hint.text()
     assert alerts_module.target_text("service:inconnu.fr", []) == "inconnu.fr"
     assert alerts_module.target_text("tunnel:t9", []) == "Tunnel « t9 »"
 

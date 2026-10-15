@@ -123,6 +123,7 @@ class FilesTab(QWidget):
         layout.addWidget(self.error)
         self.table = QTableWidget(0, 4)
         self.table.setAccessibleName(tr("Fichiers du serveur"))
+        self.table.setTabKeyNavigation(False)  # Tab quitte le tableau au lieu de passer de case en case
         self.table.setHorizontalHeaderLabels([tr("Nom"), tr("Taille"), tr("Modifié"), tr("Droits")])
         self.table.verticalHeader().hide()
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)

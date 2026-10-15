@@ -105,6 +105,7 @@ class ImportDialog(QDialog):
         )
         self.table = QTableWidget(len(plan.items), 4)
         self.table.setAccessibleName(tr("Éléments à importer"))
+        self.table.setTabKeyNavigation(False)  # Tab quitte le tableau au lieu de passer de case en case
         self.table.setHorizontalHeaderLabels([tr("Type"), tr("Nom"), tr("Conflit"), tr("Action")])
         self.table.verticalHeader().hide()
         self.table.verticalHeader().setDefaultSectionSize(38)

@@ -50,6 +50,7 @@ from cma.ui.notices import NoticeLog
 from cma.ui.palette_entries import build_palette_entries
 from cma.ui.states import TO_CHECK, sessions_summary
 from cma.ui.views.cloud import CloudView
+from cma.ui.views.cloud.search import reveal_service, reveal_tunnel
 from cma.ui.views.dashboard import DashboardView
 from cma.ui.views.logs import LogsView
 from cma.ui.views.profiles import CloudflareProfilesView
@@ -435,12 +436,31 @@ class MainWindow(QMainWindow):
         return self.monitor.service_check_running
 
     def open_tunnel(self, tunnel: Tunnel | None, *, diagnose: bool = False) -> None:
-        """Vue Cloudflare, onglet Tunnels, relue ; avec `diagnose`, l'état des connecteurs du tunnel s'ouvre."""
+        """Vue Cloudflare, onglet Tunnels, relue, puis le tunnel sélectionné ; avec `diagnose`, l'état des connecteurs
+        du tunnel s'ouvre."""
         self.show_view("cloud")
         self.cloud.tabs.setCurrentIndex(0)
-        self.cloud.refresh()
-        if diagnose and tunnel is not None:
+        if tunnel is None:
+            self.cloud.refresh()
+            return
+        tunnel_id = tunnel.id
+
+        def select() -> None:
+            reveal_tunnel(self.cloud, tunnel_id)
+
+        self.cloud.refresh(then=select)
+        if diagnose:
             self.cloud.check_connectors(tunnel)
+
+    def open_service(self, hostname: str, path: str = "") -> None:
+        """Vue Cloudflare, onglet Tunnels, relue, puis la règle du nom d'hôte publié sélectionnée."""
+        self.show_view("cloud")
+        self.cloud.tabs.setCurrentIndex(0)
+
+        def select() -> None:
+            reveal_service(self.cloud, hostname, path)
+
+        self.cloud.refresh(then=select)
 
     def publish_port(self, server: str, port: RemotePort) -> None:
         """« Publier sur Cloudflare… » d'un port découvert : la boîte de publication de la vue Cloudflare, préremplie."""

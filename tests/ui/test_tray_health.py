@@ -130,6 +130,7 @@ def test_health_menu_entries_are_wired(qtbot, gui, monkeypatch):
     tray = Tray(ctx, window)
     opened: list[object] = []
     monkeypatch.setattr(window, "open_tunnel", lambda t, **_kw: opened.append(t))
+    monkeypatch.setattr(window, "open_service", lambda host, path="": opened.append((host, path)))
     target = ServiceTarget("wiki.exemple.fr", "", "http://localhost:8080", "t1", "bureau")
     tray._on_tunnels([Tunnel("t2", "labo", "down")])
     tray._on_services([ServiceResult(target, HostProbe("origin_down", 502), datetime.now())])
@@ -142,7 +143,7 @@ def test_health_menu_entries_are_wired(qtbot, gui, monkeypatch):
 
     trigger(entries["wiki.exemple.fr — Service injoignable"], "Ouvrir")
     trigger(entries["Tunnel « labo » — Hors ligne"], "Ouvrir")
-    assert opened[0] is None and getattr(opened[1], "id", None) == "t2"
+    assert opened[0] == ("wiki.exemple.fr", "") and getattr(opened[1], "id", None) == "t2"
     trigger(entries["wiki.exemple.fr — Service injoignable"], "Mettre en sourdine 1 h")
     assert any(key.startswith("service:wiki.exemple.fr") for key in ctx.config().settings.muted)
     # Reconstruit sans panne : le sous-menu disparaît.

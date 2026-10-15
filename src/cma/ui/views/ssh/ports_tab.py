@@ -159,6 +159,7 @@ class PortsTab(QWidget):
         self.filter.textChanged.connect(lambda _t: self._update_empty())
         self.table = QTableView()
         self.table.setAccessibleName(tr("Ports distants"))
+        self.table.setTabKeyNavigation(False)  # Tab quitte le tableau au lieu de passer de case en case
         self.table.setModel(self.proxy)
         self.table.setSortingEnabled(True)
         self.table.sortByColumn(0, Qt.SortOrder.AscendingOrder)

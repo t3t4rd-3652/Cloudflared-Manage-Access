@@ -177,9 +177,10 @@ class Tray(QObject):
         self.window.open_tunnel(tunnel)
 
     def _open_cloud_from_health(self, service_result: ServiceResult) -> None:
-        """Ouvre la vue Cloudflare (onglet Tunnels, relu) pour le service en panne, comme la carte « Santé du compte »."""
+        """Ouvre la vue Cloudflare (onglet Tunnels, relu) sur la règle du service en panne."""
         self.window.bring_to_front()
-        self.window.open_tunnel(None)
+        target = service_result.target
+        self.window.open_service(target.hostname, target.path)
 
     def _mute_tunnel_for_one_hour(self, tunnel: Tunnel) -> None:
         """Met en sourdine le tunnel pendant 1 heure."""
