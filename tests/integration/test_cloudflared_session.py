@@ -10,7 +10,7 @@ import pytest
 
 from cma.core.cloudflared.command import CommandSpec, build_access_tcp
 from cma.core.cloudflared.session import CloudflaredSession
-from cma.core.events import Notification
+from cma.core.events import Notification, SessionChanged
 from cma.core.models import AuthMode, CloudflareProfile
 from cma.core.netutil import check_local_port, find_free_port
 from cma.core.sessions import SessionState
@@ -36,8 +36,8 @@ def make_session(bus, port, mode, *, tmp_path=None, auto_reconnect=True, extra_e
     return CloudflaredSession(bus=bus, profile=profile, command=CommandSpec(args, env))
 
 
-async def wait_for(session, states, timeout=30.0):
-    # Rendu dès que l'état est atteint ; 30 s parce que, sous la charge des tests en parallèle, le lancement du
+async def wait_for(session, states, timeout=45.0):
+    # Rendu dès que l'état est atteint ; 45 s parce que, sous la charge des tests en parallèle, le lancement du
     # faux cloudflared (un processus Python) dépasse parfois 10 s.
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
@@ -45,7 +45,27 @@ async def wait_for(session, states, timeout=30.0):
         if session.state in states:
             return session.state
         await asyncio.sleep(0.05)
-    raise AssertionError(f"état {session.state} au lieu de {states} ; message : {session.message}")
+    journal = " | ".join(line.message for line in session.logs[-6:])
+    raise AssertionError(
+        f"état {session.state} au lieu de {states} ; message : {session.message} ; journal : {journal}"
+    )
+
+
+async def wait_seen(bus, session, state, *, after=0, timeout=45.0):
+    """Attend qu'un état ait été publié (position `after` ou suivante dans l'historique) et renvoie sa position + 1.
+    Contrairement à `wait_for`, un état de passage n'est pas manqué : avec le faux cloudflared qui plante 0,8 s après
+    l'écoute, une machine chargée peut ne pas interroger la session pendant ce laps de temps."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        history = [e.info for e in bus.of_type(SessionChanged) if e.info.id == session.id]
+        for position in range(after, len(history)):
+            if history[position].state == state:
+                return position + 1, history[position]
+        await asyncio.sleep(0.05)
+    raise AssertionError(
+        f"état {state} jamais publié ; état actuel {session.state}, message : {session.message}"
+    )
 
 
 @pytest.fixture
@@ -63,7 +83,10 @@ async def test_listening_then_stop_releases_the_port(bus, port):
     assert not check_local_port("127.0.0.1", port).free
     await session.stop()
     assert session.state == SessionState.STOPPED
-    await asyncio.sleep(0.2)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 45
+    while loop.time() < deadline and not check_local_port("127.0.0.1", port).free:
+        await asyncio.sleep(0.05)  # Windows libère la prise un peu après la mort du processus
     assert check_local_port("127.0.0.1", port).free
 
 
@@ -99,10 +122,10 @@ async def test_usage_error_with_exit_code_zero_is_an_error(bus, port):
 async def test_crash_triggers_reconnection(bus, port):
     session = make_session(bus, port, "crash", extra_env={"FAKE_CF_CRASH_AFTER": "0.8"})
     session.start()
-    await wait_for(session, {SessionState.LISTENING})
-    await wait_for(session, {SessionState.RECONNECTING})
-    assert session.info().reconnect_in is not None
-    await wait_for(session, {SessionState.LISTENING}, timeout=8)
+    seen, _listening = await wait_seen(bus, session, SessionState.LISTENING)
+    seen, reconnecting = await wait_seen(bus, session, SessionState.RECONNECTING, after=seen)
+    assert reconnecting.reconnect_in is not None
+    await wait_seen(bus, session, SessionState.LISTENING, after=seen)
     assert session.backoff.failures >= 1
     await session.stop()
 
@@ -110,7 +133,7 @@ async def test_crash_triggers_reconnection(bus, port):
 async def test_crash_without_auto_reconnect_is_an_error(bus, port):
     session = make_session(bus, port, "crash", auto_reconnect=False, extra_env={"FAKE_CF_CRASH_AFTER": "0.8"})
     session.start()
-    await wait_for(session, {SessionState.ERROR}, timeout=8)
+    await wait_for(session, {SessionState.ERROR})
     await session.stop()
 
 
@@ -147,6 +170,9 @@ async def test_secret_reaches_the_process_by_environment(bus, port, tmp_path):
 
 
 @pytest.mark.real_cloudflared
+@pytest.mark.timeout(
+    400
+)  # binaire Go lancé deux fois : les attentes de 90 s et 60 s dépassent le délai de 180 s par défaut
 async def test_real_cloudflared(bus, port):
     binary = shutil.which("cloudflared")
     if binary is None:
@@ -158,9 +184,9 @@ async def test_real_cloudflared(bus, port):
     second = CloudflaredSession(bus=bus, profile=profile, command=build_access_tcp(binary, profile))
     try:
         session.start()
-        await wait_for(session, {SessionState.LISTENING}, timeout=45)
+        await wait_for(session, {SessionState.LISTENING}, timeout=90)  # binaire Go lancé sous forte charge
         second.start()
-        await wait_for(second, {SessionState.ERROR}, timeout=45)
+        await wait_for(second, {SessionState.ERROR}, timeout=60)
         assert "déjà utilisé" in second.message
     finally:
         # Même en échec : aucun vrai cloudflared ne doit survivre au test.

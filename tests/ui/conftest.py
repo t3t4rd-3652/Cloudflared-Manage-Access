@@ -42,7 +42,7 @@ def build_gui(qapp, paths, prompter=None):
 
 def close_gui(ctx, window):
     ctx.runner.close()
-    ctx.engine.run_sync(ctx.core.manager.shutdown(), timeout=20)
+    ctx.engine.run_sync(ctx.core.manager.shutdown(), timeout=45)
     window.quitting = True
     window.close()
     ctx.engine.stop()
@@ -54,7 +54,7 @@ def gui_context(qapp, paths):
     ctx = build_context(qapp, paths)
     yield ctx
     ctx.runner.close()
-    ctx.engine.run_sync(ctx.core.manager.shutdown(), timeout=20)
+    ctx.engine.run_sync(ctx.core.manager.shutdown(), timeout=45)
     ctx.engine.stop()
 
 

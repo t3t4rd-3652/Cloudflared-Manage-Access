@@ -15,11 +15,14 @@ Les appels sont bloquants : le moteur les exécute via `asyncio.to_thread`.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
@@ -35,6 +38,22 @@ TOKENS_PAGE = "https://dash.cloudflare.com/profile/api-tokens"
 CATCH_ALL = {"service": "http_status:404"}
 # Champs d'une application Access calculés par Cloudflare : jamais renvoyés dans un PUT.
 _APP_READ_ONLY = {"id", "uid", "aud", "created_at", "updated_at"}
+
+# Une instance de `CloudflareApi` est recréée à chaque appel de `CloudflareAdmin.api()` : le verrou est donc global.
+_INGRESS_LOCK = threading.RLock()
+
+
+def _ingress_exclusive[Method: Callable[..., Any]](method: Method) -> Method:
+    """Sérialise une modification de la configuration d'un tunnel (lecture, changement, PUT complet) : deux
+    modifications concurrentes (« Monter » cliqué trois fois de suite) liraient sinon la même configuration et la
+    seconde écraserait la première."""
+
+    @functools.wraps(method)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        with _INGRESS_LOCK:
+            return method(*args, **kwargs)
+
+    return cast(Method, wrapper)
 
 
 class CloudflareApiError(RuntimeError):
@@ -445,6 +464,7 @@ class CloudflareApi:
             )
         return rule
 
+    @_ingress_exclusive
     def publish_hostname(
         self, account_id: str, tunnel: Tunnel, hostname: str, service: str, path: str = ""
     ) -> IngressRule:
@@ -477,6 +497,7 @@ class CloudflareApi:
         self.ensure_cname(zone, hostname, tunnel.cname_target)
         return IngressRule(hostname, service, path)
 
+    @_ingress_exclusive
     def update_hostname_service(
         self,
         account_id: str,
@@ -513,6 +534,7 @@ class CloudflareApi:
             dict(cast(dict[str, Any], rule.get("originRequest") or {})),
         )
 
+    @_ingress_exclusive
     def require_access(
         self, account_id: str, tunnel: Tunnel, hostname: str, path: str, team: str, aud: str | None
     ) -> None:
@@ -556,6 +578,7 @@ class CloudflareApi:
     def delete_dns_record(self, zone_id: str, record_id: str) -> None:
         self._result("DELETE", f"/zones/{zone_id}/dns_records/{record_id}")
 
+    @_ingress_exclusive
     def unpublish_hostname(self, account_id: str, tunnel: Tunnel, hostname: str, path: str = "") -> None:
         """Retire la règle `hostname` + `path` du tunnel. L'enregistrement DNS n'est supprimé que si plus aucune
         règle du tunnel n'utilise ce nom d'hôte (et seulement s'il vise ce tunnel)."""
@@ -566,6 +589,7 @@ class CloudflareApi:
         if not any(r.get("hostname") == hostname for r in config["ingress"]):
             self.delete_tunnel_cname(account_id, tunnel, hostname)
 
+    @_ingress_exclusive
     def move_rule(self, account_id: str, tunnel: Tunnel, hostname: str, path: str, offset: int) -> int:
         """Avance (offset -1) ou recule (+1) une règle parmi les règles nommées ; la règle finale reste la dernière.
         Renvoie la nouvelle position (0 = première essayée)."""
@@ -582,6 +606,7 @@ class CloudflareApi:
             self._put_ingress(account_id, tunnel, config)
         return target
 
+    @_ingress_exclusive
     def set_catch_all(self, account_id: str, tunnel: Tunnel, service: str) -> None:
         """Service de la règle finale (sans nom d'hôte) : « http_status:404 », « http_status:503 » ou un service."""
         config = self.tunnel_config(account_id, tunnel.id)

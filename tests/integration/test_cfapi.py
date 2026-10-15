@@ -768,3 +768,40 @@ async def test_cli_tunnels_with_services(cf, admin, paths, secrets, capsys, monk
     data = json.loads(capsys.readouterr().out)
     assert [t["status"] for t in data["tunnels"]] == ["healthy", "healthy"]
     assert data["services"][0]["hostname"] == "grafana.exemple.fr" and data["services"][0]["status"] == 502
+
+
+def test_concurrent_rule_changes_do_not_lose_updates(cf, api, monkeypatch):
+    """Trois « Monter » lancés d'affilée lisent la configuration du tunnel en même temps : sans verrou, ils lisent la
+    même version et le dernier PUT écrase les autres. Une lecture ralentie rend la course certaine."""
+    import threading
+    import time
+
+    from cma.core.cfapi import CloudflareApi
+
+    tunnel = Tunnel("t2", "labo", "down")
+    for name in ("a", "b", "c", "d"):
+        api.publish_hostname("acc1", tunnel, "app.lab.exemple.fr", f"http://localhost:300{name}", f"/{name}")
+    original = CloudflareApi.tunnel_config
+
+    def slow_read(self, account_id, tunnel_id):
+        config = original(self, account_id, tunnel_id)
+        time.sleep(0.2)  # le temps que les autres fils lisent la même version
+        return config
+
+    monkeypatch.setattr(CloudflareApi, "tunnel_config", slow_read)
+    failures: list[BaseException] = []
+
+    def move_up() -> None:
+        try:
+            api.move_rule("acc1", tunnel, "app.lab.exemple.fr", "/d", -1)
+        except BaseException as exc:
+            failures.append(exc)
+
+    threads = [threading.Thread(target=move_up) for _ in range(3)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert not failures
+    monkeypatch.setattr(CloudflareApi, "tunnel_config", original)
+    assert [r.path for r in api.tunnel_ingress("acc1", "t2")[0]] == ["/d", "/a", "/b", "/c"]

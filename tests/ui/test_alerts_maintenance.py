@@ -160,7 +160,9 @@ def test_monitor_sends_reminders_once_per_period(qtbot, gui_context, monkeypatch
     # Relevé suivant : pas de second rappel avant une heure de plus.
     monitor.check_tunnels()
     qtbot.waitUntil(lambda: not monitor.tunnel_check_running, timeout=5000)
-    qtbot.wait(200)
+    # Le rappel ou le résumé est décidé dans le rappel de fin de relevé : une fois celui-ci passé, plus rien ne part
+    # que par l'envoi en cours, que l'on attend (au lieu d'un délai fixe qu'une machine chargée dépasse).
+    qtbot.waitUntil(lambda: not monitor._follow_up_running, timeout=45000)
     assert sent == ["CMA — toujours en panne : bureau"]
     # En maintenance (tout le compte, toute la semaine) : plus de rappel même après une heure.
     state = AlertState(path)
@@ -173,7 +175,9 @@ def test_monitor_sends_reminders_once_per_period(qtbot, gui_context, monkeypatch
     )
     monitor.check_tunnels()
     qtbot.waitUntil(lambda: not monitor.tunnel_check_running, timeout=5000)
-    qtbot.wait(200)
+    # Le rappel ou le résumé est décidé dans le rappel de fin de relevé : une fois celui-ci passé, plus rien ne part
+    # que par l'envoi en cours, que l'on attend (au lieu d'un délai fixe qu'une machine chargée dépasse).
+    qtbot.waitUntil(lambda: not monitor._follow_up_running, timeout=45000)
     assert sent == ["CMA — toujours en panne : bureau"]
 
 
@@ -183,7 +187,9 @@ def test_monitor_without_reminder_setting_sends_nothing(qtbot, gui_context, monk
     monitor.availability.start("tunnel", "tunnel:t1", "bureau", "down", datetime.now(UTC) - timedelta(days=2))
     monitor.check_tunnels()
     qtbot.waitUntil(lambda: not monitor.tunnel_check_running, timeout=5000)
-    qtbot.wait(200)
+    # Le rappel ou le résumé est décidé dans le rappel de fin de relevé : une fois celui-ci passé, plus rien ne part
+    # que par l'envoi en cours, que l'on attend (au lieu d'un délai fixe qu'une machine chargée dépasse).
+    qtbot.waitUntil(lambda: not monitor._follow_up_running, timeout=45000)
     assert sent == [] and not state_path(ctx.paths.data_dir).exists()
 
 
@@ -209,7 +215,9 @@ def test_monitor_digest_only_after_tunnel_checks(qtbot, gui_context, monkeypatch
     # Le relevé des services ne déclenche pas le résumé.
     assert monitor.check_services() is True
     qtbot.waitUntil(lambda: not monitor.service_check_running, timeout=5000)
-    qtbot.wait(200)
+    # Le rappel ou le résumé est décidé dans le rappel de fin de relevé : une fois celui-ci passé, plus rien ne part
+    # que par l'envoi en cours, que l'on attend (au lieu d'un délai fixe qu'une machine chargée dépasse).
+    qtbot.waitUntil(lambda: not monitor._follow_up_running, timeout=45000)
     assert sent == []
     # Celui des tunnels, si : une seule fois.
     monitor.check_tunnels()
@@ -219,7 +227,9 @@ def test_monitor_digest_only_after_tunnel_checks(qtbot, gui_context, monkeypatch
     assert AlertState(state_path(ctx.paths.data_dir)).digest_week == "2026-W42"
     monitor.check_tunnels()
     qtbot.waitUntil(lambda: not monitor.tunnel_check_running, timeout=5000)
-    qtbot.wait(200)
+    # Le rappel ou le résumé est décidé dans le rappel de fin de relevé : une fois celui-ci passé, plus rien ne part
+    # que par l'envoi en cours, que l'on attend (au lieu d'un délai fixe qu'une machine chargée dépasse).
+    qtbot.waitUntil(lambda: not monitor._follow_up_running, timeout=45000)
     assert len(sent) == 1
     # Les objets connus au dernier relevé servent à viser une maintenance.
     assert monitor.known_objects() == [
