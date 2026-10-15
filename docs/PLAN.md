@@ -655,6 +655,82 @@ Statut : FAIT (juge : écarts corrigés ; release 2.13.0)
   que le quota est au palier 2), release 2.13.0 et installation.
 - **Critère de fin** : suite verte trois fois, CI verte, verdict du juge, `cma --version` = 2.13.0 sur le poste.
 
+### Organisation de P33 à P37 : quatre agents en parallèle
+
+Choix de l'utilisateur (2026-10-15) : 4 agents. Chacun a son `git worktree` sous `.claude/worktrees/` et des fichiers
+attitrés ; les traductions passent par un JSON réappliqué à l'intégration.
+
+| Agent | Phase | Modèle | Fichiers attitrés |
+| --- | --- | --- | --- |
+| E | P33 | Sonnet (`executant-m`) | `core/slo.py` (nouveau), `core/monitoring.py`, `ui/views/cloud/availability.py`, `cli.py` (commande `availability`) |
+| F | P34 | Opus (`executant-c`) | `core/cfadmin.py`, `ui/monitor.py`, `cli.py` (`tunnels`, `_record_and_alert`), `docs/adr/0003-…` |
+| G | P35 | Sonnet (`executant-m`) | `ui/views/health.py`, `ui/views/dashboard.py`, nouveau widget de tuile |
+| H | P36 | Sonnet (`executant-m`) | `i18n_de.py`, `i18n_es.py` (valeurs existantes), tests instables, mises en page hors fichiers attitrés |
+
+`core/models.py` (réglages) est partagé : chaque agent n'y ajoute que ses champs, en fin de `Settings`.
+
+### P33 — Objectifs de disponibilité (2.14)
+
+Statut : À FAIRE
+
+- **Objectif** : savoir quand un service tient moins que ce qu'on attend de lui.
+- **Tâches** : objectif de disponibilité par objet (`Settings.availability_targets`, clé d'objet → pourcentage, et un
+  objectif par défaut facultatif) ; alerte quand la disponibilité sur 30 jours passe sous l'objectif (une fois par
+  franchissement, état dans `alert_state.json`), retour annoncé quand elle repasse au-dessus ; objectif affiché et
+  modifiable dans la boîte Disponibilité (colonne, teinte) ; `cma availability --month AAAA-MM` : rapport d'un mois
+  civil (avec l'objectif et l'écart).
+- **Critère de fin** : tests du franchissement (une seule alerte, retour), du mois civil (jours locaux, mois incomplet),
+  de la boîte (clair et sombre, accessibilité) ; couverture du cœur ≥ 90 %.
+- **Risques** : fenêtres de 30 jours sans relevé (aucune alerte), objectif mal saisi (borné 50 à 100 %).
+
+### P34 — Surveillance de plusieurs comptes (2.14)
+
+Statut : À FAIRE
+
+- **Objectif** : un utilisateur qui a plusieurs jetons d'API nommés (plusieurs comptes Cloudflare) est prévenu des
+  pannes de tous ses comptes, pas seulement de celui choisi dans la vue.
+- **Tâches** : réglage « Surveiller tous les comptes » (désactivé par défaut) ; relevé des tunnels et services de
+  chaque jeton nommé, avec son compte (CMA ouvert et tâche planifiée) ; le nom du compte dans les notifications, les
+  alertes, le sous-menu « Pannes » et la carte « Santé du compte » ; un jeton en échec n'empêche pas les autres ; ADR
+  0003 (modèle de relevé multi-comptes, clés et journal de disponibilité).
+- **Critère de fin** : tests avec deux jetons et deux comptes du faux serveur (pannes des deux comptes relevées,
+  un jeton refusé n'arrête pas l'autre, réglage désactivé = comportement actuel) ; durée d'un relevé mesurée.
+- **Risques** : quotas de l'API Cloudflare (relevés en série par jeton) ; clés d'objets identiques entre comptes
+  (identifiants de tunnels uniques, à vérifier).
+
+### P35 — La disponibilité sur la page Sessions (2.14)
+
+Statut : À FAIRE
+
+- **Objectif** : voir la tenue des 7 derniers jours sans ouvrir les outils du compte.
+- **Tâches** : tuile « Disponibilité » sur la page Sessions (taux global sur 7 jours, nombre d'incidents, objet le
+  moins disponible), cachée sans relevé ; depuis la carte « Santé du compte » et la tuile, ouvrir la boîte Disponibilité
+  déjà positionnée sur l'objet.
+- **Critère de fin** : tests de la tuile (avec et sans relevé), ouverture sur le bon objet ; captures clair et sombre ;
+  accessibilité (nom, tabulation réelle).
+- **Risques** : place sur la page Sessions à 100 % (vérifier à 1240×780).
+
+### P36 — Qualité des langues et stabilité des tests (2.14)
+
+Statut : À FAIRE
+
+- **Objectif** : des traductions allemandes et espagnoles relues, aucune étiquette coupée, une suite stable sous charge.
+- **Tâches** : relecture des entrées allemandes et espagnoles ajoutées depuis la 2.10 (cohérence des termes avec
+  celles d'avant : « Ajustes », « Einstellungen »…) ; captures complètes en allemand et en espagnol, recherche de
+  libellés coupés ou débordants, corrections de mise en page hors des fichiers des autres agents (les autres sont
+  signalés) ; tests instables connus (`test_ssh_files_tab`, `test_logs_view`, attentes trop courtes) rendus robustes.
+- **Critère de fin** : liste des corrections de traduction ; captures de/es regardées ; suite complète verte cinq fois
+  de suite en parallèle.
+- **Risques** : conflits avec les catalogues des autres agents (valeurs existantes seulement, réintégration par JSON).
+
+### P37 — Intégration, juge, release 2.14.0 (2.14)
+
+Statut : À FAIRE
+
+- **Tâches** : fusion des branches, traductions, suite complète trois fois, CHANGELOG, guide, README, SECURITE,
+  ARCHITECTURE, captures, juge neutre, release 2.14.0 et installation.
+- **Critère de fin** : suite et CI vertes, verdict du juge, `cma --version` = 2.14.0 sur le poste.
+
 ### Dette technique à surveiller
 
 - (Archivé le 2026-10-14 : résolu par P23.) Disponibilité : le journal agrégeait les relevés par jour UTC
@@ -695,6 +771,11 @@ Statut : FAIT (juge : écarts corrigés ; release 2.13.0)
 | P30 | FAIT | 173fa99 | 643 ✓ | 2026-10-15 |
 | P31 | FAIT | 27e2681 | 675 ✓ | 2026-10-15 |
 | P32 | FAIT | 42d0b22 | 677 ✓ | 2026-10-15 |
+| P33 | À FAIRE | — | — | — |
+| P34 | À FAIRE | — | — | — |
+| P35 | À FAIRE | — | — | — |
+| P36 | À FAIRE | — | — | — |
+| P37 | À FAIRE | — | — | — |
 
-**Prochaine action exacte :** 2.13.0 publiée et installée le 2026-10-15. Prochain plan à proposer (P33 et
-suivantes) ; en attente côté propriétaire : soumission winget, signature du code, nettoyage des worktrees.
+**Prochaine action exacte :** lancer les agents E (P33), F (P34, Opus), G (P35) et H (P36) en parallèle, chacun
+dans son worktree (`.claude/worktrees/p33` à `p36`), puis intégrer en P37.
