@@ -13,7 +13,8 @@ journal des relevés.
 
 Un petit fichier `alert_state.json` dans le dossier de données, lu et écrit par `cma.core.alertstate` (écriture
 atomique, lecture tolérante) : `{"reminders": {"<clé>": "<ISO 8601 UTC>"}, "digest_week": "2026-W42", "tunnels": {"<clé de service>":
-"<id du tunnel>"}}` ; `tunnels` garde le tunnel de chaque nom d'hôte d'un relevé à l'autre, pour qu'une
+"<id du tunnel>"}, "slo": {"<clé>": "<ISO 8601 UTC>"}}` ; `slo` (P33) garde les objets déjà annoncés sous leur objectif de
+disponibilité, pour n'alerter qu'une fois par franchissement (clé absente tant qu'aucun n'est annoncé) ; `tunnels` garde le tunnel de chaque nom d'hôte d'un relevé à l'autre, pour qu'une
 maintenance ou une sourdine du tunnel couvre ses noms avant le premier relevé des services. Comme pour le
 journal de disponibilité, la tâche planifiée n'écrit que si CMA est fermé.
 

@@ -1,4 +1,4 @@
-"""Boîte « Envois récents » : ce qui est parti vers les canaux d'alerte (pannes, retours, rappels, résumés, tests), la
+"""Boîte « Envois récents » : ce qui est parti vers les canaux d'alerte (pannes, retours, rappels, objectifs, résumés, tests), la
 date, le canal, l'objet et le résultat, du plus récent au plus ancien (journal `alert_log.json`, 200 entrées au plus)."""
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ def nature_label(nature: str) -> str:
         "recovery": tr("Retour"),
         "reminder": tr("Rappel"),
         "digest": tr("Résumé"),
+        "slo": tr("Objectif"),
         "test": tr("Test"),
     }.get(nature, nature)
 

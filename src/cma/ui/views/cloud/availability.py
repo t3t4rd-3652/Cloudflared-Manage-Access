@@ -1,16 +1,21 @@
 """Disponibilité (Outils) : taux sur 7 et 30 jours, temps de réponse et incidents de chaque tunnel et service publié,
-lus dans le journal tenu par la surveillance (CMA ouvert et tâche planifiée)."""
+lus dans le journal tenu par la surveillance (CMA ouvert et tâche planifiée), avec l'objectif de chaque objet
+(`cma.core.slo`) : colonne « Objectif », teinte d'alerte sous l'objectif, boîte « Définir l'objectif… »."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QBrush, QColor, QMouseEvent, QPainter, QPaintEvent, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
     QSplitter,
@@ -23,12 +28,20 @@ from PySide6.QtWidgets import (
 from cma.core.availability import AvailabilityLog, DayStats, Incident, Stats, daily
 from cma.core.availability_report import build, report_csv, report_html
 from cma.core.fsutil import atomic_write_text
+from cma.core.models import MAX_TARGET, MIN_TARGET, Config
+from cma.core.slo import SloStatus, set_target, status, target_text
 from cma.i18n import tr
 from cma.ui.icons import app_icon
 from cma.ui.theme import current_tokens, status_colors
 from cma.ui.views.cloud.access_log import request_time
-from cma.ui.views.cloud.helpers import data_table
+from cma.ui.views.cloud.helpers import data_table, dialog_buttons
 from cma.ui.widgets import button, clear_items, label, title
+
+if TYPE_CHECKING:
+    from cma.ui.context import GuiContext
+
+TARGET_COLUMN = 6  # « Objectif » : dernière colonne, les autres gardent leur place
+SUGGESTED_TARGET = 99.9
 
 
 def percent(stats: Stats) -> str:
@@ -157,9 +170,81 @@ def ask_report_path(parent: QWidget, days: int) -> Path | None:
     return Path(path) if path else None
 
 
-class AvailabilityDialog(QDialog):
-    def __init__(self, parent: QWidget | None, path: Path) -> None:
+@dataclass(frozen=True)
+class TargetChoice:
+    """Réponse de la boîte d'objectif : `value` en %, ou None pour retirer l'objectif."""
+
+    value: float | None
+
+
+class TargetDialog(QDialog):
+    """Objectif de disponibilité sur 30 jours d'un objet (ou objectif par défaut), de 50 à 100 %."""
+
+    def __init__(
+        self, parent: QWidget | None, name: str, current: float | None, *, for_default: bool
+    ) -> None:
         super().__init__(parent)
+        self.removed = False
+        self.setWindowTitle(tr("Objectif de disponibilité"))
+        self.setWindowIcon(app_icon())
+        self.resize(520, 260)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.addWidget(title(tr("Objectif de disponibilité : {name}").format(name=name), "SectionTitle"))
+        layout.addWidget(
+            label(
+                (
+                    tr("S'applique aux tunnels et aux services qui n'ont pas d'objectif propre.")
+                    if for_default
+                    else tr("Disponibilité minimale attendue de cet objet.")
+                )
+                + " "
+                + tr(
+                    "Sur les 30 derniers jours, CMA prévient une fois quand elle passe dessous, puis quand elle "
+                    "remonte (canaux d'alerte)."
+                ),
+                "muted",
+                wrap=True,
+            )
+        )
+        self.spin = QDoubleSpinBox()
+        self.spin.setAccessibleName(tr("Objectif de disponibilité (%)"))
+        self.spin.setRange(MIN_TARGET, MAX_TARGET)
+        self.spin.setDecimals(2)
+        self.spin.setSingleStep(0.1)
+        self.spin.setSuffix(" %")
+        self.spin.setValue(current if current is not None else SUGGESTED_TARGET)
+        layout.addWidget(self.spin)
+        layout.addStretch()
+        buttons, self.ok_button = dialog_buttons(self, tr("Enregistrer"))
+        self.ok_button.clicked.connect(self.accept)
+        self.remove_button = buttons.addButton(
+            tr("Retirer l'objectif"), QDialogButtonBox.ButtonRole.ActionRole
+        )
+        self.remove_button.setEnabled(current is not None)
+        self.remove_button.clicked.connect(self._remove)
+        layout.addWidget(buttons)
+
+    def _remove(self) -> None:
+        self.removed = True
+        self.accept()
+
+    def value(self) -> TargetChoice:
+        return TargetChoice(None if self.removed else float(self.spin.value()))
+
+
+def ask_target(
+    parent: QWidget, name: str, current: float | None, *, for_default: bool = False
+) -> TargetChoice | None:
+    """Fonction de module : les tests la remplacent pour ne pas ouvrir de boîte modale. None : annulé."""
+    dialog = TargetDialog(parent, name, current, for_default=for_default)
+    return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
+
+
+class AvailabilityDialog(QDialog):
+    def __init__(self, parent: QWidget | None, path: Path, ctx: GuiContext | None = None) -> None:
+        super().__init__(parent)
+        self.ctx = ctx
         self.log = AvailabilityLog(path)
         self.keys = self.log.keys()
         self.setWindowTitle(tr("Disponibilité"))
@@ -200,11 +285,13 @@ class AvailabilityDialog(QDialog):
                 tr("30 jours"),
                 tr("Temps moyen"),
                 tr("Incidents (30 j)"),
+                tr("Objectif"),
             ],
             tr("Disponibilité par objet"),
         )
         for column, width in enumerate((300, 90, 100, 100, 120)):
             self.table.horizontalHeader().resizeSection(column, width)
+        self.table.horizontalHeader().resizeSection(5, 110)
         self.table.itemSelectionChanged.connect(self._show_incidents)
         splitter.addWidget(self.table)
         self.incidents = data_table(
@@ -222,6 +309,12 @@ class AvailabilityDialog(QDialog):
         self.all_button = button(tr("Tous les incidents"), "history")
         self.all_button.clicked.connect(lambda: self.fill_incidents(None))
         footer.addWidget(self.all_button)
+        self.target_button = button(tr("Définir l'objectif…"), "pencil")
+        self.target_button.clicked.connect(self.define_target)
+        footer.addWidget(self.target_button)
+        self.default_button = button(tr("Objectif par défaut…"), "shield-check")
+        self.default_button.clicked.connect(self.define_default_target)
+        footer.addWidget(self.default_button)
         self.export_button = button(tr("Exporter le rapport…"), "file-export")
         self.export_button.clicked.connect(self.export_report)
         footer.addWidget(self.export_button)
@@ -233,11 +326,74 @@ class AvailabilityDialog(QDialog):
         layout.addLayout(footer)
         self._fill()
 
-    def _fill(self) -> None:
+    def _config(self) -> Config:
+        return self.ctx.config() if self.ctx is not None else Config()
+
+    def _selected_key(self) -> str | None:
+        row = self.table.currentRow()
+        return self.keys[row] if 0 <= row < len(self.keys) else None
+
+    def _update_buttons(self) -> None:
+        self.target_button.setEnabled(self.ctx is not None and self._selected_key() is not None)
+        self.default_button.setEnabled(self.ctx is not None)
+
+    def define_target(self) -> None:
+        """« Définir l'objectif… » pour l'objet choisi : pose, change ou retire son objectif propre."""
+        key = self._selected_key()
+        if key is None or self.ctx is None:
+            return
+        current = self._config().settings.availability_targets.get(key)
+        answer = ask_target(self, self.log.label(key), current)
+        if answer is None:
+            return
+        if self.ctx.update_config(lambda config: set_target(config, key, answer.value)):
+            self._fill(key)
+
+    def define_default_target(self) -> None:
+        """« Objectif par défaut… » : celui des objets sans objectif propre."""
+        if self.ctx is None:
+            return
+        current = self._config().settings.default_availability_target
+        answer = ask_target(self, tr("tous les objets sans objectif propre"), current, for_default=True)
+        if answer is None:
+            return
+
+        def apply(config: Config) -> None:
+            config.settings.default_availability_target = answer.value
+
+        if self.ctx.update_config(apply):
+            self._fill(self._selected_key())
+
+    def _target_item(self, current: SloStatus) -> QTableWidgetItem:
+        """Case « Objectif » : la valeur, ou « — » ; sous l'objectif, un ▼ et la teinte d'alerte (le texte seul dit
+        déjà la situation, la couleur ne porte rien d'essentiel)."""
+        if current.target is None:
+            item = QTableWidgetItem("—")
+            item.setToolTip(tr("Aucun objectif : « Définir l'objectif… » en pose un."))
+            return item
+        shown = target_text(current.target)
+        if not current.below:
+            item = QTableWidgetItem(shown)
+            item.setToolTip(tr("Objectif de disponibilité sur 30 jours."))
+            return item
+        item = QTableWidgetItem(f"▼ {shown}")
+        item.setForeground(QBrush(QColor(status_colors("danger", current_tokens())[0])))
+        item.setToolTip(
+            tr("Sous l'objectif : {percent} sur 30 jours pour {target}.").format(
+                percent=percent(Stats((current.uptime or 0.0) / 100, None, None, current.checks)),
+                target=shown,
+            )
+        )
+        item.setData(Qt.ItemDataRole.AccessibleTextRole, tr("{target}, sous l'objectif").format(target=shown))
+        return item
+
+    def _fill(self, select: str | None = None) -> None:
         tokens = current_tokens()
+        config = self._config()
         clear_items(self.table, len(self.keys))
         for row, key in enumerate(self.keys):
             week, month = self.log.stats(key, 7), self.log.stats(key, 30)
+            slo = status(self.log, config, key)
             mean = f"{month.mean_ms:.0f} ms" if month.mean_ms is not None else "—"
             kind = tr("Tunnel") if key.startswith("tunnel:") else tr("Service")
             count = len(self.log.history(key, 30))
@@ -246,17 +402,23 @@ class AvailabilityDialog(QDialog):
                 item = QTableWidgetItem(value)
                 if column in (2, 3):
                     stats = week if column == 2 else month
-                    item.setForeground(QBrush(QColor(status_colors(uptime_tone(stats), tokens)[0])))
+                    tone = "danger" if column == 3 and slo.below else uptime_tone(stats)
+                    item.setForeground(QBrush(QColor(status_colors(tone, tokens)[0])))
                     item.setToolTip(tr("{n} tests").format(n=stats.checks))
                 if column == 4 and month.max_ms is not None:
                     item.setToolTip(tr("Maximum : {ms:.0f} ms").format(ms=month.max_ms))
                 self.table.setItem(row, column, item)
+            self.table.setItem(row, TARGET_COLUMN, self._target_item(slo))
+        if select in self.keys:
+            self.table.selectRow(self.keys.index(select))
+        self._update_buttons()
         self.table.setVisible(bool(self.keys))
         self.empty.setVisible(not self.keys)
         self.fill_incidents(None)
         self._show_chart()
 
     def _show_incidents(self) -> None:
+        self._update_buttons()
         row = self.table.currentRow()
         self.fill_incidents(self.keys[row] if 0 <= row < len(self.keys) else None)
         self._show_chart()
@@ -317,5 +479,7 @@ class AvailabilityDialog(QDialog):
 
 
 def show_availability(parent: QWidget, path: Path) -> None:
-    """Fonction de module : les tests la remplacent pour ne pas ouvrir de boîte modale."""
-    AvailabilityDialog(parent, path).exec()
+    """Fonction de module : les tests la remplacent pour ne pas ouvrir de boîte modale. Le contexte de l'application
+    (pour lire et poser les objectifs) est celui de la vue Cloudflare qui l'ouvre."""
+    ctx = getattr(parent, "ctx", None)
+    AvailabilityDialog(parent, path, ctx).exec()

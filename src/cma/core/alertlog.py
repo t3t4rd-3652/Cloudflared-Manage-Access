@@ -2,7 +2,7 @@
 
 Fichier `alert_log.json` du dossier de données, à part de `alert_state.json` : `{"entries": [...]}`, 200 entrées au
 plus (les plus récentes). Une entrée : date UTC, nom et type du canal, nature (`alert`, `recovery`, `reminder`,
-`digest`, `test`), objet (libellé d'un tunnel ou d'un nom d'hôte, vide pour un résumé ou un test), résultat.
+`digest`, `slo`, `test`), objet (libellé d'un tunnel ou d'un nom d'hôte, vide pour un résumé ou un test), résultat.
 
 Aucun secret : ni l'adresse du canal ni un fragment d'adresse (`scrub`), et un message d'erreur court (200
 caractères). La lecture est tolérante (fichier absent ou illisible = journal vide) et l'écriture atomique ; un
@@ -38,7 +38,7 @@ _LAST_SEGMENT_MIN = 4  # dernier segment du chemin (sujet ntfy, jeton de webhook
 _URL = re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://\S+")
 _SPLIT = re.compile(r"[/?&=#:@;,]+")
 
-NATURES = ("alert", "recovery", "reminder", "digest", "test")
+NATURES = ("alert", "recovery", "reminder", "digest", "slo", "test")
 
 _lock = threading.Lock()
 

@@ -1,9 +1,10 @@
 """État des envois d'alertes (ADR 0002) : dernier rappel de chaque panne, semaine du dernier résumé.
 
 Fichier `alert_state.json` du dossier de données, à part de la configuration (exportée) et du journal de
-disponibilité : `{"reminders": {"<clé>": "<ISO 8601 UTC>"}, "digest_week": "2026-W42"}`. La lecture est tolérante
-(fichier absent ou illisible = état vide : au pire, un rappel ou un résumé part une fois de trop) et l'écriture
-atomique. Comme pour le journal, la tâche planifiée n'écrit que si CMA est fermé.
+disponibilité : `{"reminders": {"<clé>": "<ISO 8601 UTC>"}, "digest_week": "2026-W42", "slo": {"<clé>": "<ISO 8601 UTC>"}}`
+(`slo` : objets déjà annoncés sous leur objectif de disponibilité, clé absente sans objet annoncé). La lecture est
+tolérante (fichier absent ou illisible = état vide : au pire, un rappel ou un résumé part une fois de trop) et
+l'écriture atomique. Comme pour le journal, la tâche planifiée n'écrit que si CMA est fermé.
 """
 
 from __future__ import annotations
@@ -30,6 +31,8 @@ class AlertState:
         self.digest_week = ""
         # Tunnel de chaque nom d'hôte (clé de service → identifiant du tunnel), d'après le dernier relevé connu.
         self.tunnels: dict[str, str] = {}
+        # Objets dont la disponibilité sur 30 jours est sous l'objectif et déjà annoncée (clé → date de l'annonce).
+        self.slo: dict[str, str] = {}
         self.dirty = False
         try:
             data: Any = read_json_lenient(path) if path.exists() else {}
@@ -48,6 +51,11 @@ class AlertState:
         week = values.get("digest_week")
         if isinstance(week, str):
             self.digest_week = week
+        slo = values.get("slo")
+        if isinstance(slo, dict):
+            self.slo = {
+                str(key): value for key, value in cast(dict[Any, Any], slo).items() if isinstance(value, str)
+            }
         tunnels = values.get("tunnels")
         if isinstance(tunnels, dict):
             self.tunnels = {
@@ -87,6 +95,29 @@ class AlertState:
             self.tunnels.update(changed)
             self.dirty = True
 
+    # --- Objectifs de disponibilité ---------------------------------------------------------------------------
+
+    def slo_below(self, key: str) -> bool:
+        """Le passage sous l'objectif de cet objet est-il déjà annoncé (et son retour pas encore) ?"""
+        return key in self.slo
+
+    def mark_slo(self, key: str, below: bool, at: datetime) -> None:
+        """Note l'annonce d'un passage sous l'objectif (`below`) ou celle du retour au-dessus."""
+        if below:
+            self.slo[key] = at.astimezone(UTC).strftime(_FORMAT)
+            self.dirty = True
+        elif self.slo.pop(key, None) is not None:
+            self.dirty = True
+
+    def keep_only_slo(self, keys: Iterable[str]) -> None:
+        """Oublie les objets sans objectif ou sans relevé connu : un futur passage sous l'objectif repart à zéro."""
+        wanted = set(keys)
+        stale = [key for key in self.slo if key not in wanted]
+        for key in stale:
+            del self.slo[key]
+        if stale:
+            self.dirty = True
+
     # --- Résumé hebdomadaire ----------------------------------------------------------------------------------
 
     def mark_digest(self, week: str) -> None:
@@ -99,7 +130,12 @@ class AlertState:
         """Écrit le fichier s'il a changé (OSError si le dossier n'est pas accessible)."""
         if not self.dirty:
             return
-        atomic_write_json(
-            self.path, {"reminders": self.reminders, "digest_week": self.digest_week, "tunnels": self.tunnels}
-        )
+        data: dict[str, Any] = {
+            "reminders": self.reminders,
+            "digest_week": self.digest_week,
+            "tunnels": self.tunnels,
+        }
+        if self.slo:  # la clé n'apparaît que pour qui a des objectifs : le fichier des autres ne change pas
+            data["slo"] = self.slo
+        atomic_write_json(self.path, data)
         self.dirty = False

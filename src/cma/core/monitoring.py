@@ -11,6 +11,8 @@ sourdine, alertes vers l'extérieur.
 - Les alertes partent vers chaque canal actif ; un canal en échec n'empêche pas les autres.
 - Une panne qui dure est rappelée toutes les N heures, et le résumé hebdomadaire part le lundi (état des envois dans
   `alert_state.json`, ADR 0002) : mêmes règles CMA ouvert et tâche planifiée.
+- Un objet qui passe sous son objectif de disponibilité sur 30 jours (`cma.core.slo`) est annoncé une fois, puis son
+  retour au-dessus ; ces annonces suivent les rappels (nature « slo » dans le journal des envois).
 - Chaque envoi vers un canal, réussi ou non, est noté dans `alert_log.json` (`cma.core.alertlog`, ADR 0002) quand
   l'appelant donne un `journal` : jamais l'adresse du canal.
 """
@@ -19,7 +21,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, tzinfo
 
 from cma.core.alertlog import AlertLog, send_and_note
@@ -33,6 +35,7 @@ from cma.core.models import Config, MaintenanceWindow
 from cma.core.secrets import SecretStore
 from cma.core.servicewatch import ServiceTarget
 from cma.core.servicewatch import severity as service_severity
+from cma.core.slo import Crossing, crossings, has_targets, percent_text, target_text
 from cma.core.tunnelwatch import severity as tunnel_severity
 from cma.i18n import tr
 
@@ -151,7 +154,8 @@ def mute(config: Config, key: str, duration: timedelta | None, now: datetime | N
 
 @dataclass(frozen=True)
 class Event:
-    """Changement à annoncer : panne (nouvel incident), retour, ou rappel d'une panne qui dure."""
+    """Changement à annoncer : panne (nouvel incident), retour, rappel d'une panne qui dure, ou franchissement de
+    l'objectif de disponibilité (`slo` : `recovered` dit alors si l'objet est remonté au-dessus)."""
 
     key: str
     label: str
@@ -160,6 +164,7 @@ class Event:
     muted: bool
     recovered: bool
     reminder: bool = False
+    slo: bool = False
 
 
 def _close_unwatched(log: AvailabilityLog, kind: str, watched: set[str], now: datetime | None) -> None:
@@ -269,8 +274,14 @@ def channels(config: Config, secrets: SecretStore) -> list[tuple[str, str, str, 
 
 
 def event_alert(event: Event) -> Alert:
-    """L'alerte d'un événement : le titre dit s'il s'agit d'une panne, d'un retour ou d'un rappel."""
-    if event.recovered:
+    """L'alerte d'un événement : le titre dit s'il s'agit d'une panne, d'un retour, d'un rappel ou de l'objectif."""
+    if event.slo:
+        title = (
+            tr("CMA — objectif retrouvé : {name}")
+            if event.recovered
+            else tr("CMA — objectif manqué : {name}")
+        ).format(name=event.label)
+    elif event.recovered:
         title = tr("CMA — {name} rétabli").format(name=event.label)
     elif event.reminder:
         title = tr("CMA — toujours en panne : {name}").format(name=event.label)
@@ -280,7 +291,9 @@ def event_alert(event: Event) -> Alert:
 
 
 def event_nature(event: Event) -> str:
-    """Nature d'un envoi dans le journal (`cma.core.alertlog`) : retour, rappel ou panne."""
+    """Nature d'un envoi dans le journal (`cma.core.alertlog`) : objectif, retour, rappel ou panne."""
+    if event.slo:
+        return "slo"
     return "recovery" if event.recovered else "reminder" if event.reminder else "alert"
 
 
@@ -398,18 +411,93 @@ def send_reminders(
     return errors
 
 
+def slo_events(
+    log: AvailabilityLog,
+    config: Config,
+    state: AlertState,
+    now: datetime | None = None,
+    tz: tzinfo | None = None,
+    tunnel_of: Mapping[str, str] | None = None,
+) -> list[Event]:
+    """Franchissements de l'objectif de disponibilité dus (`cma.core.slo.crossings`). Rien pour un objet en sourdine
+    ou en maintenance (un nom d'hôte suit son tunnel : `tunnel_of`). L'état n'est pas modifié ici : il l'est quand
+    l'envoi a réussi (`send_slo`)."""
+    moment = now or datetime.now(UTC)
+    if not has_targets(config):
+        state.keep_only_slo(
+            ()
+        )  # plus d'objectif : un futur passage sous un objectif posé plus tard repart à zéro
+        return []
+
+    def muted(key: str) -> bool:
+        return is_muted(config, key, (tunnel_of or {}).get(key), moment, tz)
+
+    return [_slo_event(c) for c in crossings(log, config, state, moment, tz, muted)]
+
+
+def _slo_event(crossing: Crossing) -> Event:
+    values = {
+        "name": crossing.label,
+        "uptime": percent_text(crossing.uptime),
+        "target": target_text(crossing.target),
+    }
+    if crossing.recovered:
+        text = tr(
+            "{name} : disponibilité de {uptime} sur 30 jours, de nouveau au-dessus de l'objectif ({target})."
+        )
+        return Event(crossing.key, crossing.label, "success", text.format(**values), False, True, slo=True)
+    text = tr("{name} : disponibilité de {uptime} sur 30 jours, sous l'objectif ({target}).")
+    return Event(crossing.key, crossing.label, "warning", text.format(**values), False, False, slo=True)
+
+
+def send_slo(
+    events: list[Event],
+    config: Config,
+    secrets: SecretStore,
+    state: AlertState,
+    now: datetime | None = None,
+    sender: Sender | None = None,
+    journal: AlertLog | None = None,
+) -> list[str]:
+    """Envoie les franchissements aux canaux (le retour seulement à ceux qui le veulent) ; l'état note ce qui est
+    parti : un passage sous l'objectif quand au moins un canal l'a reçu (sinon il repart au relevé suivant), un
+    retour dans tous les cas (sans quoi l'objet resterait « annoncé » et son prochain passage dessous muet)."""
+    moment = now or datetime.now(UTC)
+    send = sender or send_alert
+    targets = channels(config, secrets)
+    errors: list[str] = []
+    for event in events:
+        alert = event_alert(event)
+        reached = 0
+        for name, kind, url, recoveries in targets:
+            if event.recovered and not recoveries:
+                continue
+            failure = send_and_note(journal, send, name, kind, url, alert, nature="slo", subject=event.label)
+            if failure is None:
+                reached += 1
+            else:
+                errors.append(f"{name} : {failure}")
+        if event.recovered:
+            state.mark_slo(event.key, False, moment)
+        elif reached:
+            state.mark_slo(event.key, True, moment)
+    return errors
+
+
 @dataclass
 class FollowUp:
-    """Ce qu'un relevé laisse à envoyer en plus des pannes et des retours : rappels et résumé de la semaine."""
+    """Ce qu'un relevé laisse à envoyer en plus des pannes et des retours : rappels, franchissements de l'objectif
+    de disponibilité et résumé de la semaine."""
 
     state: AlertState
     reminders: list[Event]
     digest: Alert | None = None
     week: str = ""
+    slo: list[Event] = field(default_factory=list[Event])
 
     @property
     def empty(self) -> bool:
-        return not self.reminders and self.digest is None
+        return not self.reminders and self.digest is None and not self.slo
 
 
 def prepare_follow_up(
@@ -422,13 +510,15 @@ def prepare_follow_up(
     tz: tzinfo | None = None,
     tunnel_of: Mapping[str, str] | None = None,
 ) -> FollowUp:
-    """Rappels dus et, si `check_digest` et que le résumé est dû cette semaine, son contenu. Rapide et sans réseau :
+    """Rappels et franchissements d'objectif dus et, si `check_digest` et que le résumé est dû cette semaine, son
+    contenu. Rapide et sans réseau :
     la fenêtre peut l'appeler sur son fil, puis envoyer (`deliver_follow_up`) dans un autre."""
     moment = now or datetime.now(UTC)
     # Tunnel de chaque nom d'hôte : mémorisé d'un relevé à l'autre, pour qu'une maintenance ou une sourdine du tunnel
     # couvre ses noms même avant le premier relevé des services (démarrage, tâche planifiée sans services).
     state.remember_tunnels(tunnel_of or {})
     plan = FollowUp(state, reminder_events(log, config, state, moment, tz, state.tunnels))
+    plan.slo = slo_events(log, config, state, moment, tz, state.tunnels)
     if check_digest and digest_due(config, state, moment, tz):
         plan.digest = build_digest(log, config, moment, tz)
         plan.week = week_id(moment.astimezone(tz))
@@ -443,9 +533,10 @@ def deliver_follow_up(
     sender: Sender | None = None,
     journal: AlertLog | None = None,
 ) -> list[str]:
-    """Envoie rappels et résumé, note ce qui est parti dans `alert_state.json` (et chaque envoi dans `journal`) ;
+    """Envoie rappels, franchissements d'objectif et résumé, note ce qui est parti dans `alert_state.json` (et chaque envoi dans `journal`) ;
     renvoie les erreurs."""
     errors = send_reminders(plan.reminders, config, secrets, plan.state, now, sender, journal)
+    errors += send_slo(plan.slo, config, secrets, plan.state, now, sender, journal)
     if plan.digest is not None:
         reached, failed = broadcast(plan.digest, config, secrets, sender, journal, nature="digest")
         errors += failed

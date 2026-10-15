@@ -13,6 +13,7 @@ import getpass
 import io
 import json
 import sys
+from datetime import datetime, tzinfo
 from pathlib import Path
 from typing import Any
 
@@ -101,6 +102,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=tr("disponibilité des tunnels et services relevés (code 2 si un incident est en cours)"),
     )
     availability.add_argument("--days", type=int, default=30, choices=(1, 7, 30, 90))
+    availability.add_argument(
+        "--month",
+        metavar="AAAA-MM",
+        help=tr(
+            "rapport d'un mois civil (jours locaux) avec l'objectif et l'écart ; le mois en cours va jusqu'à "
+            "aujourd'hui ; remplace --days"
+        ),
+    )
     availability.add_argument("--json", action="store_true")
     availability.add_argument(
         "--output",
@@ -490,14 +499,87 @@ def write_availability_report(path: Path, rows: list[Any], incidents: list[Any],
         )
 
 
+def write_month_report(path: Path, report: Any) -> None:
+    """Rapport d'un mois dans un fichier : CSV (avec BOM pour Excel), JSON ou HTML selon l'extension."""
+    from cma.core.fsutil import atomic_write_text
+    from cma.core.slo_report import month_csv, month_html, month_json
+
+    suffix = path.suffix.lower()
+    if suffix == ".csv":
+        atomic_write_text(path, "﻿" + month_csv(report))
+    elif suffix == ".json":
+        atomic_write_text(path, month_json(report) + "\n")
+    elif suffix in (".html", ".htm"):
+        atomic_write_text(path, month_html(report))
+    else:
+        raise ValueError(
+            tr("Extension inconnue « {suffix} » : utilisez .html, .csv ou .json.").format(suffix=suffix)
+        )
+
+
+def show_month_availability(
+    paths: AppPaths,
+    month: str,
+    *,
+    as_json: bool = False,
+    output: str | None = None,
+    now: datetime | None = None,
+    tz: tzinfo | None = None,
+) -> int:
+    """Disponibilité d'un mois civil (jours locaux) avec l'objectif et l'écart de chaque objet. Le mois en cours
+    va jusqu'à aujourd'hui ; un mois sans relevé donne un rapport vide. Code 0 (le rapport ne dit pas « en
+    panne » : voir `cma tunnels`), 1 si le mois est invalide ou à venir, ou si l'écriture échoue."""
+    from cma.core.availability import AvailabilityLog
+    from cma.core.config_store import ConfigStore
+    from cma.core.slo import month_report
+    from cma.core.slo_report import month_json, period_text, report_header, report_lines
+
+    store = ConfigStore(paths)
+    store.load()
+    log = AvailabilityLog(paths.data_dir / "availability.json")
+    try:
+        report = month_report(log, store.snapshot(), month, now, tz)
+        if output:
+            write_month_report(Path(output), report)
+    except (OSError, ValueError) as exc:
+        print(tr("Erreur : {error}").format(error=exc), file=sys.stderr)
+        return 1
+    if output:
+        print(tr("Rapport enregistré : {file}").format(file=output))
+    elif as_json:
+        print(month_json(report))
+    elif not report.rows:
+        print(tr("Aucun relevé en {month}.").format(month=report.month))
+    else:
+        print(
+            tr("Disponibilité de {month} (du {period})").format(
+                month=report.month, period=period_text(report)
+            )
+        )
+        print(report_header())
+        for line in report_lines(report):
+            print(line)
+    return 0
+
+
 def show_availability(
-    paths: AppPaths, *, days: int = 30, as_json: bool = False, output: str | None = None
+    paths: AppPaths,
+    *,
+    days: int = 30,
+    as_json: bool = False,
+    output: str | None = None,
+    month: str | None = None,
+    now: datetime | None = None,
+    tz: tzinfo | None = None,
 ) -> int:
     """Disponibilité lue dans le journal tenu par la surveillance. Code 2 si un incident est encore ouvert ; avec
-    `output`, le rapport est écrit dans ce fichier (le code de retour ne change pas, 1 si l'écriture échoue)."""
+    `output`, le rapport est écrit dans ce fichier (le code de retour ne change pas, 1 si l'écriture échoue). Avec
+    `month` (AAAA-MM), rapport d'un mois civil : voir `show_month_availability`."""
     from cma.core.availability import AvailabilityLog
     from cma.core.availability_report import build, report_json
 
+    if month is not None:
+        return show_month_availability(paths, month, as_json=as_json, output=output, now=now, tz=tz)
     log = AvailabilityLog(paths.data_dir / "availability.json")
     rows, incidents = build(log, days)
     if output:
@@ -656,7 +738,9 @@ def run(args: argparse.Namespace) -> int:
         return send_test_alerts(paths)
 
     if command == "availability":
-        return show_availability(paths, days=args.days, as_json=args.json, output=args.output)
+        return show_availability(
+            paths, days=args.days, as_json=args.json, output=args.output, month=args.month
+        )
 
     if command == "snapshot":
         return take_snapshot_cli(paths)
