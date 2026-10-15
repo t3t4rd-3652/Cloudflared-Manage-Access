@@ -286,6 +286,7 @@ def _record_and_alert(
     services_complete: bool = False,
 ) -> None:
     """`services_complete` : le relevé des services a réussi (une liste vide veut alors dire « plus aucun nom »)."""
+    from cma.core.alertlog import AlertLog, log_path
     from cma.core.alertstate import AlertState, state_path
     from cma.core.availability import AvailabilityLog
     from cma.core.monitoring import (
@@ -327,7 +328,9 @@ def _record_and_alert(
         if problems:
             text += " " + tr("Ouvrez CMA pour le diagnostic.")
         system_notification(APP_NAME, text)
-    send_events(events, config, secrets)
+    # Journal des envois : écrit seulement ici, donc CMA fermé (même règle que le journal de disponibilité).
+    journal = AlertLog(log_path(paths.data_dir))
+    send_events(events, config, secrets, None, journal)
     # Rappels des pannes qui durent et résumé du lundi : la tâche n'écrit `alert_state.json` que si CMA est fermé,
     # comme le journal (cette fonction n'est appelée que dans ce cas).
     if config.settings.alert_channels:
@@ -338,7 +341,7 @@ def _record_and_alert(
             check_digest=True,
             tunnel_of={service_key(target): target.tunnel_id for target, _probe in tested},
         )
-        deliver_follow_up(plan, config, secrets)
+        deliver_follow_up(plan, config, secrets, None, None, journal)
 
 
 def _admin(paths: AppPaths, secrets: SecretStore | None, base_url: str | None) -> Any:
@@ -402,7 +405,8 @@ def show_review(
 
 def send_test_alerts(paths: AppPaths, *, secrets: SecretStore | None = None) -> int:
     """Un test vers chaque canal actif. Code 0 si tous l'ont accepté ; 1 sinon (ou sans canal)."""
-    from cma.core.alerts import Alert, AlertError, send_alert
+    from cma.core.alertlog import AlertLog, log_path, send_and_note
+    from cma.core.alerts import Alert, send_alert
     from cma.core.config_store import ConfigStore
     from cma.core.monitoring import channels
     from cma.core.secrets import open_secret_store
@@ -420,22 +424,24 @@ def send_test_alerts(paths: AppPaths, *, secrets: SecretStore | None = None) -> 
     alert = Alert(
         tr("CMA — test d'alerte"), tr("Ce canal recevra les pannes et les retours de vos services."), "info"
     )
+    journal = AlertLog(log_path(paths.data_dir))
     failed = 0
     for name, kind, url, _recoveries in targets:
-        try:
-            send_alert(kind, url, alert)
-        except AlertError as exc:
-            failed += 1
-            print(f"✗ {name} : {exc}")
-        else:
+        failure = send_and_note(journal, send_alert, name, kind, url, alert, nature="test")
+        if failure is None:
             print(f"✓ {name}")
+        else:
+            failed += 1
+            print(f"✗ {name} : {failure}")
     return 1 if failed else 0
 
 
 def send_digest(paths: AppPaths, *, secrets: SecretStore | None = None) -> int:
     """Le résumé de la semaine, tout de suite, vers chaque canal actif. Code 0 si tous l'ont accepté ; 1 sinon (ou
-    sans canal). N'écrit pas `alert_state.json` : le résumé automatique du lundi part quand même."""
-    from cma.core.alerts import AlertError, send_alert
+    sans canal). N'écrit pas `alert_state.json` : le résumé automatique du lundi part quand même. Chaque envoi est
+    noté dans `alert_log.json`."""
+    from cma.core.alertlog import AlertLog, log_path, send_and_note
+    from cma.core.alerts import send_alert
     from cma.core.availability import AvailabilityLog
     from cma.core.config_store import ConfigStore
     from cma.core.digest import build_digest
@@ -454,15 +460,15 @@ def send_digest(paths: AppPaths, *, secrets: SecretStore | None = None) -> int:
         )
         return 1
     alert = build_digest(AvailabilityLog(paths.data_dir / "availability.json"), config)
+    journal = AlertLog(log_path(paths.data_dir))
     failed = 0
     for name, kind, url, _recoveries in targets:
-        try:
-            send_alert(kind, url, alert)
-        except AlertError as exc:
-            failed += 1
-            print(f"✗ {name} : {exc}")
-        else:
+        failure = send_and_note(journal, send_alert, name, kind, url, alert, nature="digest")
+        if failure is None:
             print(f"✓ {name}")
+        else:
+            failed += 1
+            print(f"✗ {name} : {failure}")
     return 1 if failed else 0
 
 

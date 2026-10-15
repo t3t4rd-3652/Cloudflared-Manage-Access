@@ -184,6 +184,35 @@ def test_availability_dialog_accessibility(qtbot, gui, tmp_path):
     dialog.deleteLater()
 
 
+def test_recent_sends_dialog_accessibility(qtbot, gui, tmp_path):
+    """Envois récents : tableau du journal des envois d'alertes, effacement et fermeture au clavier."""
+    from cma.core.alertlog import AlertLog
+    from cma.ui.dialogs.sends import SendsDialog
+
+    ctx, window = gui
+    journal = AlertLog(tmp_path / "alert_log.json")
+    journal.note(channel="Téléphone", kind="ntfy", nature="alert", subject="bureau")
+    journal.note(channel="Équipe", kind="slack", nature="digest", error="Le canal a refusé l'alerte (403).")
+
+    dialog = SendsDialog(window, journal)
+    dialog.show()
+    apply_accessible_names(dialog)
+    assert describe(missing_accessible_names(dialog)) == []
+    assert dialog.windowTitle()
+    assert accessible_name(dialog.table) == "Envois récents"
+    assert not dialog.table.tabKeyNavigation()  # Tab quitte le tableau au lieu de passer de case en case
+    verify_tab_order(dialog, min_controls=2)
+    dialog.deleteLater()
+
+    # Journal vide : seuls les boutons restent, et le clavier atteint « Fermer ».
+    empty = SendsDialog(window, AlertLog(tmp_path / "vide.json"))
+    empty.show()
+    apply_accessible_names(empty)
+    assert describe(missing_accessible_names(empty)) == []
+    verify_tab_order(empty, min_controls=1)
+    empty.deleteLater()
+
+
 def test_publish_dialog_with_prefilled_values_accessibility(qtbot, gui):
     """Publication d'un service avec valeurs pré-remplies (hostname, service, note).
 

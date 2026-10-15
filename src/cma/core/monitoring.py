@@ -11,6 +11,8 @@ sourdine, alertes vers l'extérieur.
 - Les alertes partent vers chaque canal actif ; un canal en échec n'empêche pas les autres.
 - Une panne qui dure est rappelée toutes les N heures, et le résumé hebdomadaire part le lundi (état des envois dans
   `alert_state.json`, ADR 0002) : mêmes règles CMA ouvert et tâche planifiée.
+- Chaque envoi vers un canal, réussi ou non, est noté dans `alert_log.json` (`cma.core.alertlog`, ADR 0002) quand
+  l'appelant donne un `journal` : jamais l'adresse du canal.
 """
 
 from __future__ import annotations
@@ -20,7 +22,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
 
-from cma.core.alerts import Alert, AlertError, elapsed_text, secret_key, send_alert
+from cma.core.alertlog import AlertLog, send_and_note
+from cma.core.alerts import Alert, elapsed_text, secret_key, send_alert
 from cma.core.alertstate import AlertState
 from cma.core.availability import AvailabilityLog
 from cma.core.cfapi import Tunnel
@@ -276,10 +279,20 @@ def event_alert(event: Event) -> Alert:
     return Alert(title, event.text, event.level)
 
 
+def event_nature(event: Event) -> str:
+    """Nature d'un envoi dans le journal (`cma.core.alertlog`) : retour, rappel ou panne."""
+    return "recovery" if event.recovered else "reminder" if event.reminder else "alert"
+
+
 def send_events(
-    events: list[Event], config: Config, secrets: SecretStore, sender: Sender | None = None
+    events: list[Event],
+    config: Config,
+    secrets: SecretStore,
+    sender: Sender | None = None,
+    journal: AlertLog | None = None,
 ) -> list[str]:
-    """Envoie chaque événement non mis en sourdine à chaque canal ; renvoie les erreurs (« canal : raison »)."""
+    """Envoie chaque événement non mis en sourdine à chaque canal ; renvoie les erreurs (« canal : raison »).
+    Chaque envoi, réussi ou non, est noté dans `journal` s'il est donné."""
     errors: list[str] = []
     send = sender or send_alert
     targets = channels(config, secrets)
@@ -290,27 +303,34 @@ def send_events(
         for name, kind, url, recoveries in targets:
             if event.recovered and not recoveries:
                 continue
-            try:
-                send(kind, url, alert)
-            except AlertError as exc:
-                errors.append(f"{name} : {exc}")
+            failure = send_and_note(
+                journal, send, name, kind, url, alert, nature=event_nature(event), subject=event.label
+            )
+            if failure is not None:
+                errors.append(f"{name} : {failure}")
     return errors
 
 
 def broadcast(
-    alert: Alert, config: Config, secrets: SecretStore, sender: Sender | None = None
+    alert: Alert,
+    config: Config,
+    secrets: SecretStore,
+    sender: Sender | None = None,
+    journal: AlertLog | None = None,
+    *,
+    nature: str = "alert",
+    subject: str = "",
 ) -> tuple[int, list[str]]:
     """Envoie l'alerte à chaque canal actif : (nombre de canaux atteints, erreurs « canal : raison »)."""
     send = sender or send_alert
     reached = 0
     errors: list[str] = []
     for name, kind, url, _recoveries in channels(config, secrets):
-        try:
-            send(kind, url, alert)
-        except AlertError as exc:
-            errors.append(f"{name} : {exc}")
-        else:
+        failure = send_and_note(journal, send, name, kind, url, alert, nature=nature, subject=subject)
+        if failure is None:
             reached += 1
+        else:
+            errors.append(f"{name} : {failure}")
     return reached, errors
 
 
@@ -363,12 +383,15 @@ def send_reminders(
     state: AlertState,
     now: datetime | None = None,
     sender: Sender | None = None,
+    journal: AlertLog | None = None,
 ) -> list[str]:
     """Envoie les rappels ; l'état note la date de ceux qu'au moins un canal a reçus (les autres repartiront)."""
     moment = now or datetime.now(UTC)
     errors: list[str] = []
     for event in events:
-        reached, failed = broadcast(event_alert(event), config, secrets, sender)
+        reached, failed = broadcast(
+            event_alert(event), config, secrets, sender, journal, nature="reminder", subject=event.label
+        )
         errors += failed
         if reached:
             state.mark_reminder(event.key, moment)
@@ -418,11 +441,13 @@ def deliver_follow_up(
     secrets: SecretStore,
     now: datetime | None = None,
     sender: Sender | None = None,
+    journal: AlertLog | None = None,
 ) -> list[str]:
-    """Envoie rappels et résumé, note ce qui est parti dans `alert_state.json` ; renvoie les erreurs."""
-    errors = send_reminders(plan.reminders, config, secrets, plan.state, now, sender)
+    """Envoie rappels et résumé, note ce qui est parti dans `alert_state.json` (et chaque envoi dans `journal`) ;
+    renvoie les erreurs."""
+    errors = send_reminders(plan.reminders, config, secrets, plan.state, now, sender, journal)
     if plan.digest is not None:
-        reached, failed = broadcast(plan.digest, config, secrets, sender)
+        reached, failed = broadcast(plan.digest, config, secrets, sender, journal, nature="digest")
         errors += failed
         if reached:
             plan.state.mark_digest(plan.week)

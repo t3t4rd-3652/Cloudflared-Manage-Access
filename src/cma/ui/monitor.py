@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from cma.core.alertlog import AlertLog, log_path
 from cma.core.alertstate import AlertState, state_path
 from cma.core.availability import AvailabilityLog
 from cma.core.cfapi import Tunnel
@@ -66,6 +67,9 @@ class Monitor(QObject):
         self.open_tunnel = open_tunnel or (lambda _tunnel, _diagnose: None)
         self.tunnel_watch = TunnelWatch()
         self.availability = AvailabilityLog(ctx.paths.data_dir / "availability.json")
+        # Journal des envois : noté depuis le fil qui envoie (un envoi de relevé ou de suite à la fois, plus le test
+        # des Paramètres) ; le verrou de `AlertLog` sérialise les écritures.
+        self.alert_log = AlertLog(log_path(ctx.paths.data_dir))
         self.tunnel_check_running = False
         self.service_check_running = False
         self._follow_up_running = False
@@ -177,7 +181,9 @@ class Monitor(QObject):
             return
 
         async def send() -> list[str]:
-            return await asyncio.to_thread(send_events, events, config, self.ctx.core.secrets)
+            return await asyncio.to_thread(
+                send_events, events, config, self.ctx.core.secrets, None, self.alert_log
+            )
 
         def done(errors: list[str]) -> None:
             for error in errors:
@@ -213,7 +219,13 @@ class Monitor(QObject):
 
         async def send() -> list[str]:
             return await asyncio.to_thread(
-                deliver_follow_up, plan, config, self.ctx.core.secrets, datetime.now(UTC)
+                deliver_follow_up,
+                plan,
+                config,
+                self.ctx.core.secrets,
+                datetime.now(UTC),
+                None,
+                self.alert_log,
             )
 
         def done(errors: list[str]) -> None:

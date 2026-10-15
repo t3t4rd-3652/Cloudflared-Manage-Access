@@ -21,9 +21,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cma.core.alertlog import AlertLog, log_path, send_and_note
 from cma.core.alerts import KINDS, Alert, AlertError, kind_label, secret_key, send_alert
 from cma.core.models import AlertChannel, Config, MaintenanceWindow
 from cma.i18n import tr
+from cma.ui.dialogs.sends import show_recent_sends
 from cma.ui.icons import app_icon
 from cma.ui.views.cloud.helpers import data_table, dialog_buttons
 from cma.ui.views.common import confirm
@@ -216,6 +218,14 @@ class AlertsSection:
         self.remove_button = button(tr("Supprimer…"), "trash", danger=True)
         self.remove_button.clicked.connect(self.remove)
         row.addWidget(self.remove_button)
+        self.sends_button = button(tr("Envois récents…"), "history")
+        self.sends_button.setToolTip(
+            tr(
+                "Ce qui est parti vers les canaux (pannes, retours, rappels, résumés, tests) et si l'envoi a réussi."
+            )
+        )
+        self.sends_button.clicked.connect(self.show_sends)
+        row.addWidget(self.sends_button)
         row.addStretch()
         form.addRow(row)
         self.status = label("", "meta", wrap=True)
@@ -410,8 +420,15 @@ class AlertsSection:
         self.test_button.setEnabled(False)
         self.status.setText(tr("Envoi du test à « {name} »…").format(name=channel.name))
 
+        journal = AlertLog(log_path(self.ctx.paths.data_dir))
+
         async def run() -> None:
-            await asyncio.to_thread(send_alert, channel.kind, url, alert)
+            # Noté dans le journal des envois depuis ce fil, comme les envois du `Monitor`.
+            failure = await asyncio.to_thread(
+                send_and_note, journal, send_alert, channel.name, channel.kind, url, alert, nature="test"
+            )
+            if failure is not None:
+                raise AlertError(failure)
 
         def done(_result: object) -> None:
             self._update_actions()
@@ -423,3 +440,6 @@ class AlertsSection:
             self.status.setText(tr("Échec du test : {error}").format(error=message))
 
         self.ctx.run(run(), done, failed)
+
+    def show_sends(self) -> None:
+        show_recent_sends(self.view, AlertLog(log_path(self.ctx.paths.data_dir)))
