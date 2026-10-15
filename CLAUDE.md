@@ -13,7 +13,7 @@ applications protégées par Cloudflare Access (`cloudflared access tcp`) et des
 Elle sait aussi administrer un compte Cloudflare (tunnels, noms d'hôte publiés, applications Access,
 service tokens) avec un jeton d'API.
 
-- Version courante : voir `src/cma/__init__.py` (2.11.0 au 2026-10-14). Historique utilisateur : `CHANGELOG.md`,
+- Version courante : voir `src/cma/__init__.py` (2.12.0 au 2026-10-15). Historique utilisateur : `CHANGELOG.md`,
   embarqué dans les paquets (`cma/resources/CHANGELOG.md`) : la boîte « Quoi de neuf » en montre les sections.
 - Architecture, threads, cycle de vie des sessions : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - Sécurité et modèle de menace : [docs/SECURITE.md](docs/SECURITE.md). Scripts serveur : [docs/SERVEUR.md](docs/SERVEUR.md).
@@ -102,6 +102,7 @@ l'échec en annotations » (`check-runs` du commit, puis `annotations_url` du jo
 | 2026-10-09 | P8 : lecture du compte en parallèle (7-10 s → 2 s), test d'un nom d'hôte depuis Internet, historique des notifications. Release **2.9.0**. |
 | 2026-10-09 | P9 à P12 : surveillance des services publiés, reprise après la veille, réseaux privés WARP, journal d'audit, instantanés, permissions du jeton, trafic, liens `cma://` et partage, jetons d'API nommés, vues découpées, guide d'utilisation. Release **2.10.0**. |
 | 2026-10-09 → 10-14 | P13 à P22, Release **2.11.0** : bilan de sécurité, Access exigé au niveau du tunnel, jeton de la surveillance, disponibilité (graphique, rapport HTML/CSV), alertes ntfy/Slack/Teams/Discord, sourdine, import de `~/.ssh/config`, carte « Santé du compte », surveillance sortie de la fenêtre (`ui/monitor.py`, ADR 0001), `cma review`, `cma availability`, `cma alerts test`, publication d'un port découvert, « Quoi de neuf », raccourcis (F1). |
+| 2026-10-14 → 10-15 | P23 à P28 en agents parallèles (worktrees, Sonnet et Haiku, intégration et juges Opus) : disponibilité par jour local, maintenance planifiée, rappel des pannes longues, résumé hebdomadaire, `cma alerts digest`, `cma availability --output`, pannes dans le menu de l'icône, touche Tab libérée des tableaux. Deux juges, écarts corrigés. Release **2.12.0**. |
 
 Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff-filter=D --name-only`).
 

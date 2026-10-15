@@ -2,7 +2,7 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
-## [Non publié]
+## [2.12.0] - 2026-10-15
 
 ### Ajouté
 - **Maintenance planifiée** (Paramètres › Général › Alertes › Maintenance et rappels) : un créneau hebdomadaire

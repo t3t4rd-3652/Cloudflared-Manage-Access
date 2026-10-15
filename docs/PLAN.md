@@ -1,6 +1,6 @@
 # Plan du projet
 
-État au 2026-10-15, version **2.11.0** publiée ; P23 à P28 réalisés (2.12 : jours locaux, maintenance, rappels,
+État au 2026-10-15, version **2.12.0** ; P23 à P28 réalisés (2.12 : jours locaux, maintenance, rappels,
 résumé hebdomadaire, pannes dans l'icône, accessibilité au clavier), vérifiés par deux juges. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
@@ -586,7 +586,7 @@ Statut : FAIT
 
 ### P28 — Intégration, documentation, vérification et release 2.12 (2.12)
 
-Statut : EN COURS
+Statut : FAIT (deux juges : écarts corrigés ; release 2.12.0)
 
 - **Objectif** : réunir P23 à P27, documenter, faire vérifier, publier.
 - **Tâches** : fusion des branches, catalogues de traduction, suite complète trois fois, CHANGELOG, guide (maintenance,
@@ -631,7 +631,8 @@ Statut : EN COURS
 | P25 | FAIT | d0a5112 | 594 ✓ | 2026-10-14 |
 | P26 | FAIT | bfb1fdf, 5917839 | 594 ✓ | 2026-10-14 |
 | P27 | FAIT | c9b5265, 66fef5e | 594 ✓ | 2026-10-14 |
-| P28 | EN COURS | — | — | — |
+| P28 | FAIT | 3ff1e22 | 612 ✓ | 2026-10-15 |
 
-**Prochaine action exacte :** P28 — relire la documentation de P23 à P27, juge neutre, puis release 2.12.0 et
-installation. Intégration faite : 4 branches fusionnées (2bd7d72), 594 tests verts trois fois.
+**Prochaine action exacte :** 2.12.0 publiée et installée le 2026-10-15. Prochain plan à proposer (P29 et
+suivantes) ; en attente côté propriétaire : soumission winget, signature du code, réécriture éventuelle de
+l'historique (ancienne adresse d'exemple).
