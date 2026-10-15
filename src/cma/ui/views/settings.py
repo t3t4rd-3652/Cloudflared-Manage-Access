@@ -283,6 +283,19 @@ class SettingsView(QWidget):
             lambda _i: self._set("watch_token_id", self.watch_token.currentData())
         )
         form.addRow(tr("Jeton de la surveillance"), self.watch_token)
+        # Plusieurs jetons d'API (plusieurs comptes) : chacun relevé avec son dernier compte choisi (ADR 0003).
+        self.watch_all_accounts = QCheckBox(
+            tr("Surveiller tous les comptes (chaque jeton d'API avec son compte)")
+        )
+        self.watch_all_accounts.setToolTip(
+            tr(
+                "Chaque jeton d'API enregistré est relevé avec le dernier compte choisi avec lui dans la vue "
+                "Cloudflare, CMA ouvert comme fermé ; le nom du compte accompagne alors chaque panne. Un jeton refusé "
+                "n'empêche pas les autres d'être relevés."
+            )
+        )
+        self.watch_all_accounts.toggled.connect(lambda checked: self._set("watch_all_accounts", checked))
+        form.addRow(self.watch_all_accounts)
         # Quand CMA est fermé : tâche planifiée Windows (`tunnels --notify` toutes les 15 minutes). Son état est lu
         # une fois ici, pas à chaque changement de configuration (schtasks est lent à lancer).
         self.watch_closed = QCheckBox(
@@ -451,6 +464,11 @@ class SettingsView(QWidget):
             for token in self.ctx.manager.cloudflare.tokens():
                 self.watch_token.addItem(token.name, token.id)
             self.watch_token.setCurrentIndex(max(0, self.watch_token.findData(settings.watch_token_id)))
+        self.watch_all_accounts.setChecked(settings.watch_all_accounts)
+        # Utile à partir de deux jetons ; reste modifiable s'il est coché, pour pouvoir le décocher.
+        self.watch_all_accounts.setEnabled(
+            len(self.ctx.manager.cloudflare.tokens()) >= 2 or settings.watch_all_accounts
+        )
         self.start_with_system.setChecked(autostart.supported() and autostart.is_enabled())
         self.port_min.setValue(settings.auto_port_min)
         self.port_max.setValue(settings.auto_port_max)

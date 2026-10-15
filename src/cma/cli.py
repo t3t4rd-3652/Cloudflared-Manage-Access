@@ -215,6 +215,9 @@ def show_tunnels(
     `notify` (tâche planifiée) : notification du système si un tunnel ou un service est en panne, seulement quand
     CMA n'est pas ouvert (sinon il surveille déjà et prévient lui-même). Les services y sont testés si le réglage
     « Tester aussi les services publiés » est actif. Une lecture en échec ne notifie rien.
+
+    Avec « Surveiller tous les comptes » (ADR 0003), chaque jeton d'API est relevé avec son compte, comme CMA ouvert ;
+    un jeton refusé est signalé sur la sortie d'erreur sans arrêter les autres (code 1 si rien d'autre ne va mal).
     """
     from datetime import datetime
 
@@ -232,33 +235,50 @@ def show_tunnels(
     admin = CloudflareAdmin(store, vault, lambda _port, _taken: None, base_url=base_url or API_BASE)
     check_services = services or (notify and store.snapshot().settings.watch_services)
     try:
-        tunnels = asyncio.run(admin.tunnel_states())
+        sweep = asyncio.run(admin.watch_tunnels())
     except (CloudflareApiError, OSError) as exc:
         print(tr("Erreur : {error}").format(error=exc), file=sys.stderr)
         return 1
+    tunnels = sweep.tunnels
+    failures = list(sweep.failures)
     services_complete = False
     try:
-        tested = asyncio.run(admin.check_services()) if check_services else []
-        services_complete = bool(check_services)
+        service_sweep = asyncio.run(admin.watch_services()) if check_services else None
+        tested = service_sweep.results if service_sweep is not None else []
+        services_complete = service_sweep is not None and service_sweep.complete
+        failures += service_sweep.failures if service_sweep is not None else []
     except (CloudflareApiError, OSError) as exc:
         if services:
             print(tr("Erreur : {error}").format(error=exc), file=sys.stderr)
             return 1
         tested = []  # tâche planifiée : l'état des tunnels suffit à prévenir
-    rows = [
-        {"id": t.id, "name": t.name, "status": t.status, "label": status_label(t.status)} for t in tunnels
-    ]
+    # Un jeton refusé l'est pour les tunnels comme pour les services : une ligne par jeton et par raison.
+    for name, error in dict.fromkeys((f.token_name, f.error) for f in failures):
+        print(tr("Jeton « {name} » illisible : {error}").format(name=name, error=error), file=sys.stderr)
+    rows: list[dict[str, str]] = []
+    for t in tunnels:
+        row = {
+            "id": t.id,
+            "name": sweep.names.get(t.id, t.name),
+            "status": t.status,
+            "label": status_label(t.status),
+        }
+        if t.id in sweep.accounts:  # tous les comptes : le compte de chaque tunnel
+            row["account"] = sweep.accounts[t.id].name
+        rows.append(row)
     if as_json and services:
-        checks = [
-            {
-                "hostname": t.label,
+        checks: list[dict[str, Any]] = []
+        for t, p in tested:
+            check: dict[str, Any] = {
+                "hostname": t.address,
                 "tunnel": t.tunnel_name,
                 "state": p.state,
                 "status": p.status,
                 "summary": p.summary(t.label),
             }
-            for t, p in tested
-        ]
+            if t.account_id:
+                check["account"] = t.account
+            checks.append(check)
         print(json.dumps({"tunnels": rows, "services": checks}, indent=2, ensure_ascii=False))
     elif as_json:
         print(json.dumps(rows, indent=2, ensure_ascii=False))
@@ -280,9 +300,15 @@ def show_tunnels(
         # CMA fermé : la tâche tient le journal de disponibilité, et ne prévient qu'à un changement (nouvelle panne
         # ou retour), pas à chaque passage tant que la panne dure.
         _record_and_alert(
-            paths, store.snapshot(), vault, tunnels, tested, services_complete=services_complete
+            paths,
+            store.snapshot(),
+            vault,
+            tunnels,
+            tested,
+            services_complete=services_complete,
+            tunnels_complete=sweep.complete,
         )
-    return 2 if troubled or down else 0
+    return 2 if troubled or down else 1 if failures else 0
 
 
 def _record_and_alert(
@@ -293,8 +319,11 @@ def _record_and_alert(
     tested: list[Any],
     *,
     services_complete: bool = False,
+    tunnels_complete: bool = True,
 ) -> None:
-    """`services_complete` : le relevé des services a réussi (une liste vide veut alors dire « plus aucun nom »)."""
+    """`services_complete` : le relevé des services a réussi (une liste vide veut alors dire « plus aucun nom ») ;
+    `tunnels_complete` : celui des tunnels aussi. Un relevé incomplet (non demandé, en échec, ou dont un compte n'a
+    pas pu être lu avec « Surveiller tous les comptes ») ne clôt aucun incident."""
     from cma.core.alertlog import AlertLog, log_path
     from cma.core.alertstate import AlertState, state_path
     from cma.core.availability import AvailabilityLog
@@ -314,11 +343,9 @@ def _record_and_alert(
     # Une surveillance coupée dans les Paramètres ne relève plus rien : ses incidents ouverts sont clos, sans
     # événement ni notification (sinon ils resteraient « en cours » pour toujours).
     close_unwatched_kinds(log, config)
-    events = (record_tunnels(log, config, tunnels) if settings.watch_tunnels else []) + (
-        record_services(log, config, tested, complete=True if services_complete else None)
-        if settings.watch_services
-        else []
-    )
+    events = (
+        record_tunnels(log, config, tunnels, complete=tunnels_complete) if settings.watch_tunnels else []
+    ) + (record_services(log, config, tested, complete=services_complete) if settings.watch_services else [])
     with contextlib.suppress(OSError):  # un journal non écrit ne doit pas empêcher de prévenir
         log.save()
     shown = [e for e in events if not e.muted]

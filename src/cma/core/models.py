@@ -495,6 +495,9 @@ class Settings(Model):
     # « service:<nom d'hôte et chemin> »), puis un objectif par défaut facultatif pour les autres.
     availability_targets: dict[str, float] = Field(default_factory=dict[str, float])
     default_availability_target: float | None = None
+    # Surveillance de tous les comptes (P34, ADR 0003) : chaque jeton d'API nommé est relevé avec son dernier compte
+    # choisi, au lieu du seul compte de la vue Cloudflare.
+    watch_all_accounts: bool = False
 
     @field_validator("availability_targets", mode="after")
     @classmethod

@@ -10,6 +10,7 @@ import http.server
 import json
 import re
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -86,6 +87,11 @@ class FakeCloudflare:
     audit_allowed: bool = True
     # Autres jetons acceptés (plusieurs jetons d'API enregistrés dans CMA).
     other_tokens: tuple[str, ...] = ()
+    # Autres jetons qui mènent chacun à son propre compte (surveillance de plusieurs comptes, ADR 0003) : jeton → état
+    # de ce compte, servi tel quel à ce jeton.
+    tenants: dict[str, FakeCloudflare] = field(default_factory=dict)
+    # Attente avant chaque réponse, en secondes : Cloudflare met 0,3 à 1 s à répondre (mesure de la durée d'un relevé).
+    delay: float = 0.0
     # Connecteurs par tunnel : « bureau » a un connecteur sain (4 connexions), « labo » aucun.
     connectors: dict[str, list[dict[str, Any]]] = field(
         default_factory=lambda: {
@@ -261,13 +267,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         parts = urlsplit(self.path)
         path = parts.path.removeprefix("/client/v4")
         query = parse_qs(parts.query)
+        body = self._body() if method in ("POST", "PUT", "PATCH") else None  # lu avant toute réponse
+        if state.delay:
+            time.sleep(state.delay)
+        authorization = self.headers.get("Authorization")
+        tenant = next((s for t, s in state.tenants.items() if authorization == f"Bearer {t}"), None)
+        if tenant is not None:
+            # Jeton d'un autre compte : toute la requête est servie par l'état de ce compte.
+            state = self.state = tenant
         with state.lock:
             state.requests.append((method, path))
         allowed = {f"Bearer {t}" for t in (state.token, *state.other_tokens)}
-        if self.headers.get("Authorization") not in allowed:
+        if tenant is None and authorization not in allowed:
             self._error(401, 10000, "Authentication error")
             return
-        body = self._body() if method in ("POST", "PUT", "PATCH") else None
         with state.lock:
             self._route(method, path, query, body)
 
@@ -596,6 +609,58 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_PATCH(self) -> None:
         self._handle("PATCH")
+
+
+SECOND_TOKEN = "jeton-api-du-second-compte"
+
+
+def two_accounts() -> FakeCloudflare:
+    """Deux comptes, un par jeton (ADR 0003). « Compte A » (jeton TOKEN) : « bureau » en ligne, qui publie
+    grafana.exemple.fr, et « labo » hors ligne. « Compte B » (jeton SECOND_TOKEN) : « api » hors ligne, et « web » en
+    ligne, qui publie app.exemple.org."""
+    second = FakeCloudflare(
+        token=SECOND_TOKEN,
+        accounts=[{"id": "acc2", "name": "Compte B"}],
+        zones=[{"id": "z9", "name": "exemple.org", "account": {"id": "acc2", "name": "Compte B"}}],
+        tunnels=[
+            {"id": "t9", "name": "api", "status": "down"},
+            {"id": "t8", "name": "web", "status": "healthy"},
+        ],
+        configs={
+            "t8": {
+                "ingress": [
+                    {"hostname": "app.exemple.org", "service": "http://localhost:8080"},
+                    {"service": "http_status:404"},
+                ]
+            },
+            "t9": {"ingress": [{"service": "http_status:404"}]},
+        },
+        dns={"z9": []},
+    )
+    return FakeCloudflare(accounts=[{"id": "acc1", "name": "Compte A"}], tenants={SECOND_TOKEN: second})
+
+
+def register_two_tokens(
+    update: Any, secrets: Any, *, second: str = SECOND_TOKEN, watch_all: bool = True
+) -> None:
+    """CMA avec deux jetons d'API nommés : « Perso » (compte acc1, jeton actif) et « Travail » (compte acc2, jeton
+    `second`). `update` : `ConfigStore.update` ou `GuiContext.update_config`."""
+    from cma.core.cfadmin import token_secret_key
+    from cma.core.models import ApiToken
+
+    def apply(config: Any) -> None:
+        settings = config.settings
+        settings.cloudflare_tokens = [
+            ApiToken(id="principal", name="Perso", account_id="acc1"),
+            ApiToken(id="travail", name="Travail", account_id="acc2"),
+        ]
+        settings.cloudflare_token_id = "principal"
+        settings.cloudflare_account_id = "acc1"
+        settings.watch_all_accounts = watch_all
+
+    update(apply)
+    secrets.set(token_secret_key("principal"), TOKEN)
+    secrets.set(token_secret_key("travail"), second)
 
 
 class FakeCloudflareServer:
