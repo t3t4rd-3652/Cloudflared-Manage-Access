@@ -176,3 +176,63 @@ def test_incident_without_any_check_has_no_percentage(tmp_path: Path):
     log = AvailabilityLog(tmp_path / "a.json")
     log.start("tunnel", "tunnel:t1", "bureau", "down", MONDAY - timedelta(hours=5))
     assert "• bureau : —, 1 incident(s), pannes 5 h 00" in build_digest(log, Config(), MONDAY, UTC).text
+
+
+def test_digest_with_many_open_incidents_keeps_its_important_sections(tmp_path: Path):
+    """80 incidents ouverts, 20 tokens : chaque section est bornée, rien n'est coupé au milieu d'un nom, et les
+    objets les moins disponibles comme les tokens sont toujours là."""
+    log = AvailabilityLog(tmp_path / "a.json")
+    for number in range(80):
+        host = f"service-numero-{number:03d}.un-sous-domaine-vraiment-tres-long.un-domaine.exemple.fr"
+        log.record_check(f"service:{host}", host, False, None, MONDAY - timedelta(days=1))
+        log.start("service", f"service:{host}", host, "origin_down", MONDAY - timedelta(hours=number + 1))
+    config = Config()
+    for number in range(20):
+        config.tokens.append(
+            ServiceToken(
+                name=f"token-d-integration-continue-numero-{number:02d}-tres-long",
+                client_id="x",
+                expires_at=MONDAY + timedelta(days=number),
+            )
+        )
+    alert = build_digest(log, config, MONDAY, UTC)
+    text = alert.text
+    lines = text.splitlines()
+    assert len(text) <= LIMIT and len(f"**{alert.title}**\n{text}") < 2000
+    # « En cours » : quelques noms abrégés, puis le reste compté.
+    still = next(line for line in lines if line.startswith("En cours : "))
+    assert still.endswith("… et 76 autres") and len(still) < 300
+    # Les tokens : les 8 plus urgents, puis le reste compté.
+    assert "Service tokens à renouveler :" in lines
+    assert sum(line.startswith("• token-d-") for line in lines) == 8
+    assert "… et 12 autres" in lines
+    # Les objets : au moins les premiers, entiers, suivis du reste compté ; jamais une ligne coupée.
+    objects = [line for line in lines if line.startswith("• service-")]
+    assert len(objects) >= 5
+    assert all(" : 0.00 %, 1 incident(s), pannes " in line for line in objects)  # lignes entières
+    assert lines[-1].startswith("… et ") and str(80 - len(objects)) in lines[-1]
+    known = ("Disponibilité", "Incidents :", "En cours :", "Service tokens", "• ", "… et ")
+    assert all(line.startswith(known) for line in lines)
+
+
+def test_truncate_never_cuts_a_line_in_two():
+    text = "\n".join(f"ligne numéro {n:03d}" for n in range(100))
+    cut = truncate(text, 200)
+    assert len(cut) <= 200 and cut.endswith("…")
+    assert all(
+        line.startswith("ligne numéro ") and len(line) == 16 for line in cut.removesuffix("…").splitlines()
+    )
+
+
+def test_digest_figures_follow_the_given_time_zone(tmp_path: Path):
+    """Les chiffres suivent le fuseau demandé : un relevé du 6 est dans la fenêtre de 7 jours du 12 à 23 h 30 UTC,
+    mais plus dans celle du 13 (UTC+2)."""
+    log = AvailabilityLog(tmp_path / "a.json")
+    log.record_check("tunnel:t1", "bureau", True, None, datetime(2026, 10, 6, 12, 0, tzinfo=UTC), UTC)
+    now = datetime(2026, 10, 12, 23, 30, tzinfo=UTC)
+    in_utc = build_digest(log, Config(), now, UTC)
+    assert "• bureau : 100 %" in in_utc.text.splitlines()
+    ahead = build_digest(log, Config(), now, PARIS)  # PARIS = UTC+2 : déjà le 13, la fenêtre commence le 7
+    assert "bureau" not in ahead.text and "Aucun relevé sur la période" in ahead.text
+    assert ahead.title == "CMA — semaine du 06/10/2026"  # le titre suit aussi le fuseau (13 - 7 jours)
+    assert in_utc.title == "CMA — semaine du 05/10/2026"
