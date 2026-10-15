@@ -1,12 +1,12 @@
 {
-    "version": "2.11.0",
+    "version": "2.12.0",
     "description": "Desktop manager for cloudflared access connections and SSH port forwards (portable).",
     "homepage": "https://github.com/t3t4rd-3652/Cloudflared-Manage-Access",
     "license": "MIT",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/t3t4rd-3652/Cloudflared-Manage-Access/releases/download/v2.11.0/CloudflaredManageAccess-2.11.0-portable.zip",
-            "hash": "979e7d09a02a37039d9d0328f057e4296b12a08f1cfe9c773e49f2e01a50de54",
+            "url": "https://github.com/t3t4rd-3652/Cloudflared-Manage-Access/releases/download/v2.12.0/CloudflaredManageAccess-2.12.0-portable.zip",
+            "hash": "396f726e143a27a9de623175596892aff594605e9afa484bf24255aa63bb2775",
             "extract_dir": "CloudflaredManageAccess"
         }
     },
