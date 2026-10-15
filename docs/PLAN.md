@@ -604,7 +604,7 @@ l'orchestrateur relit, lance les tests et committe. Traductions et documentation
 
 ### P29 — Maintenance visible, incidents clos quand une surveillance est coupée (2.13)
 
-Statut : À FAIRE
+Statut : FAIT
 
 - **Objectif** : voir d'un coup d'œil qu'un objet est en maintenance ; ne plus garder d'incident ouvert pour une
   surveillance coupée (choix resté ouvert en P28).
@@ -621,7 +621,7 @@ Statut : À FAIRE
 
 ### P30 — Canaux d'alerte et maintenances dans l'export de configuration (2.13)
 
-Statut : À FAIRE
+Statut : FAIT
 
 - **Objectif** : retrouver ses alertes et maintenances sur un autre poste ou après réinstallation.
 - **Tâches** : `cma.core.transfer` exporte et importe aussi `alert_channels` (sans l'adresse, qui est secrète, sauf
@@ -691,9 +691,9 @@ Statut : À FAIRE
 | P27 | FAIT | c9b5265, 66fef5e | 594 ✓ | 2026-10-14 |
 | P28 | FAIT | 3ff1e22 | 612 ✓ | 2026-10-15 |
 | P29 | FAIT | 6a31a70 | 622 ✓ | 2026-10-15 |
-| P30 | À FAIRE | — | — | — |
+| P30 | FAIT | 173fa99 | 643 ✓ | 2026-10-15 |
 | P31 | À FAIRE | — | — | — |
 | P32 | À FAIRE | — | — | — |
 
-**Prochaine action exacte :** P30 — un agent `executant-m` (Sonnet), seul, sur `main` : canaux d'alerte et
-maintenances dans l'export de configuration (adresse seulement dans un export chiffré).
+**Prochaine action exacte :** P31 — un agent `executant-m` (Sonnet), seul, sur `main` : journal des envois
+d'alertes et boîte « Envois récents… ». (P30, interrompue par l'arrêt du poste, a été reprise et terminée.)
