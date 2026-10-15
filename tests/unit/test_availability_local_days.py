@@ -102,8 +102,15 @@ def test_daily_and_stats_follow_the_local_day(tmp_path):
     series = daily(log, "service:x", 3, now, PARIS)
     assert [d.day for d in series] == ["2026-10-07", "2026-10-08", "2026-10-09"]
     assert series[1].uptime is None and series[2].checks == 2 and series[2].uptime == 0.5
-    # Le même relevé lu en UTC tomberait la veille : le fuseau est bien un paramètre, pas une constante.
-    assert [d.day for d in daily(log, "service:x", 3, now, UTC)] == ["2026-10-07", "2026-10-08", "2026-10-09"]
+    # Le jour d'un relevé est celui du fuseau demandé : l'incident de 00 h 30 (Paris) est classé le 9, pas le 8.
+    assert list(log.days["service:x"]) == ["2026-10-09"]
+    assert [d.checks for d in series] == [0, 0, 2]
+    # Les mêmes relevés classés en UTC tomberaient la veille : le 8 a un relevé, le 9 un seul.
+    utc_log = AvailabilityLog(tmp_path / "utc.json")
+    utc_log.record_check("service:x", "x", False, None, datetime(2026, 10, 8, 22, 30, tzinfo=UTC), UTC)
+    utc_log.record_check("service:x", "x", True, 80.0, datetime(2026, 10, 9, 10, tzinfo=UTC), UTC)
+    assert list(utc_log.days["service:x"]) == ["2026-10-08", "2026-10-09"]
+    assert [d.checks for d in daily(utc_log, "service:x", 3, now, UTC)] == [0, 1, 1]
     assert log.stats("service:x", 1, now, PARIS).checks == 2
     # Le 9 à 23 h 30 UTC, il est déjà le 10 à Paris : « aujourd'hui » a changé, et le 9 reste le jour précédent.
     late = datetime(2026, 10, 9, 23, 30, tzinfo=UTC)

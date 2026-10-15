@@ -131,15 +131,33 @@ class Event:
     reminder: bool = False
 
 
+def _close_unwatched(log: AvailabilityLog, kind: str, watched: set[str], now: datetime | None) -> None:
+    """Clôt, sans l'annoncer, l'incident ouvert de chaque objet qui n'est plus relevé : sinon il resterait ouvert
+    pour toujours, avec un rappel toutes les N heures et une ligne « En cours » dans chaque résumé."""
+    for incident in [i for i in log.incidents if i.open and i.kind == kind and i.key not in watched]:
+        log.end(kind, incident.key, now)
+
+
 def record_tunnels(
-    log: AvailabilityLog, config: Config, tunnels: list[Tunnel], now: datetime | None = None
+    log: AvailabilityLog,
+    config: Config,
+    tunnels: list[Tunnel],
+    now: datetime | None = None,
+    *,
+    complete: bool = True,
 ) -> list[Event]:
-    """Relevé des tunnels → journal ; renvoie les incidents ouverts et fermés. Un tunnel inactif n'est pas suivi."""
+    """Relevé des tunnels → journal ; renvoie les incidents ouverts et fermés. Un tunnel inactif n'est pas suivi.
+
+    `complete` : le relevé a réussi et liste tous les tunnels du compte. L'incident ouvert d'un tunnel devenu
+    inactif (arrêté pour de bon) ou supprimé est alors clos sans événement ; un relevé en échec (`complete=False`)
+    ne ferme rien."""
     events: list[Event] = []
+    watched: set[str] = set()
     for tunnel in tunnels:
         if tunnel.status == "inactive":
             continue
         key = tunnel_key(tunnel.id)
+        watched.add(key)
         level = tunnel_severity(tunnel.status)
         log.record_check(key, tunnel.name, level == 0, None, now)
         muted = is_muted(config, key, now=now)
@@ -155,6 +173,8 @@ def record_tunnels(
         elif level == 0 and tunnel.status == "healthy" and log.end("tunnel", key, now) is not None:
             text = tr("Le tunnel « {name} » est de nouveau en ligne.").format(name=tunnel.name)
             events.append(Event(key, tunnel.name, "success", text, muted, True))
+    if complete:
+        _close_unwatched(log, "tunnel", watched, now)
     return events
 
 
@@ -163,13 +183,22 @@ def record_services(
     config: Config,
     results: list[tuple[ServiceTarget, HostProbe]],
     now: datetime | None = None,
+    *,
+    complete: bool | None = None,
 ) -> list[Event]:
-    """Relevé des services → journal ; « sans réponse » (réseau du poste) n'est ni compté ni annoncé."""
+    """Relevé des services → journal ; « sans réponse » (réseau du poste) n'est ni compté ni annoncé.
+
+    `complete` : le relevé a réussi. L'incident ouvert d'un service absent d'un relevé réussi (nom d'hôte retiré,
+    tunnel supprimé ou plus en service) est clos sans événement. Un service « sans réponse » reste suivi : son état
+    connu ne change pas. Par défaut (`None`), seul un relevé non vide compte comme réussi : une liste vide peut
+    venir d'un échec ou d'un relevé non demandé (tâche planifiée), jamais de quoi tout fermer."""
     events: list[Event] = []
+    watched: set[str] = set()
     for target, probe in results:
+        key = service_key(target)
+        watched.add(key)
         if probe.state == "unreachable":
             continue
-        key = service_key(target)
         level = service_severity(probe.state)
         log.record_check(key, target.label, level == 0, probe.ms, now)
         muted = is_muted(config, key, target.tunnel_id, now)
@@ -179,6 +208,10 @@ def record_services(
         elif level == 0 and log.end("service", key, now) is not None:
             text = tr("{host} répond de nouveau.").format(host=target.label)
             events.append(Event(key, target.label, "success", text, muted, True))
+    if complete is None:
+        complete = bool(results)
+    if complete:
+        _close_unwatched(log, "service", watched, now)
     return events
 
 
