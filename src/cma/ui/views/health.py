@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
 from cma.core.cfapi import Tunnel
 from cma.core.expiry import TokenExpiry
+from cma.core.monitoring import service_key, tunnel_key
 from cma.core.servicewatch import ServiceResult, severity, troubled_services_summary
 from cma.core.tunnelwatch import troubled_summary
 from cma.i18n import tr
@@ -24,6 +25,9 @@ class HealthCard(QFrame):
         self.setObjectName("Card")
         self.open_cloud = open_cloud
         self.open_tokens = open_tokens
+        # Boîte Disponibilité positionnée sur l'objet (clé du journal) ; branchée par la fenêtre principale.
+        self.open_availability: Callable[[str | None], None] = lambda _key: None
+        self.first_key: str | None = None
         self._tokens_only = False
         row = QHBoxLayout(self)
         row.setContentsMargins(16, 12, 16, 12)
@@ -38,6 +42,9 @@ class HealthCard(QFrame):
         self.detail.setMinimumWidth(200)
         texts.addWidget(self.detail)
         row.addLayout(texts, 1)
+        self.availability = button(tr("Disponibilité"), "clock", link=True)
+        self.availability.clicked.connect(self._open_availability)
+        row.addWidget(self.availability, 0, Qt.AlignmentFlag.AlignVCenter)
         self.action = button(tr("Voir"), "arrow-right")
         self.action.clicked.connect(self._open)
         row.addWidget(self.action, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -45,6 +52,9 @@ class HealthCard(QFrame):
 
     def _open(self) -> None:
         (self.open_tokens if self._tokens_only else self.open_cloud)()
+
+    def _open_availability(self) -> None:
+        self.open_availability(self.first_key)
 
     def update_state(
         self, tunnels: list[Tunnel], services: list[ServiceResult], tokens: list[TokenExpiry]
@@ -59,6 +69,16 @@ class HealthCard(QFrame):
                 + (" " + tr("(dont {n} expiré(s))").format(n=expired) if expired else "")
             )
         self._tokens_only = bool(tokens) and not tunnels and not services
+        # Premier objet en panne (tunnels d'abord) : la boîte Disponibilité s'ouvre dessus.
+        self.first_key = (
+            tunnel_key(tunnels[0].id) if tunnels else service_key(services[0].target) if services else None
+        )
+        self.availability.setVisible(self.first_key is not None)
+        if self.first_key is not None:
+            name = tunnels[0].name if tunnels else services[0].target.label
+            text = tr("Ouvrir la disponibilité : {name}").format(name=name)
+            self.availability.setAccessibleName(text)
+            self.availability.setToolTip(text)
         if not parts:
             self.hide()
             return

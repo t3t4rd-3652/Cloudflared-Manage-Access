@@ -57,6 +57,7 @@ from cma.ui.views.profiles import CloudflareProfilesView
 from cma.ui.views.settings import SettingsView
 from cma.ui.views.ssh import SshView
 from cma.ui.views.tokens import TokensView
+from cma.ui.views.uptime_tile import show_availability_on
 from cma.ui.wake import WakeWatcher
 from cma.ui.widgets import BannerStack, add_shortcut, label
 
@@ -253,6 +254,9 @@ class MainWindow(QMainWindow):
         ctx.bridge.config_changed.connect(self._show_troubled_tunnels)
         self.dashboard.health.open_cloud = lambda: self.open_tunnel(None)
         self.dashboard.health.open_tokens = self.open_cloud_tokens
+        self.dashboard.health.open_availability = self.open_availability
+        self.dashboard.uptime.log_source = lambda: self.availability
+        self.dashboard.uptime.open_object = self.open_availability
         self.ssh.publish_port = self.publish_port
         self.settings.open_shortcuts = self.open_shortcuts
         self.settings.open_whats_new = self.open_whats_new
@@ -427,6 +431,7 @@ class MainWindow(QMainWindow):
         self.dashboard.health.update_state(
             troubled, services, expiring_tokens(self.ctx.config(), datetime.now(UTC))
         )
+        self.dashboard.uptime.refresh()  # chaque relevé passe ici : la tuile de disponibilité suit
 
     @property
     def _tunnel_check_running(self) -> bool:
@@ -452,6 +457,10 @@ class MainWindow(QMainWindow):
         self.cloud.refresh(then=select)
         if diagnose:
             self.cloud.check_connectors(tunnel)
+
+    def open_availability(self, key: str | None = None) -> None:
+        """Boîte Disponibilité des outils du compte, positionnée sur l'objet `key` (clé du journal)."""
+        show_availability_on(self, self.ctx.paths.data_dir / "availability.json", key)
 
     def open_service(self, hostname: str, path: str = "") -> None:
         """Vue Cloudflare, onglet Tunnels, relue, puis la règle du nom d'hôte publié sélectionnée."""
