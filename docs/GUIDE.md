@@ -121,8 +121,8 @@ ne déclenche ni notification ni alerte jusqu'à la fin de la sourdine.
 
 Une maintenance qui revient chaque semaine se déclare une fois pour toutes, dans **Paramètres › Général › Alertes ›
 Maintenance et rappels** : **Ajouter…** demande le jour, l'heure de début et l'heure de fin (heure locale ; si la
-fin est avant le début, la maintenance passe minuit et se termine le lendemain ; une fin égale au début couvre la journée entière), puis l'objet visé (un tunnel, un nom
-d'hôte ou tout le compte) et un libellé facultatif. Pendant le créneau, l'objet est relevé comme d'habitude mais ne
+fin est avant le début, la maintenance passe minuit et se termine le lendemain ; une fin égale au début couvre la
+journée entière), puis l'objet visé (un tunnel, un nom d'hôte ou tout le compte) et un libellé facultatif. Pendant le créneau, l'objet est relevé comme d'habitude mais ne
 déclenche ni notification, ni alerte, ni rappel.
 
 ![Alertes : résumé du lundi, rappels et maintenances prévues](captures/guide-maintenance.png)
