@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cma.core.alerts import kind_label as alert_kind_label
 from cma.core.crypto import WrongPassphraseError
 from cma.core.transfer import (
     Action,
@@ -41,7 +42,7 @@ from cma.core.transfer import (
 from cma.i18n import tr
 from cma.ui.context import GuiContext
 from cma.ui.icons import app_icon
-from cma.ui.widgets import copy_to_clipboard, label, title
+from cma.ui.widgets import copy_to_clipboard, group_label, label, title
 
 
 def kind_label(kind: str) -> str:
@@ -158,10 +159,13 @@ class ImportDialog(QDialog):
         self.table.currentCellChanged.connect(lambda *_a: self._refresh())
         if plan.warnings:
             layout.addWidget(label("! " + "\n! ".join(plan.warnings), "warning", wrap=True))
+        self._build_alerts(layout)
         self.passphrase = QLineEdit()
         self.passphrase.setEchoMode(QLineEdit.EchoMode.Password)
         self.passphrase.setAccessibleName(tr("Phrase de passe des secrets"))
+        self.passphrase.textChanged.connect(lambda _t: self._refresh_alerts())
         self.passphrase_error = label("", "error", wrap=True)
+        self._refresh_alerts()
         if plan.needs_passphrase:
             layout.addWidget(
                 label(
@@ -179,8 +183,79 @@ class ImportDialog(QDialog):
         buttons, self.ok_button = _buttons(self, tr("Importer"))
         self.ok_button.clicked.connect(self._accept)
         layout.addWidget(buttons)
-        self.resize(880, 600)
+        self.resize(880, 680 if plan.has_alert_data else 600)
         self._refresh()
+
+    def _build_alerts(self, layout: QVBoxLayout) -> None:
+        """Alertes et maintenances du fichier : ce qui sera ajouté, ce qui attend une adresse, et les réglages
+        globaux (rappels, résumé), repris seulement si l'utilisateur le coche."""
+        plan = self.plan
+        self.alerts_title = group_label(tr("Alertes et maintenances"))
+        self.alerts_summary = label("", wrap=True)
+        self.alerts_waiting = label("", "warning", wrap=True)
+        self.import_settings = QCheckBox(tr("Reprendre les réglages des rappels et du résumé"))
+        self.import_settings.setAccessibleName(tr("Reprendre les réglages des rappels et du résumé"))
+        self.import_settings.setChecked(False)
+        self.settings_detail = label("", "muted", wrap=True)
+        self.import_settings.toggled.connect(self._refresh)
+        values = plan.alert_settings
+        if values is not None:
+            hours = values["alert_repeat_hours"]
+            self.settings_detail.setText(
+                tr("Dans le fichier : {repeat} ; résumé du lundi {digest}.").format(
+                    repeat=tr("rappel toutes les {n} h").format(n=hours) if hours else tr("pas de rappel"),
+                    digest=tr("activé") if values["weekly_digest"] else tr("désactivé"),
+                )
+            )
+        widgets = (
+            self.alerts_title,
+            self.alerts_summary,
+            self.alerts_waiting,
+            self.import_settings,
+            self.settings_detail,
+        )
+        for widget in widgets:
+            layout.addWidget(widget)
+            widget.setVisible(plan.has_alert_data)
+        self.import_settings.setVisible(values is not None)
+        self.settings_detail.setVisible(values is not None)
+
+    def _refresh_alerts(self) -> None:
+        plan = self.plan
+        lines: list[str] = []
+        if plan.channels:
+            names = ", ".join(f"{c.name} ({alert_kind_label(c.kind)})" for c in plan.channels)
+            lines.append(tr("Canaux d'alerte à ajouter : {names}").format(names=names))
+        if plan.windows:
+            lines.append(tr("Maintenances à ajouter : {n}").format(n=len(plan.windows)))
+        if not plan.channels and not plan.windows:
+            lines.append(tr("Aucun canal ni aucune maintenance à ajouter."))
+        if plan.skipped_channels or plan.skipped_windows:
+            lines.append(
+                tr("Déjà présents ici, donc ignorés : {c} canal(aux), {w} maintenance(s)").format(
+                    c=plan.skipped_channels, w=plan.skipped_windows
+                )
+            )
+        self.alerts_summary.setText("\n".join(lines))
+        waiting = ""
+        if plan.channels and plan.needs_passphrase:
+            waiting = (
+                tr(
+                    "Les adresses de ces canaux sont chiffrées : elles seront reprises avec la phrase de passe."
+                )
+                if self.passphrase.text()
+                else tr(
+                    "Les adresses de ces canaux sont chiffrées. Sans phrase de passe, les canaux seront créés "
+                    "désactivés : ressaisissez leur adresse dans Paramètres › Général › Alertes."
+                )
+            )
+        elif plan.channels_waiting:
+            waiting = tr(
+                "Canaux créés désactivés, faute d'adresse : {names}. Ressaisissez leur adresse dans "
+                "Paramètres › Général › Alertes."
+            ).format(names=", ".join(c.name for c in plan.channels_waiting))
+        self.alerts_waiting.setText(("! " + waiting) if waiting else "")
+        self.alerts_waiting.setVisible(plan.has_alert_data and bool(waiting))
 
     def _chosen(self) -> list[Action]:
         return [combo.currentData() for combo in self._combos]
@@ -195,7 +270,10 @@ class ImportDialog(QDialog):
                 a=added, r=replaced, s=skipped
             )
         )
-        count = added + replaced
+        self.plan.apply_alert_settings = (
+            self.import_settings.isChecked() and self.plan.alert_settings is not None
+        )
+        count = added + replaced + self.plan.alert_count
         self.ok_button.setText(
             tr("Importer 1 élément") if count == 1 else tr("Importer {n} éléments").format(n=count)
         )
@@ -260,6 +338,9 @@ class ImportDialog(QDialog):
     def _accept(self) -> None:
         if self._rename_problems():
             return
+        self.plan.apply_alert_settings = (
+            self.import_settings.isChecked() and self.plan.alert_settings is not None
+        )
         for row, (combo, item) in enumerate(zip(self._combos, self.plan.items, strict=True)):
             item.action = combo.currentData()
             item.rename_to = (
@@ -307,8 +388,18 @@ def run_import(ctx: GuiContext, parent: QWidget | None) -> None:
             if summary.skipped == 1
             else tr("{n} éléments ignorés.").format(n=summary.skipped)
         )
+    if summary.channels or summary.windows:
+        text += " " + tr("Alertes : {c} canal(aux), {w} maintenance(s).").format(
+            c=summary.channels, w=summary.windows
+        )
+    if summary.alert_settings:
+        text += " " + tr("Réglages des rappels et du résumé repris.")
     if summary.secrets:
         text += " " + tr("{n} secret(s) enregistré(s) dans le coffre.").format(n=summary.secrets)
+    if summary.waiting:
+        text += " " + tr(
+            "Canaux désactivés, à compléter dans Paramètres › Général › Alertes : {names}."
+        ).format(names=", ".join(summary.waiting))
     ctx.notify(
         "success" if not summary.warnings else "warning",
         text + ("\n• " + "\n• ".join(summary.warnings) if summary.warnings else ""),
@@ -360,11 +451,23 @@ class ExportDialog(QDialog):
                 self._items.append((child, kind, entry.id))
             parent_item.setExpanded(True)
         layout.addWidget(self.tree, 1)
+        settings = config.settings
+        self.channels_count = len(settings.alert_channels)
+        self.has_alerts = bool(
+            settings.alert_channels
+            or settings.maintenance_windows
+            or settings.alert_repeat_hours
+            or settings.weekly_digest
+        )
         self.empty = label(tr("Aucune donnée à exporter."), "muted")
-        self.empty.setVisible(not self._items)
+        self.empty.setVisible(not self._items and not self.has_alerts)
         layout.addWidget(self.empty)
         self.dependencies = label("", "warning", wrap=True)
         layout.addWidget(self.dependencies)
+        self.with_alerts = QCheckBox(tr("Inclure les canaux d'alerte et les maintenances"))
+        self.with_alerts.setChecked(True)
+        self.with_alerts.setVisible(self.has_alerts)
+        layout.addWidget(self.with_alerts)
         self.with_secrets = QCheckBox(tr("Inclure les secrets (chiffrés par une phrase de passe)"))
         layout.addWidget(self.with_secrets)
         self.secrets_box = QWidget()
@@ -388,6 +491,7 @@ class ExportDialog(QDialog):
         layout.addWidget(buttons)
         self.tree.itemChanged.connect(lambda *_a: self._refresh())
         self.with_secrets.toggled.connect(lambda _c: self._refresh())
+        self.with_alerts.toggled.connect(lambda _c: self._refresh())
         for field in (self.passphrase, self.confirmation):
             field.textChanged.connect(lambda _t: self._refresh())
         self.resize(720, 560)
@@ -399,6 +503,9 @@ class ExportDialog(QDialog):
             for item, item_kind, entry_id in self._items
             if item_kind == kind and item.checkState(0) == Qt.CheckState.Checked
         }
+
+    def alerts_included(self) -> bool:
+        return self.has_alerts and self.with_alerts.isChecked()
 
     def passphrase_value(self) -> str | None:
         return self.passphrase.text() if self.with_secrets.isChecked() else None
@@ -419,9 +526,10 @@ class ExportDialog(QDialog):
         if secrets:
             self.secrets_hint.setText(problem or tr("Cette phrase de passe sera demandée à l'import."))
         else:
-            self.secrets_hint.setText(
-                tr("Sans secrets, les destinataires devront renseigner leurs identifiants.")
-            )
+            hint = tr("Sans secrets, les destinataires devront renseigner leurs identifiants.")
+            if self.alerts_included() and self.channels_count:
+                hint += " " + tr("Les adresses des canaux d'alerte ne sont pas exportées.")
+            self.secrets_hint.setText(hint)
         chosen_cf = self.selection("cloudflare")
         notes = []
         for profile in self.config.ssh_profiles:
@@ -437,7 +545,7 @@ class ExportDialog(QDialog):
         self.dependencies.setText("\n".join(notes))
         self.dependencies.setVisible(bool(notes))
         selected = any(item.checkState(0) == Qt.CheckState.Checked for item, _k, _i in self._items)
-        self.ok_button.setEnabled(selected and problem is None)
+        self.ok_button.setEnabled((selected or self.alerts_included()) and problem is None)
 
     def _accept(self) -> None:
         if self.ok_button.isEnabled():
@@ -461,6 +569,7 @@ def run_export(ctx: GuiContext, parent: QWidget | None, preselect: set[str] | No
         ssh_ids=dialog.selection("ssh"),
         token_ids=dialog.selection("token"),
         passphrase=passphrase,
+        alerts=dialog.alerts_included(),
     )
     try:
         write_export(Path(path), data)

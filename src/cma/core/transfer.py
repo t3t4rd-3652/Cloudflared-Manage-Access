@@ -3,6 +3,11 @@
 Format d'export v2 : {"format": "cma-export", "version": 2, ...}. Les secrets ne sont exportés
 que sur demande, chiffrés par phrase de passe. L'import accepte aussi les fichiers de la v1
 (profils, tokens, profils SSH), convertis par la même logique que la migration.
+
+Les canaux d'alerte (`alert_channels`), les maintenances (`maintenance_windows`) et les réglages des rappels et du
+résumé (`alert_settings`) sont des clés facultatives du même fichier : un export qui les contient reste lisible par
+une version qui les ignore (les clés inconnues sont ignorées), et un ancien export se relit tel quel. L'adresse d'un
+canal vaut un jeton : elle suit la règle des autres secrets (clé `alert:<id>`, jamais en clair).
 """
 
 from __future__ import annotations
@@ -17,11 +22,22 @@ from typing import Any, Literal, cast
 from pydantic import ValidationError
 
 from cma import __version__
+from cma.core.alerts import secret_key as alert_secret_key
 from cma.core.config_store import ConfigStore
 from cma.core.crypto import decrypt_json, encrypt_json
 from cma.core.fsutil import atomic_write_json, read_json_lenient
 from cma.core.migrations import MigrationReport, convert_v1
-from cma.core.models import AuthMode, CloudflareProfile, Config, ServiceToken, SshProfile, new_id, unique_name
+from cma.core.models import (
+    AlertChannel,
+    AuthMode,
+    CloudflareProfile,
+    Config,
+    MaintenanceWindow,
+    ServiceToken,
+    SshProfile,
+    new_id,
+    unique_name,
+)
 from cma.core.secrets import SecretStore
 from cma.i18n import tr
 
@@ -75,6 +91,16 @@ class ImportPlan:
     secrets: dict[str, str] | None = None
     encrypted_secrets: dict[str, Any] | None = None
     warnings: list[str] = field(default_factory=list[str])
+    # Alertes et maintenances : seulement ce qui est nouveau pour cette installation (les doublons sont comptés).
+    channels: list[AlertChannel] = field(default_factory=list[AlertChannel])
+    windows: list[MaintenanceWindow] = field(default_factory=list[MaintenanceWindow])
+    skipped_channels: int = 0
+    skipped_windows: int = 0
+    # Réglages des rappels et du résumé trouvés dans le fichier ; repris seulement si `apply_alert_settings`.
+    alert_settings: dict[str, Any] | None = None
+    apply_alert_settings: bool = False
+    # Le fichier parle d'alertes (même si tout y est déjà présent ici).
+    has_alert_data: bool = False
 
     @property
     def needs_passphrase(self) -> bool:
@@ -85,6 +111,27 @@ class ImportPlan:
         if self.encrypted_secrets is not None:
             self.secrets = dict(decrypt_json(self.encrypted_secrets, passphrase))
 
+    def has_address(self, channel: AlertChannel) -> bool:
+        """L'adresse du canal est disponible dans les secrets déchiffrés du fichier."""
+        return bool(self.secrets and self.secrets.get(alert_secret_key(channel.id)))
+
+    @property
+    def channels_waiting(self) -> list[AlertChannel]:
+        """Canaux qui seront créés désactivés, faute d'adresse. Vide tant que les secrets chiffrés ne sont pas
+        déchiffrés : on ne sait pas encore s'ils les contiennent (voir `needs_passphrase`)."""
+        if self.needs_passphrase:
+            return []
+        return [c for c in self.channels if not self.has_address(c)]
+
+    @property
+    def alert_count(self) -> int:
+        """Nombre d'éléments d'alerte à ajouter (réglages compris, s'ils sont demandés)."""
+        return (
+            len(self.channels)
+            + len(self.windows)
+            + (1 if self.apply_alert_settings and self.alert_settings else 0)
+        )
+
 
 @dataclass(frozen=True)
 class ImportSummary:
@@ -93,6 +140,11 @@ class ImportSummary:
     skipped: int
     secrets: int
     warnings: list[str]
+    channels: int = 0
+    windows: int = 0
+    # Noms des canaux créés désactivés : leur adresse est à ressaisir.
+    waiting: tuple[str, ...] = ()
+    alert_settings: bool = False
 
 
 # --- Export ---------------------------------------------------------------------------------
@@ -106,8 +158,11 @@ def build_export(
     ssh_ids: set[str] | None = None,
     token_ids: set[str] | None = None,
     passphrase: str | None = None,
+    alerts: bool = True,
 ) -> dict[str, Any]:
-    """Export JSON. `None` = tout exporter. Les tokens utilisés par les profils exportés sont toujours inclus."""
+    """Export JSON. `None` = tout exporter. Les tokens utilisés par les profils exportés sont toujours inclus.
+    `alerts` : canaux d'alerte, maintenances et réglages des rappels ; l'adresse d'un canal n'y figure jamais, elle
+    n'est que dans les secrets chiffrés par la phrase de passe."""
     cloudflare = [p for p in config.cloudflare_profiles if cloudflare_ids is None or p.id in cloudflare_ids]
     ssh = [p for p in config.ssh_profiles if ssh_ids is None or p.id in ssh_ids]
     wanted_tokens = set(token_ids) if token_ids is not None else {t.id for t in config.tokens}
@@ -122,8 +177,25 @@ def build_export(
         "cloudflare_profiles": [p.model_dump(mode="json") for p in cloudflare],
         "ssh_profiles": [p.model_dump(mode="json") for p in ssh],
     }
+    channels = list(config.settings.alert_channels) if alerts else []
+    if alerts:
+        if channels:
+            data["alert_channels"] = [c.model_dump(mode="json") for c in channels]
+        if config.settings.maintenance_windows:
+            data["maintenance_windows"] = [
+                w.model_dump(mode="json") for w in config.settings.maintenance_windows
+            ]
+        if config.settings.alert_repeat_hours or config.settings.weekly_digest:
+            data["alert_settings"] = {
+                "alert_repeat_hours": config.settings.alert_repeat_hours,
+                "weekly_digest": config.settings.weekly_digest,
+            }
     if passphrase:
         payload: dict[str, str] = {}
+        for channel in channels:
+            address = secrets.get(alert_secret_key(channel.id))
+            if address:
+                payload[alert_secret_key(channel.id)] = address
         for token in tokens:
             value = secrets.get(token.secret_key)
             if value:
@@ -175,6 +247,7 @@ def plan_import(raw: Any, config: Config) -> ImportPlan:
     if data.get("format") == EXPORT_FORMAT:
         plan = ImportPlan(source="v2")
         incoming = _parse_v2(data, plan)
+        _parse_alerts(data, plan, config)
         if isinstance(data.get("secrets"), dict):
             plan.encrypted_secrets = data["secrets"]
     elif _is_mapping_of_dicts(raw):
@@ -216,7 +289,7 @@ def plan_import(raw: Any, config: Config) -> ImportPlan:
             else:
                 action = Action.RENAME
             plan.items.append(ImportItem(kind=kind, incoming=item, existing=existing, action=action))  # type: ignore[arg-type]
-    if not plan.items:
+    if not plan.items and not plan.has_alert_data:
         raise ImportError_(tr("Le fichier ne contient aucun profil ni token."))
     return plan
 
@@ -244,10 +317,71 @@ def _parse_v2(
     )
 
 
+def _parse_alerts(raw: dict[str, Any], plan: ImportPlan, config: Config) -> None:
+    """Canaux, maintenances et réglages du fichier : ne retient que ce qui n'existe pas déjà (sans doublon)."""
+    settings = config.settings
+    seen_channels = {(c.kind, c.name.lower()) for c in settings.alert_channels}
+    seen_windows = [w.model_dump() for w in settings.maintenance_windows]
+
+    def entries(key: str) -> list[Any]:
+        value = raw.get(key)
+        return list(cast(list[Any], value)) if isinstance(value, list) else []
+
+    for entry in entries("alert_channels"):
+        plan.has_alert_data = True
+        try:
+            channel = AlertChannel.model_validate(entry)
+        except ValidationError as exc:
+            name = str(cast(dict[str, Any], entry).get("name", "?")) if isinstance(entry, dict) else "?"
+            plan.warnings.append(
+                tr("« {name} » ignoré : {error}").format(name=name, error=exc.errors()[0].get("msg", exc))
+            )
+            continue
+        key = (channel.kind, channel.name.lower())
+        if key in seen_channels:
+            plan.skipped_channels += 1
+            continue
+        seen_channels.add(key)
+        plan.channels.append(channel)
+
+    for entry in entries("maintenance_windows"):
+        plan.has_alert_data = True
+        try:
+            window = MaintenanceWindow.model_validate(entry)
+        except ValidationError as exc:
+            plan.warnings.append(
+                tr("Maintenance ignorée : {error}").format(error=exc.errors()[0].get("msg", exc))
+            )
+            continue
+        if window.model_dump() in seen_windows:
+            plan.skipped_windows += 1
+            continue
+        seen_windows.append(window.model_dump())
+        plan.windows.append(window)
+
+    values = raw.get("alert_settings")
+    if isinstance(values, dict):
+        mapping = cast(dict[str, Any], values)
+        repeat = mapping.get("alert_repeat_hours")
+        digest = mapping.get("weekly_digest")
+        if (
+            isinstance(repeat, int)
+            and not isinstance(repeat, bool)
+            and 0 <= repeat <= 168
+            and isinstance(digest, bool)
+        ):
+            plan.has_alert_data = True
+            plan.alert_settings = {"alert_repeat_hours": repeat, "weekly_digest": digest}
+        else:
+            plan.warnings.append(tr("Réglages des rappels et du résumé illisibles : ignorés."))
+
+
 def apply_import(plan: ImportPlan, store: ConfigStore, secrets: SecretStore) -> ImportSummary:
     """Applique le plan (sauvegarde préalable de la configuration), secrets compris s'ils sont disponibles."""
     store.backup("avant-import")
-    counters = {"added": 0, "replaced": 0, "skipped": 0, "secrets": 0}
+    counters = {"added": 0, "replaced": 0, "skipped": 0, "secrets": 0, "channels": 0, "windows": 0}
+    waiting: list[str] = []
+    applied = {"settings": False}
     warnings: list[str] = list(plan.warnings)
     pending_secrets: list[tuple[str, str]] = []
 
@@ -327,6 +461,35 @@ def apply_import(plan: ImportPlan, store: ConfigStore, secrets: SecretStore) -> 
                     if value:
                         pending_secrets.append((f"{prefix}:{incoming.id}", value))
 
+        settings = config.settings
+        for channel in plan.channels:
+            # Revérifié ici : la configuration a pu changer depuis l'aperçu.
+            if any(
+                c.kind == channel.kind and c.name.lower() == channel.name.lower()
+                for c in settings.alert_channels
+            ):
+                continue
+            created = channel.model_copy(deep=True)
+            if any(c.id == created.id for c in settings.alert_channels):
+                created.id = new_id()
+            address = plan.secrets.get(alert_secret_key(channel.id)) if plan.secrets else None
+            if address:
+                pending_secrets.append((alert_secret_key(created.id), address))
+            else:
+                # Sans adresse, un canal actif échouerait à chaque alerte : il attend d'être complété.
+                created.enabled = False
+                waiting.append(created.name)
+            settings.alert_channels.append(created)
+            counters["channels"] += 1
+        for window in plan.windows:
+            if window.model_dump() not in [w.model_dump() for w in settings.maintenance_windows]:
+                settings.maintenance_windows.append(window.model_copy(deep=True))
+                counters["windows"] += 1
+        if plan.apply_alert_settings and plan.alert_settings:
+            settings.alert_repeat_hours = plan.alert_settings["alert_repeat_hours"]
+            settings.weekly_digest = plan.alert_settings["weekly_digest"]
+            applied["settings"] = True
+
     store.update(mutate)
     for key, value in pending_secrets:
         secrets.set(key, value)
@@ -337,4 +500,8 @@ def apply_import(plan: ImportPlan, store: ConfigStore, secrets: SecretStore) -> 
         skipped=counters["skipped"],
         secrets=counters["secrets"],
         warnings=warnings,
+        channels=counters["channels"],
+        windows=counters["windows"],
+        waiting=tuple(waiting),
+        alert_settings=applied["settings"],
     )
