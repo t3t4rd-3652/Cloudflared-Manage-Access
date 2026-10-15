@@ -25,6 +25,7 @@ from cma.core.cfapi import IngressRule, Tunnel
 from cma.core.hostprobe import HostProbe, probe_hostname_async
 from cma.core.models import AuthMode, Config
 from cma.core.secrets import SecretStore
+from cma.core.tunnelwatch import with_account
 from cma.i18n import tr
 
 # Tests simultanés : chacun attend surtout la réponse de Cloudflare.
@@ -48,14 +49,24 @@ class ServiceTarget:
     service: str
     tunnel_id: str
     tunnel_name: str
+    # Surveillance de plusieurs comptes (ADR 0003) : compte du tunnel, et son nom affiché dès que deux comptes au
+    # moins sont relevés. La clé reste le nom d'hôte et le chemin : un nom public n'a qu'une destination.
+    account_id: str = ""
+    account: str = ""
 
     @property
     def key(self) -> str:
         return self.hostname.lower() + self.path
 
     @property
-    def label(self) -> str:
+    def address(self) -> str:
+        """Nom d'hôte et chemin, sans le compte."""
         return self.hostname + self.path
+
+    @property
+    def label(self) -> str:
+        """Libellé affiché : le nom d'hôte et le chemin, suivis du compte quand plusieurs comptes sont relevés."""
+        return with_account(self.address, self.account)
 
     @property
     def web(self) -> bool:
@@ -154,13 +165,18 @@ class ServiceWatch:
         self._results: dict[str, ServiceResult] = {}
 
     def update(
-        self, results: list[tuple[ServiceTarget, HostProbe]], at: datetime | None = None
+        self,
+        results: list[tuple[ServiceTarget, HostProbe]],
+        at: datetime | None = None,
+        *,
+        keep: Callable[[ServiceTarget], bool] | None = None,
     ) -> list[ServiceChange]:
-        """Relevé complet : les noms absents (retirés, tunnel arrêté) sont oubliés."""
+        """Relevé complet : les noms absents (retirés, tunnel arrêté) sont oubliés, sauf ceux que `keep` garde (les
+        noms d'un compte dont le relevé a échoué : leur état connu reste, sans nouvelle alerte au relevé suivant)."""
         changes = self.record(results, at)
         tested = {target.key for target, _probe in results}
-        for key in list(self._results):
-            if key not in tested:
+        for key, known in list(self._results.items()):
+            if key not in tested and not (keep is not None and keep(known.target)):
                 del self._results[key]
         return changes
 

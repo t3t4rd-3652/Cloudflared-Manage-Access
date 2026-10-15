@@ -481,6 +481,9 @@ class Settings(Model):
     maintenance_windows: list[MaintenanceWindow] = Field(default_factory=list[MaintenanceWindow])
     alert_repeat_hours: int = Field(default=0, ge=0, le=168)
     weekly_digest: bool = False
+    # Surveillance de tous les comptes (P34, ADR 0003) : chaque jeton d'API nommé est relevé avec son dernier compte
+    # choisi, au lieu du seul compte de la vue Cloudflare.
+    watch_all_accounts: bool = False
 
     @field_validator("language", mode="before")
     @classmethod

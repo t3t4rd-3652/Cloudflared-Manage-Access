@@ -20,6 +20,12 @@ def severity(status: str) -> int:
     return SEVERITY.get(status, 0)
 
 
+def with_account(name: str, account: str) -> str:
+    """Nom d'un tunnel ou d'un service suivi du nom de son compte, quand la surveillance relève plusieurs comptes
+    (ADR 0003) : « bureau (Compte B) ». Sans compte, le nom tel quel."""
+    return f"{name} ({account})" if account else name
+
+
 def status_label(status: str) -> str:
     """Libellé d'un état de tunnel donné par l'API (« En ligne », « Dégradé »…)."""
     return {

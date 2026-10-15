@@ -19,8 +19,8 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from cma.core.alertlog import AlertLog, log_path
 from cma.core.alertstate import AlertState, state_path
 from cma.core.availability import AvailabilityLog
+from cma.core.cfadmin import ServiceSweep, TunnelSweep
 from cma.core.cfapi import Tunnel
-from cma.core.hostprobe import HostProbe
 from cma.core.monitoring import (
     Event,
     close_unwatched_kinds,
@@ -33,7 +33,7 @@ from cma.core.monitoring import (
     service_key,
     tunnel_key,
 )
-from cma.core.servicewatch import ServiceChange, ServiceResult, ServiceTarget
+from cma.core.servicewatch import ServiceChange, ServiceResult
 from cma.core.tunnelwatch import TunnelChange, TunnelWatch
 from cma.i18n import tr
 from cma.ui.context import GuiContext
@@ -73,8 +73,11 @@ class Monitor(QObject):
         self.tunnel_check_running = False
         self.service_check_running = False
         self._follow_up_running = False
+        # Portée du dernier relevé : le compte choisi, ou chaque jeton et son compte (« Surveiller tous les comptes »).
         self._tunnel_account: str | None = None
         self._service_account: str | None = None
+        # Tous les comptes (ADR 0003) : compte de chaque tunnel du dernier relevé (identifiant du tunnel → du compte).
+        self._tunnel_accounts: dict[str, str] = {}
         self._tunnel_timer = QTimer(self)
         self._tunnel_timer.setInterval(TUNNEL_WATCH_MS)
         self._tunnel_timer.timeout.connect(self.check_tunnels)
@@ -90,29 +93,68 @@ class Monitor(QObject):
 
     # --- Relevés ----------------------------------------------------------------------------------------
 
-    def check_tunnels(self) -> bool:
-        """Relève l'état des tunnels (une requête) ; renvoie False quand la surveillance n'a rien à faire."""
+    def _scope(self) -> str | None:
+        """Ce qu'il y a à relever : le compte choisi avec un jeton (un seul compte), ou chaque jeton du coffre et son
+        compte (« Surveiller tous les comptes ») ; None s'il n'y a rien."""
         settings = self.ctx.config().settings
         admin = self.ctx.manager.cloudflare
+        if settings.watch_all_accounts:
+            return admin.watch_scope() or None
         account = settings.cloudflare_account_id
+        return account if account and admin.has_token() else None
+
+    def _same_scope(self, scope: str) -> bool:
+        """Le relevé qui se termine vaut-il encore ? Pas si l'utilisateur a changé de compte (ou de jetons) entre-temps."""
+        settings = self.ctx.config().settings
+        if settings.watch_all_accounts:
+            return self.ctx.manager.cloudflare.watch_scope() == scope
+        return settings.cloudflare_account_id == scope
+
+    def _new_scope(self, previous: str | None, scope: str, forget: Callable[[], None]) -> None:
+        """Un seul compte : changer de compte fait oublier le relevé précédent. Tous les comptes : il reste valable (les
+        identifiants de tunnels et les noms publics ne se répètent pas d'un compte à l'autre) et le relevé suivant le
+        remplace ; une panne déjà connue n'est pas annoncée une seconde fois parce qu'un jeton a été ajouté."""
+        if scope != previous and not self.ctx.config().settings.watch_all_accounts:
+            forget()
+
+    def check_tunnels(self) -> bool:
+        """Relève l'état des tunnels (une requête par compte) ; renvoie False quand la surveillance n'a rien à faire."""
+        settings = self.ctx.config().settings
+        admin = self.ctx.manager.cloudflare
         if not settings.watch_tunnels:
             self._close_unwatched()
-        if self.tunnel_check_running or not settings.watch_tunnels or not account or not admin.has_token():
+        scope = self._scope() if settings.watch_tunnels and not self.tunnel_check_running else None
+        if scope is None:
             if self.tunnel_watch.troubled and not self.tunnel_check_running:
                 # Surveillance coupée ou jeton oublié : un ancien relevé ne doit pas rester affiché.
                 self.tunnel_watch.forget()
                 self.refresh()
             return False
-        if account != self._tunnel_account:
-            self.tunnel_watch.forget()
-            self._tunnel_account = account
+        self._new_scope(self._tunnel_account, scope, self.tunnel_watch.forget)
+        self._tunnel_account = scope
         self.tunnel_check_running = True
 
-        def done(tunnels: list[Tunnel]) -> None:
+        def done(sweep: TunnelSweep) -> None:
             self.tunnel_check_running = False
-            if self.ctx.config().settings.cloudflare_account_id == account:
-                self.report_tunnel_changes(self.tunnel_watch.update(tunnels))
-                self._record(record_tunnels(self.availability, self.ctx.config(), tunnels))
+            if self._same_scope(scope):
+                # Un compte illisible cette fois garde ses tunnels tels qu'au relevé précédent : pas de nouvelle alerte
+                # pour une panne déjà connue quand il revient.
+                failed = {f.account_id for f in sweep.failures if f.account_id}
+                kept = [
+                    t
+                    for t in self.tunnel_watch.tunnels
+                    if self._tunnel_accounts.get(t.id) in failed and t.id not in sweep.accounts
+                ]
+                self._tunnel_accounts = {
+                    **{t.id: self._tunnel_accounts[t.id] for t in kept},
+                    **{tid: watched.account_id for tid, watched in sweep.accounts.items()},
+                }
+                self.report_tunnel_changes(self.tunnel_watch.update(sweep.tunnels + kept))
+                self._record(
+                    record_tunnels(
+                        self.availability, self.ctx.config(), sweep.tunnels, complete=sweep.complete
+                    )
+                )
                 self._follow_up(digest=True)
                 self.refresh()
 
@@ -121,34 +163,40 @@ class Monitor(QObject):
             self.tunnel_check_running = False
             log.info("Surveillance des tunnels : relevé impossible (%s)", error)
 
-        self.ctx.run(admin.tunnel_states(), done, failed)
+        self.ctx.run(admin.watch_tunnels(), done, failed)
         return True
 
     def check_services(self) -> bool:
         """Teste depuis Internet les noms d'hôte HTTP des tunnels en service ; False quand il n'y a rien à faire."""
         settings = self.ctx.config().settings
         admin = self.ctx.manager.cloudflare
-        account = settings.cloudflare_account_id
         watch = self.ctx.services
         if not settings.watch_services:
             self._close_unwatched()
-        if self.service_check_running or not settings.watch_services or not account or not admin.has_token():
+        scope = self._scope() if settings.watch_services and not self.service_check_running else None
+        if scope is None:
             if watch.troubled and not self.service_check_running:
                 watch.forget()
                 self.refresh()
             return False
-        if account != self._service_account:
-            watch.forget()
-            self._service_account = account
+        self._new_scope(self._service_account, scope, watch.forget)
+        self._service_account = scope
         self.service_check_running = True
 
-        def done(results: list[tuple[ServiceTarget, HostProbe]]) -> None:
+        def done(sweep: ServiceSweep) -> None:
             self.service_check_running = False
-            if self.ctx.config().settings.cloudflare_account_id != account:
+            if not self._same_scope(scope):
                 return
-            self.report_service_changes(watch.update(results))
-            # Relevé réussi : un service qui n’y figure plus voit son incident clos (plus de rappel sans fin).
-            self._record(record_services(self.availability, self.ctx.config(), results, complete=True))
+            # Les noms d'un compte illisible cette fois restent tels qu'au relevé précédent.
+            failed = {f.account_id for f in sweep.failures if f.account_id}
+            self.report_service_changes(
+                watch.update(sweep.results, keep=lambda target: target.account_id in failed)
+            )
+            # Relevé réussi : un service qui n’y figure plus voit son incident clos (plus de rappel sans fin) ; un
+            # relevé dont un compte a échoué ne clôt rien.
+            self._record(
+                record_services(self.availability, self.ctx.config(), sweep.results, complete=sweep.complete)
+            )
             self._follow_up(digest=False)
             self.refresh()
             self.services_checked.emit()
@@ -157,7 +205,7 @@ class Monitor(QObject):
             self.service_check_running = False
             log.info("Surveillance des services : relevé impossible (%s)", error)
 
-        self.ctx.run(admin.check_services(), done, failed)
+        self.ctx.run(admin.watch_services(), done, failed)
         return True
 
     # --- Suites d'un relevé -----------------------------------------------------------------------------------
@@ -247,6 +295,15 @@ class Monitor(QObject):
         found += [(service_key(r.target), r.target.label) for r in self.ctx.services.results]
         return sorted(found, key=lambda item: item[1].lower())
 
+    def other_account(self, account_id: str | None) -> bool:
+        """Objet d'un autre compte que celui de la vue Cloudflare (tous les comptes) : la vue ne le montre pas, aucune
+        action « Diagnostiquer… » ou « Voir… » ne lui est proposée."""
+        return bool(account_id) and account_id != self.ctx.config().settings.cloudflare_account_id
+
+    def tunnel_account(self, tunnel_id: str) -> str | None:
+        """Compte d'un tunnel du dernier relevé (tous les comptes) ; None avec un seul compte surveillé."""
+        return self._tunnel_accounts.get(tunnel_id)
+
     def report_tunnel_changes(self, changes: list[TunnelChange]) -> None:
         config = self.ctx.config()
         for change in changes:
@@ -254,7 +311,7 @@ class Monitor(QObject):
                 continue
             action: Action = (
                 None
-                if change.recovered
+                if change.recovered or self.other_account(self.tunnel_account(change.tunnel.id))
                 else (tr("Diagnostiquer…"), lambda t=change.tunnel: self.open_tunnel(t, True))
             )
             self.notice.emit(change.level, change.message(), action)
@@ -265,7 +322,9 @@ class Monitor(QObject):
             if is_muted(config, service_key(change.target), change.target.tunnel_id):
                 continue
             action: Action = (
-                None if change.recovered else (tr("Voir…"), lambda: self.open_tunnel(None, False))
+                None
+                if change.recovered or self.other_account(change.target.account_id)
+                else (tr("Voir…"), lambda: self.open_tunnel(None, False))
             )
             self.notice.emit(change.level, change.message(), action)
 
