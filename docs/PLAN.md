@@ -1,6 +1,6 @@
 # Plan du projet
 
-État au 2026-10-15, version **2.12.0** ; P23 à P28 réalisés (2.12 : jours locaux, maintenance, rappels,
+État au 2026-10-15, version **2.13.0** (P29 à P32) ; P23 à P28 réalisés (2.12 : jours locaux, maintenance, rappels,
 résumé hebdomadaire, pannes dans l'icône, accessibilité au clavier), vérifiés par deux juges. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
@@ -649,7 +649,7 @@ Statut : FAIT
 
 ### P32 — Documentation, juge, release 2.13.0 (2.13)
 
-Statut : À FAIRE
+Statut : FAIT (juge : écarts corrigés ; release 2.13.0)
 
 - **Tâches** : CHANGELOG, GUIDE, README, SECURITE (export, journal des envois), captures, juge neutre (Sonnet tant
   que le quota est au palier 2), release 2.13.0 et installation.
@@ -694,7 +694,7 @@ Statut : À FAIRE
 | P29 | FAIT | 6a31a70 | 622 ✓ | 2026-10-15 |
 | P30 | FAIT | 173fa99 | 643 ✓ | 2026-10-15 |
 | P31 | FAIT | 27e2681 | 675 ✓ | 2026-10-15 |
-| P32 | À FAIRE | — | — | — |
+| P32 | FAIT | 42d0b22 | 677 ✓ | 2026-10-15 |
 
-**Prochaine action exacte :** P32 — écarts du juge corrigés (masquage du journal, documentation) ; suite complète,
-push, CI, puis release 2.13.0 et installation sur le poste.
+**Prochaine action exacte :** 2.13.0 publiée et installée le 2026-10-15. Prochain plan à proposer (P33 et
+suivantes) ; en attente côté propriétaire : soumission winget, signature du code, nettoyage des worktrees.

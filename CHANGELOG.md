@@ -2,7 +2,7 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
-## [Non publié]
+## [2.13.0] - 2026-10-15
 
 ### Ajouté
 - **Pastille « Maintenance »** sur les cartes de la vue Cloudflare : pendant une maintenance prévue, le tunnel ou le

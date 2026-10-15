@@ -1,6 +1,6 @@
 """Cloudflared Manage Access : accès Cloudflare Access (cloudflared access tcp) et redirections SSH."""
 
-__version__ = "2.12.0"
+__version__ = "2.13.0"
 
 APP_NAME = "Cloudflared Manage Access"
 APP_ID = "CloudflaredManageAccess"
