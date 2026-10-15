@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QResizeEvent
+from PySide6.QtGui import QResizeEvent, QShowEvent
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -46,6 +46,7 @@ from cma.ui.states import (  # noqa: F401 (RUNNING, TO_CHECK, sessions_summary :
 )
 from cma.ui.views.health import HealthCard
 from cma.ui.views.session_cards import FavoriteTile, SessionRow
+from cma.ui.views.uptime_tile import UptimeTile
 from cma.ui.widgets import (
     EmptyState,
     button,
@@ -101,6 +102,11 @@ class DashboardView(QWidget):
         self.content = QVBoxLayout(container)
         self.content.setContentsMargins(0, 0, 4, 0)
         self.content.setSpacing(10)
+
+        # Disponibilité des 7 derniers jours : en tête de la zone défilante (elle ne repousse pas les sessions hors de
+        # l'écran), cachée sans relevé ; la fenêtre principale la tient à jour après chaque relevé.
+        self.uptime = UptimeTile()
+        self.content.addWidget(self.uptime)
 
         self.favorites_title = QWidget()
         favorites_row = QHBoxLayout(self.favorites_title)
@@ -385,6 +391,11 @@ class DashboardView(QWidget):
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self._layout_tiles()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        # Après l'affichage de la page : le calcul de la tuile ne retarde ni le démarrage ni le changement de vue.
+        QTimer.singleShot(0, self.uptime.refresh)
 
     def _refresh_tiles(self) -> None:
         for tile in self._tiles:
