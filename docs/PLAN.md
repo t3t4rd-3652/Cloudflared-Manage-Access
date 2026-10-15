@@ -596,6 +596,64 @@ Statut : FAIT (deux juges : écarts corrigés ; release 2.12.0)
 - **Critère de fin** : suite verte trois fois, CI verte, verdict du juge, version installée vérifiée.
 - **Risques** : conflits de fusion entre B et les autres (fichiers partagés limités au branchement).
 
+### Organisation de P29 à P32 : un agent à la fois (quota)
+
+Le 2026-10-15, le quota sur 5 heures dépassait 75 % : une seule phase à la fois, confiée à un agent Sonnet
+(`executant-m`) qui travaille directement sur `main` (pas de parallélisme, donc pas de worktree). Entre deux phases,
+l'orchestrateur relit, lance les tests et committe. Traductions et documentation : comme en P28.
+
+### P29 — Maintenance visible, incidents clos quand une surveillance est coupée (2.13)
+
+Statut : À FAIRE
+
+- **Objectif** : voir d'un coup d'œil qu'un objet est en maintenance ; ne plus garder d'incident ouvert pour une
+  surveillance coupée (choix resté ouvert en P28).
+- **Tâches** : pastille « Maintenance » sur les cartes de tunnel et de nom d'hôte de la vue Cloudflare (comme
+  « Sourdine », avec l'heure de fin en info-bulle), et dans le sous-menu « Pannes » de l'icône ; quand la
+  surveillance des tunnels ou des services est coupée (Paramètres, ou tâche planifiée), les incidents ouverts de ce
+  type sont clos, sans événement, et le journal le note.
+- **Fichiers** : `src/cma/core/monitoring.py`, `src/cma/ui/monitor.py`, `src/cma/cli.py`,
+  `src/cma/ui/views/cloud/cards.py`, `src/cma/ui/views/cloud/tunnels_tab.py`, `src/cma/ui/tray.py`, tests.
+- **Critère de fin** : tests de la pastille (fenêtre en cours ou non) et de la clôture (coupure côté interface et côté
+  tâche) ; capture d'une carte en maintenance en clair et en sombre.
+- **Risques** : une coupure brève de la surveillance clôt un incident qui reprendra au relevé suivant (nouvel
+  incident) : acceptable, à dire dans le guide.
+
+### P30 — Canaux d'alerte et maintenances dans l'export de configuration (2.13)
+
+Statut : À FAIRE
+
+- **Objectif** : retrouver ses alertes et maintenances sur un autre poste ou après réinstallation.
+- **Tâches** : `cma.core.transfer` exporte et importe aussi `alert_channels` (sans l'adresse, qui est secrète, sauf
+  dans un export chiffré par phrase de passe, comme les autres secrets), `maintenance_windows`, `alert_repeat_hours`
+  et `weekly_digest` ; la boîte d'import montre ces éléments et ce qui manque (adresse à ressaisir).
+- **Fichiers** : `src/cma/core/transfer.py`, `src/cma/ui/dialogs/transfer.py`, tests.
+- **Critère de fin** : aller-retour export/import testé (en clair sans adresse, chiffré avec adresse), ancien export
+  relu ; aucune adresse en clair dans un export non chiffré (test).
+- **Risques** : fuite d'une adresse de webhook (elle vaut un jeton) : test négatif obligatoire.
+
+### P31 — Historique des envois d'alertes (2.13)
+
+Statut : À FAIRE
+
+- **Objectif** : savoir ce qui est parti, quand, vers quel canal, et si l'envoi a réussi.
+- **Tâches** : journal des envois (alertes, rappels, résumés, tests) gardé dans `alert_state.json` ou un fichier voisin
+  (décision dans l'ADR 0002, 200 entrées au plus), écrit par CMA ouvert et par la tâche planifiée (même règle
+  d'écriture) ; boîte « Envois récents… » dans Paramètres › Général › Alertes (date, canal, type, objet, résultat).
+- **Fichiers** : `src/cma/core/alertstate.py` ou nouveau module, `src/cma/core/monitoring.py`, `src/cma/core/alerts.py`,
+  `src/cma/ui/views/settings_alerts.py`, `docs/adr/0002-…`, tests.
+- **Critère de fin** : envois réussis et en échec notés et affichés ; limite de taille ; fichier illisible toléré ;
+  boîte vérifiée en clair et en sombre et accessible (noms, tabulation réelle).
+- **Risques** : aucune adresse ni message d'erreur contenant un secret dans le journal (rédaction).
+
+### P32 — Documentation, juge, release 2.13.0 (2.13)
+
+Statut : À FAIRE
+
+- **Tâches** : CHANGELOG, GUIDE, README, SECURITE (export, journal des envois), captures, juge neutre (Sonnet tant
+  que le quota est au palier 2), release 2.13.0 et installation.
+- **Critère de fin** : suite verte trois fois, CI verte, verdict du juge, `cma --version` = 2.13.0 sur le poste.
+
 ### Dette technique à surveiller
 
 - (Archivé le 2026-10-14 : résolu par P23.) Disponibilité : le journal agrégeait les relevés par jour UTC
@@ -632,7 +690,10 @@ Statut : FAIT (deux juges : écarts corrigés ; release 2.12.0)
 | P26 | FAIT | bfb1fdf, 5917839 | 594 ✓ | 2026-10-14 |
 | P27 | FAIT | c9b5265, 66fef5e | 594 ✓ | 2026-10-14 |
 | P28 | FAIT | 3ff1e22 | 612 ✓ | 2026-10-15 |
+| P29 | À FAIRE | — | — | — |
+| P30 | À FAIRE | — | — | — |
+| P31 | À FAIRE | — | — | — |
+| P32 | À FAIRE | — | — | — |
 
-**Prochaine action exacte :** 2.12.0 publiée et installée le 2026-10-15. Prochain plan à proposer (P29 et
-suivantes) ; en attente côté propriétaire : soumission winget, signature du code, réécriture éventuelle de
-l'historique (ancienne adresse d'exemple).
+**Prochaine action exacte :** P29 — un agent `executant-m` (Sonnet), seul, sur `main` : pastille « Maintenance »
+et clôture des incidents d'une surveillance coupée.
