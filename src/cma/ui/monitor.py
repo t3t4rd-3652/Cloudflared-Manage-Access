@@ -138,7 +138,8 @@ class Monitor(QObject):
             if self.ctx.config().settings.cloudflare_account_id != account:
                 return
             self.report_service_changes(watch.update(results))
-            self._record(record_services(self.availability, self.ctx.config(), results))
+            # Relevé réussi : un service qui n’y figure plus voit son incident clos (plus de rappel sans fin).
+            self._record(record_services(self.availability, self.ctx.config(), results, complete=True))
             self._follow_up(digest=False)
             self.refresh()
             self.services_checked.emit()

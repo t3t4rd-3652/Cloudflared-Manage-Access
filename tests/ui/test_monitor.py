@@ -65,3 +65,16 @@ def test_monitor_alone(qtbot, gui_context, monkeypatch):
     monitor.refresh()
     assert troubles[-1] == ([], [])
     assert monitor.current_troubles() == ([], [])
+
+    # Un relevé réussi où le nom n'apparaît plus (règle retirée) clôt son incident : plus de rappel sans fin.
+    service_key = "service:wiki.exemple.fr"
+    assert monitor.availability.open_incident("service", service_key) is not None
+
+    async def no_services() -> list[tuple[ServiceTarget, HostProbe]]:
+        return []
+
+    monkeypatch.setattr(admin, "check_services", no_services)
+    checked.clear()
+    assert monitor.check_services() is True
+    qtbot.waitUntil(lambda: bool(checked), timeout=5000)
+    assert monitor.availability.open_incident("service", service_key) is None
