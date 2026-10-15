@@ -237,6 +237,16 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   (`digest.watched` : surveillance des tunnels ou des services active) ; un relevé **réussi** clôt les incidents
   des objets qui n'y figurent plus (`complete=True` côté `Monitor` et côté tâche quand `check_services` a
   réussi), un relevé en échec ne clôt rien. `alert_state.json` garde aussi le tunnel de chaque nom d'hôte.
+- **Export des alertes** (`cma.core.transfer`, clés facultatives `alert_channels`, `maintenance_windows`,
+  `alert_settings`) : l'adresse d'un canal est un secret comme les autres (`alert:<id>`), chiffrée dans les
+  secrets d'un export protégé, jamais dans un export en clair. Un canal importé sans adresse est créé
+  **désactivé** (il échouerait à chaque alerte) et l'aperçu l'annonce ; pas de doublon (même type et même nom,
+  maintenance identique) ; les réglages des rappels ne sont repris que si l'utilisateur le coche.
+- **Journal des envois** (`cma.core.alertlog`, `ui/dialogs/sends.py`) : `alert_log.json`, à part de la
+  configuration et de `alert_state.json`, 200 entrées au plus. Plusieurs fils notent en même temps : un verrou
+  de processus sérialise « lire, ajouter, écrire », et un journal qui ne s'écrit pas n'empêche jamais une alerte
+  de partir. Aucune adresse, même en morceaux : messages passés par `scrub` (200 caractères). La tâche planifiée
+  ne l'écrit que si CMA est fermé ; `cma alerts test` et `digest` y notent leurs envois.
 - **Travail en agents parallèles** : chaque agent a son `git worktree` sous `.claude/worktrees/`, et lance les
   tests depuis ce worktree avec `PYTHONPATH=src` et le `.venv` du dépôt principal. Les traductions passent par un
   JSON que l'orchestrateur réapplique à l'intégration : les trois catalogues entrent en conflit à la fusion. Une

@@ -438,6 +438,8 @@ def capture_guide(window, output: Path) -> None:
     save(publish, "guide-publier-port.png")
     capture_guide_alerts(window, output)
     capture_guide_health_menu(window, output)
+    capture_guide_sends(window, output)
+    capture_guide_maintenance_card(window, output)
 
 
 def capture_guide_alerts(window, output: Path) -> None:
@@ -519,6 +521,86 @@ def capture_guide_health_menu(window, output: Path) -> None:
     menu.hide()
     tray.deleteLater()
     QApplication.processEvents()
+
+
+def capture_guide_sends(window, output: Path) -> None:
+    """`guide-envois.png` : boîte « Envois récents » avec un journal d'exemple (réussis et échecs). Le journal est un
+    fichier temporaire : ni le journal du poste ni une vraie adresse de canal n'interviennent."""
+    from datetime import UTC
+
+    from cma.core.alertlog import AlertLog
+    from cma.ui.dialogs.sends import SendsDialog
+
+    now = datetime.now(UTC).replace(microsecond=0)
+    rows = [
+        ("Téléphone", "ntfy", "alert", "mongodb.exemple.fr", "", 190),
+        ("Équipe infra", "slack", "alert", "mongodb.exemple.fr", "Le canal a refusé l'alerte (403).", 189),
+        ("Téléphone", "ntfy", "reminder", "tunnel bureau", "", 120),
+        ("Équipe infra", "slack", "reminder", "tunnel bureau", "Canal injoignable : timed out", 119),
+        ("Téléphone", "ntfy", "recovery", "mongodb.exemple.fr", "", 60),
+        ("Téléphone", "ntfy", "digest", "", "", 30),
+        ("Équipe infra", "slack", "test", "", "", 5),
+    ]
+    with tempfile.TemporaryDirectory(prefix="cma-demo-log-") as folder:
+        journal = AlertLog(Path(folder) / "alert_log.json")
+        for channel, kind, nature, subject, error, minutes in rows:
+            journal.note(
+                channel=channel,
+                kind=kind,
+                nature=nature,
+                subject=subject,
+                error=error or None,
+                at=now - timedelta(minutes=minutes),
+            )
+        dialog = SendsDialog(window, journal)
+        dialog.show()
+        for _ in range(8):
+            QApplication.processEvents()
+        dialog.grab().save(str(output / "guide-envois.png"))
+        dialog.close()
+        dialog.deleteLater()
+        QApplication.processEvents()
+
+
+def capture_guide_maintenance_card(window, output: Path) -> None:
+    """`guide-carte-maintenance.png` : la vue Cloudflare de démonstration avec le tunnel « bureau » en maintenance
+    (une fenêtre commencée il y a une heure, finie dans trois). La configuration est rétablie ensuite."""
+    from cma.core.models import MaintenanceWindow
+
+    ctx = window.ctx
+    saved = list(ctx.config().settings.maintenance_windows)
+    start = datetime.now().astimezone() - timedelta(hours=1)
+    end = start + timedelta(hours=3)
+
+    def demo(config) -> None:
+        config.settings.maintenance_windows = [
+            MaintenanceWindow(
+                weekday=start.weekday(),
+                start=start.strftime("%H:%M"),
+                end=end.strftime("%H:%M"),
+                target="tunnel:t1",
+                label="Mises à jour du serveur",
+            )
+        ]
+
+    def restore(config) -> None:
+        config.settings.maintenance_windows = saved
+
+    ctx.update_config(demo)
+    try:
+        window.show_view("cloud")
+        window.cloud.show_maintenance()
+        for _ in range(8):
+            QApplication.processEvents()
+        shot = window.cloud.grab()
+        # Coupée sous la carte du tunnel « bureau » : la suivante, rognée, n'apporterait rien.
+        shot.copy(0, 0, shot.width(), int(680 * shot.devicePixelRatio())).save(
+            str(output / "guide-carte-maintenance.png")
+        )
+    finally:
+        ctx.update_config(restore)
+        window.cloud.show_maintenance()
+        QApplication.processEvents()
 
 
 def main() -> int:

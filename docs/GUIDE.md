@@ -116,6 +116,13 @@ Sans ouvrir la fenêtre : tant qu'un tunnel ou un service est en panne, le menu 
 **Envoyer un test** vérifie le canal. Les pannes et les retours partent ensuite vers chaque canal actif, depuis CMA
 ouvert comme depuis la tâche planifiée (Paramètres › Général › Cloudflare).
 
+**Envois récents…** (même section) ouvre le journal des 200 derniers envois vers vos canaux : date, canal,
+nature (panne, retour, rappel, résumé, test), objet et résultat. Un échec s'affiche en rouge avec son motif.
+L'adresse d'un canal n'y figure jamais. **Effacer le journal…** le vide, après confirmation, sans rien changer
+aux rappels ni au résumé. `cma alerts test` et `cma alerts digest` y notent aussi leurs envois.
+
+![Envois récents : un échec en rouge, avec son motif](captures/guide-envois.png)
+
 Une maintenance prévue ? Clic droit sur le tunnel ou le nom d'hôte › **Mettre en sourdine** : il reste relevé, mais
 ne déclenche ni notification ni alerte jusqu'à la fin de la sourdine.
 
@@ -127,12 +134,37 @@ déclenche ni notification, ni alerte, ni rappel.
 
 ![Alertes : résumé du lundi, rappels et maintenances prévues](captures/guide-maintenance.png)
 
+Pendant une maintenance prévue, le tunnel ou le nom d'hôte concerné porte la pastille **Maintenance** dans la
+vue Cloudflare. Survolez la carte pour voir l'heure de fin et le libellé. Un nom d'hôte suit son tunnel, et
+une maintenance de tout le compte couvre tout. Un objet en maintenance n'apparaît pas dans le sous-menu
+**Pannes** de l'icône.
+
+![Le tunnel « bureau » en maintenance, avec ses noms d'hôte](captures/guide-carte-maintenance.png)
+
 Dans la même section, **Rappeler une panne qui dure toutes les** renvoie un message sur les canaux d'alerte tant
 qu'une panne n'est pas finie (« Jamais » par défaut, jusqu'à 168 h). Un objet en sourdine ou en maintenance n'est
 pas rappelé. La case **Envoyer un résumé chaque lundi** envoie à chaque canal, le lundi à partir de 9 h (heure
 locale) et une fois par semaine, la disponibilité des 7 derniers jours, les incidents et les service tokens à
 renouveler ; `cma alerts digest` l'envoie à la demande. Quand CMA est fermé, la tâche planifiée envoie à sa place les
 rappels et le résumé.
+
+Quand vous coupez la surveillance des tunnels ou celle des services (Paramètres › Général › Cloudflare), les
+incidents en cours de ce type sont clos à la vérification suivante, sans notification : une coupure brève clôt
+donc un incident, qui sera rouvert comme un nouvel incident au relevé suivant si l'objet est toujours en panne.
+Avec la surveillance des tunnels coupée, la tâche planifiée ne journalise plus les tunnels et n'en alerte plus.
+
+### Retrouver ses alertes sur un autre poste
+
+**Paramètres › Données › Exporter…** (ou **Exporter…** d'une liste de profils) range aussi vos canaux d'alerte
+(nom, type, actif, retours) et vos maintenances : la case **Inclure les canaux d'alerte et les maintenances**
+est cochée d'office. À l'import, **Reprendre les réglages des rappels et du résumé** (décochée d'office)
+reprend aussi le rappel des pannes et le résumé du lundi. Rien n'est dupliqué : un canal du même nom et du même
+type, ou une maintenance identique, déjà présents sont ignorés.
+
+L'adresse d'un canal vaut un jeton : elle n'est **jamais** écrite dans un export non chiffré. Le canal est alors
+importé **désactivé** : ressaisissez son adresse dans Paramètres › Général › Alertes, puis activez-le. Dans un
+export chiffré (case **Inclure les secrets**, avec une phrase de passe), l'adresse suit, chiffrée comme les
+autres secrets, et le canal reste actif.
 
 **Outils › Disponibilité…** montre, pour chaque tunnel et service, le taux de disponibilité sur 7 et 30 jours, le
 temps de réponse moyen et la liste des incidents (début, fin, durée, cause). Choisissez une ligne pour son

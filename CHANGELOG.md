@@ -2,6 +2,31 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Ajouté
+- **Pastille « Maintenance »** sur les cartes de la vue Cloudflare : pendant une maintenance prévue, le tunnel ou le
+  nom d'hôte concerné la porte, avec l'heure de fin et le libellé en info-bulle. Un nom d'hôte suit son tunnel, et une
+  maintenance de tout le compte couvre tout.
+- **Export de configuration** : les canaux d'alerte (nom, type, actif, retours), les maintenances et, sur demande à
+  l'import (« Reprendre les réglages des rappels et du résumé »), les réglages des rappels et du résumé du lundi
+  suivent les profils. Rien n'est dupliqué à l'import. L'adresse d'un canal n'est jamais écrite dans un export non
+  chiffré : le canal est alors importé désactivé, adresse à ressaisir ; dans un export chiffré, l'adresse suit et le
+  canal reste actif.
+- **Journal des envois** (Paramètres › Général › Alertes › **Envois récents…**) : les 200 derniers envois vers les
+  canaux d'alerte (pannes, retours, rappels, résumés, tests) avec la date, le canal, l'objet et le résultat ; un échec
+  s'affiche en rouge avec son motif, et **Effacer le journal…** le vide. L'adresse d'un canal n'y figure jamais.
+  `cma alerts test` et `cma alerts digest` y notent leurs envois. Le journal est gardé à part, dans `alert_log.json`
+  du dossier de données (aucun secret, hors de la configuration et des exports).
+
+### Modifié
+- Un objet en maintenance n'apparaît plus dans le sous-menu « Pannes » de l'icône.
+- Couper la surveillance des tunnels ou des services (Paramètres) clôt, sans notification, les incidents ouverts de ce
+  type : ils ne restent plus « en cours » pour toujours. Avec la surveillance des tunnels coupée, la tâche planifiée
+  ne les journalise plus et n'en alerte plus.
+- Tableau des canaux d'alerte : les colonnes « Type » et « Retours » ont la largeur de leur en-tête (en allemand,
+  « Wiederherstellungen » était coupé).
+
 ## [2.12.0] - 2026-10-15
 
 ### Ajouté

@@ -35,7 +35,7 @@ Deux règles structurent le code :
 | `src/cma/core/config_store.py` | `config.json` : écriture atomique, sauvegardes, restauration, lecture seule si plus récent. |
 | `src/cma/core/migrations.py` | Conversion des 4 fichiers de la v1, secrets vers le coffre, rapport. |
 | `src/cma/core/secrets.py` | Coffre : keyring, fichier chiffré, mémoire. |
-| `src/cma/core/transfer.py` | Import et export, plan de conflits, secrets chiffrés. |
+| `src/cma/core/transfer.py` | Import et export, plan de conflits, secrets chiffrés ; canaux d'alerte, maintenances et réglages des rappels (l'adresse d'un canal suit la règle des secrets). |
 | `src/cma/core/sessions.py` | Base des sessions : états, journal circulaire, délai de reconnexion. |
 | `src/cma/core/cloudflared/` | Commande sans shell, analyse des journaux, session, binaire et téléchargement vérifié. |
 | `src/cma/core/ssh/` | Connexions asyncssh (rebond ProxyJump compris), clés d'hôte, clés, redirections locales, inverses et SOCKS 5, découverte de ports (Linux et Windows), transfert de fichiers SFTP (`sftp.py`). |
@@ -45,6 +45,7 @@ Deux règles structurent le code :
 | `src/cma/core/tunnelwatch.py`, `servicewatch.py` | Ce qui a changé d'un relevé à l'autre : tunnels (état de l'API), services publiés (tests depuis Internet). |
 | `src/cma/core/availability.py`, `alerts.py`, `monitoring.py` | Journal de disponibilité (incidents, taux par jour local, 90 jours), alertes vers ntfy, Slack, Teams, Discord ou un webhook, sourdine et maintenances hebdomadaires, rappels des pannes qui durent ; suites d'un relevé communes à l'interface et à la tâche planifiée. |
 | `src/cma/core/alertstate.py`, `digest.py` | État des envois (`alert_state.json` : derniers rappels, semaine du dernier résumé, [ADR 0002](adr/0002-etat-des-alertes-hors-de-la-configuration.md)) ; résumé hebdomadaire de la disponibilité, dû le lundi à partir de 9 h. |
+| `src/cma/core/alertlog.py` | Journal des envois d'alertes (`alert_log.json`, 200 derniers, [ADR 0002](adr/0002-etat-des-alertes-hors-de-la-configuration.md)) : date, canal, nature, objet, résultat ; aucune adresse (`scrub`), écriture atomique, verrou de processus, tâche planifiée seulement si CMA est fermé. |
 | `src/cma/core/security.py` | Bilan de sécurité du compte (analyse pure) : constats, gravité, correction possible. |
 | `src/cma/core/privnet.py`, `audit.py`, `traffic.py`, `snapshot.py`, `permissions.py` | Outils du compte : réseaux privés (WARP), journal d'audit, trafic GraphQL, instantanés comparés, permissions du jeton vérifiées en lecture. |
 | `src/cma/core/links.py`, `sshconfig.py` | Liens `cma://` et profils partagés sans secret ; import de `~/.ssh/config`. |
@@ -60,6 +61,7 @@ Deux règles structurent le code :
 | `src/cma/core/instance.py` | Verrou d'instance unique et canal de commande local. |
 | `src/cma/platform/` | Job Object Windows, démarrage automatique, lanceurs (terminal, RDP, Compass), tâche planifiée, notification système, liens `cma://`, nom du réseau Wi-Fi. |
 | `src/cma/ui/` | Interface : fenêtre, vues, boîtes de dialogue (palette Ctrl+K, espaces de travail, diagnostic), thème, verrouillage, zone de notification. |
+| `src/cma/ui/dialogs/sends.py` | Boîte « Envois récents » (Paramètres › Général › Alertes) : lit `alert_log.json`, échecs en rouge, effacement du journal après confirmation. |
 | `src/cma/ui/monitor.py`, `wake.py` | Surveillance du compte côté Qt (minuteurs, signaux ; [ADR 0001](adr/0001-surveillance-hors-de-la-fenetre.md)) ; sortie de veille et retour du réseau. |
 | `src/cma/ui/views/cloud/` | Vue Cloudflare : `view.py` (compte, en-tête, tuiles), onglets `tunnels_tab.py`, `apps_tab.py`, `tokens_tab.py`, menu Outils (`account_tools.py`) et ses boîtes. |
 | `src/cma/i18n.py`, `i18n_<code>.py` | Traduction : source en français, catalogues anglais, allemand et espagnol vérifiés par test, repli sur l'anglais. |
@@ -124,7 +126,9 @@ troubled(tunnels, services) ──► navigation « Cloudflare · N ! », zone d
 ```
 
 La tâche planifiée n'écrit le journal que si CMA est fermé ; elle s'en sert de mémoire pour ne prévenir qu'au début
-et à la fin d'une panne. Un objet en sourdine est relevé et journalisé, sans notification ni alerte.
+et à la fin d'une panne. Un objet en sourdine est relevé et journalisé, sans notification ni alerte. Une
+surveillance coupée dans les Paramètres clôt les incidents ouverts de son type (`close_unwatched_kinds`), sans
+notification. Chaque envoi vers un canal est noté dans `alert_log.json` (`alertlog.send_and_note`).
 
 ## Threads
 

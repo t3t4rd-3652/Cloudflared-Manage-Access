@@ -132,8 +132,9 @@ Avec un jeton d'API Cloudflare, CMA gère aussi le côté serveur :
   avec le conseil qui va avec. **Tester depuis Internet** et **Tester tous les noms d'hôte** à la demande. La carte
   **Santé du compte** de la page Sessions résume tunnels et services en panne, et service tokens à renouveler.
 - **Alertes** vers ntfy (téléphone), Slack, Microsoft Teams, Discord ou un webhook ; **sourdine** d'un tunnel ou d'un
-  nom d'hôte pendant une maintenance, **maintenances hebdomadaires** planifiées, rappel d'une panne qui dure et
-  **résumé du lundi** de la disponibilité.
+  nom d'hôte pendant une maintenance, **maintenances hebdomadaires** planifiées (pastille « Maintenance » sur les
+  cartes), rappel d'une panne qui dure, **résumé du lundi** de la disponibilité et **journal des envois**
+  (« Envois récents… », sans jamais l'adresse d'un canal).
 - **Disponibilité** de chaque tunnel et service sur 90 jours, par jour local : graphique jour par jour, temps de
   réponse, incidents, rapport exportable en HTML ou en CSV (aussi en ligne de commande).
 - **Bilan de sécurité** : noms d'hôte publiés sans Access, politiques ouvertes à tout le monde, tokens expirés ou
@@ -163,7 +164,8 @@ Avec un jeton d'API Cloudflare, CMA gère aussi le côté serveur :
 - Notifications au lieu de fenêtres bloquantes, journaux en direct filtrables (thème sombre ci-dessous).
 - Thème clair, sombre ou système, style Windows 11, interface nette à toutes les échelles d'affichage.
 - Interface en français, anglais, allemand ou espagnol (Paramètres › Langue).
-- Import et export des profils. Les secrets sont exclus par défaut, ou chiffrés par une phrase de passe.
+- Import et export des profils, des canaux d'alerte et des maintenances. Les secrets sont exclus par défaut, ou
+  chiffrés par une phrase de passe ; l'adresse d'un canal n'est jamais écrite en clair.
 - Démarrage avec Windows, instance unique, rapport de diagnostic sans secrets.
 - Mise à jour en un clic (installeur, version portable Windows, AppImage Linux) : fichier vérifié par SHA-256, puis
   relance. L'AppImage se met aussi à jour avec AppImageUpdate ou Gear Lever (zsync). **Quoi de neuf** présente

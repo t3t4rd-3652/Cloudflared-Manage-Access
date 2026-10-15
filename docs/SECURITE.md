@@ -14,11 +14,12 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
 | Instantanés `snapshots/*.json` | Configuration du compte Cloudflare (règles, politiques, DNS, Client ID des tokens) ; aucun jeton ni secret. Les 30 derniers par compte. |
 | Disponibilité `availability.json` | Incidents et taux des tunnels et services (noms d'hôte, états, durées) ; 90 jours au plus. |
 | État des alertes `alert_state.json` | Dates des derniers rappels de pannes, semaine du dernier résumé hebdomadaire et tunnel de chaque nom d'hôte ; aucun secret. |
+| Journal des envois `alert_log.json` | Les 200 derniers envois vers les canaux d'alerte (date, nom et type du canal, nature, objet, résultat). Aucun secret : l'adresse d'un canal n'y est jamais écrite, ni en entier ni en morceaux ; les erreurs sont rédigées, les adresses masquées, 200 caractères au plus. Fichier local du dossier de données, hors de la configuration et de tout export, effaçable depuis CMA. |
 | Rapport de disponibilité exporté | Mêmes données (noms d'hôte, taux, incidents), aucun jeton ni secret. La page HTML est autonome : ni script ni ressource externe. |
 | Adresses des canaux d'alerte | Coffre du système (clé `alert:<id>`) : une adresse ntfy, Slack ou Teams vaut un jeton. |
 | Historique `history.json` | Nom des accès, horaires, compteurs et messages d'incident déjà masqués ; 90 jours au plus, effaçable depuis CMA. |
 | Journaux et rapport de diagnostic | Les secrets connus et les motifs habituels (en-tête `Cf-Access-Client-Secret`, `password=`…) sont masqués. |
-| Exports | Secrets exclus par défaut, ou chiffrés par phrase de passe (scrypt, AES-256-GCM). |
+| Exports | Secrets exclus par défaut, ou chiffrés par phrase de passe (scrypt, AES-256-GCM). L'adresse d'un canal d'alerte (clé `alert:<id>`) est un secret comme les autres : absente d'un export non chiffré, chiffrée dans un export protégé ; un canal importé sans adresse est créé désactivé. |
 
 ## Exécution de cloudflared
 
