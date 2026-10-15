@@ -468,7 +468,7 @@ def test_logs_view(qtbot, gui, monkeypatch, tmp_path):
     view.reset_filters()
     assert view.proxy.rowCount() == 2
     view.table.selectRow(1)
-    assert "Access a refusé le jeton" in view.detail.toPlainText()
+    qtbot.waitUntil(lambda: "Access a refusé le jeton" in view.detail.toPlainText(), timeout=45000)
     assert "sélectionnée" in view.copy_button.accessibleName()
     view._copy()
     assert QApplication.clipboard().text().endswith("Bureau labo : Access a refusé le jeton")

@@ -60,11 +60,13 @@ class SendEntry:
     error: str = ""
 
 
-def scrub(text: str, url: str = "", kind: str = "") -> str:
+def scrub(text: str, url: str = "", kind: str = "", *, known_secrets: bool = True) -> str:
     """Retire d'un message tout ce qui peut venir de l'adresse d'un canal : secrets connus du coffre, adresses
     complètes, puis l'adresse du canal (hôte, identifiants et morceaux de chemin ou de paramètres assez longs
     pour être un jeton) et tronque à `MAX_MESSAGE` caractères."""
-    text = " ".join(redact(text).split())
+    # `known_secrets` : passer aussi par la rédaction globale du coffre (journal écrit sur disque). Le message
+    # rendu à l'interface n'a besoin que du masquage de l'adresse du canal.
+    text = " ".join((redact(text) if known_secrets else text).split())
     text = _URL.sub(MASK, text)
     if url:
         parts = urlsplit(url)
@@ -211,7 +213,8 @@ def send_and_note(
     except AlertError as exc:
         if journal is not None:
             journal.note(channel=name, kind=kind, nature=nature, subject=subject, error=str(exc), url=url)
-        return scrub(str(exc), url, kind)  # l'appelant l'affiche : jamais l'adresse du canal non plus
+        # L'appelant l'affiche : jamais l'adresse du canal non plus (la rédaction globale reste au journal).
+        return scrub(str(exc), url, kind, known_secrets=False)
     if journal is not None:
         journal.note(channel=name, kind=kind, nature=nature, subject=subject, url=url)
     return None
