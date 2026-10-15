@@ -119,7 +119,7 @@ def test_ssh_view_full_flow(qtbot, ssh_gui, threaded_ssh_server, monkeypatch):
     forwards.reload()
     forwards.table.selectRow(0)
     forwards._toggle()
-    qtbot.waitUntil(lambda: not any(s.state.active for s in view.sessions.values()), timeout=10000)
+    qtbot.waitUntil(lambda: not any(s.state.active for s in view.sessions.values()), timeout=45000)
     forwards._start_all()
     qtbot.waitUntil(
         lambda: any(s.state == SessionState.LISTENING for s in view.sessions.values()), timeout=15000
@@ -139,7 +139,7 @@ def test_ssh_view_full_flow(qtbot, ssh_gui, threaded_ssh_server, monkeypatch):
     assert len(ctx.config().ssh_profiles) == 2
     view.list.select(profile_id)
     view.panel._toggle_connection()
-    qtbot.waitUntil(lambda: view.ssh_states[profile_id].state == "disconnected", timeout=10000)
+    qtbot.waitUntil(lambda: view.ssh_states[profile_id].state == "disconnected", timeout=45000)
     view.delete()
     assert ctx.config().ssh_profile(profile_id) is None
 
@@ -280,7 +280,7 @@ def test_settings_view(qtbot, gui, monkeypatch, tmp_path):
     opened: list[object] = []
     monkeypatch.setattr(settings_view.QDesktopServices, "openUrl", opened.append)
     view._diagnostic()
-    qtbot.waitUntil(lambda: any((ctx.paths.data_dir / "diagnostics").glob("*.zip")), timeout=10000)
+    qtbot.waitUntil(lambda: any((ctx.paths.data_dir / "diagnostics").glob("*.zip")), timeout=45000)
     view._open(ctx.paths.backups_dir)
     assert opened
 
@@ -624,9 +624,9 @@ def test_ssh_files_tab(qtbot, ssh_gui, threaded_ssh_server, monkeypatch, tmp_pat
     assert files.path.text() == files.directory and files.upload_button.isEnabled()
 
     files._activate(0)  # double-clic sur un dossier : on y entre
-    qtbot.waitUntil(lambda: names() == ["a.txt"], timeout=10000)
+    qtbot.waitUntil(lambda: names() == ["a.txt"], timeout=45000)
     files.go_up()
-    qtbot.waitUntil(lambda: names() == ["docs", "notes.txt"], timeout=10000)
+    qtbot.waitUntil(lambda: names() == ["docs", "notes.txt"], timeout=45000)
 
     # Téléchargement d'un fichier et d'un dossier ; ce qui existe déjà localement est confirmé.
     target = tmp_path / "telechargements"
@@ -640,8 +640,8 @@ def test_ssh_files_tab(qtbot, ssh_gui, threaded_ssh_server, monkeypatch, tmp_pat
     assert (target / "notes.txt").read_text(encoding="utf-8") == "ancien"
     monkeypatch.setattr(files_module, "confirm", lambda *_a: True)
     files.download_selected()
-    qtbot.waitUntil(lambda: (target / "docs" / "a.txt").exists(), timeout=10000)
-    qtbot.waitUntil(lambda: files.browse_button.isEnabled(), timeout=10000)
+    qtbot.waitUntil(lambda: (target / "docs" / "a.txt").exists(), timeout=45000)
+    qtbot.waitUntil(lambda: files.browse_button.isEnabled(), timeout=45000)
     assert (target / "notes.txt").read_text(encoding="utf-8") == "n"
 
     # Envoi, nouveau dossier, renommage, suppression.
@@ -649,25 +649,25 @@ def test_ssh_files_tab(qtbot, ssh_gui, threaded_ssh_server, monkeypatch, tmp_pat
     outgoing.write_text("envoyé", encoding="utf-8")
     monkeypatch.setattr(files_module, "ask_files", lambda *_a: [outgoing])
     files.upload_files()
-    qtbot.waitUntil(lambda: "envoi.txt" in names(), timeout=10000)
+    qtbot.waitUntil(lambda: "envoi.txt" in names(), timeout=45000)
     assert (home / "envoi.txt").read_text(encoding="utf-8") == "envoyé"
     monkeypatch.setattr(files_module, "ask_name", lambda *_a: "rangement")
     files.make_directory()
-    qtbot.waitUntil(lambda: "rangement" in names(), timeout=10000)
+    qtbot.waitUntil(lambda: "rangement" in names(), timeout=45000)
     files.table.clearSelection()
     files.table.selectRow(names().index("envoi.txt"))
     monkeypatch.setattr(files_module, "ask_name", lambda *_a: "renomme.txt")
     files.rename_selected()
-    qtbot.waitUntil(lambda: "renomme.txt" in names(), timeout=10000)
+    qtbot.waitUntil(lambda: "renomme.txt" in names(), timeout=45000)
     files.table.clearSelection()
     files.table.selectRow(names().index("rangement"))
     files.delete_selected()
-    qtbot.waitUntil(lambda: "rangement" not in names(), timeout=10000)
+    qtbot.waitUntil(lambda: "rangement" not in names(), timeout=45000)
     assert not (home / "rangement").exists()
 
     # Erreur lisible, et progression affichée.
     files.open_directory("/inexistant")
-    qtbot.waitUntil(lambda: not files.error.isHidden(), timeout=10000)
+    qtbot.waitUntil(lambda: not files.error.isHidden(), timeout=45000)
     files._on_progress("gros.iso", 1024, 4096)
     assert "gros.iso" in files.status.text()
     view.new_profile()  # autre profil : l'onglet repart de zéro

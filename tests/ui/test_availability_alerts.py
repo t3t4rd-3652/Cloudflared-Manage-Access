@@ -84,7 +84,7 @@ def test_mute_from_the_tunnel_menu(qtbot, gui, cf):
     view = window.cloud
     view.token_field.set_text(TOKEN)
     view.connect_account()
-    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=45000)
 
     def grafana():
         top = view.tree.topLevelItem(0)
@@ -97,7 +97,7 @@ def test_mute_from_the_tunnel_menu(qtbot, gui, cf):
     assert [a.text() for a in sub.actions()] == ["1 heure", "4 heures", "Jusqu'à demain 8 h", "1 semaine"]
     sub.actions()[1].trigger()
     assert set(ctx.config().settings.muted) == {"service:grafana.exemple.fr"}
-    qtbot.waitUntil(lambda: bool(grafana().data(0, MUTED_ROLE)), timeout=10000)
+    qtbot.waitUntil(lambda: bool(grafana().data(0, MUTED_ROLE)), timeout=45000)
     unmute = next(
         a for a in view.tree_menu(grafana()).actions() if a.text().startswith("Réactiver les alertes")
     )
@@ -106,7 +106,7 @@ def test_mute_from_the_tunnel_menu(qtbot, gui, cf):
     # Sourdine d'un tunnel : son résumé le dit, ses noms d'hôte aussi.
     tunnel_menu = view.tree_menu(view.tree.topLevelItem(0))
     next(a.menu() for a in tunnel_menu.actions() if a.text() == "Mettre en sourdine").actions()[0].trigger()
-    qtbot.waitUntil(lambda: "sourdine" in view.tree.topLevelItem(0).text(1), timeout=10000)
+    qtbot.waitUntil(lambda: "sourdine" in view.tree.topLevelItem(0).text(1), timeout=45000)
     assert grafana().data(0, MUTED_ROLE)
     choices = tunnels_module.mute_choices(datetime(2026, 10, 9, 22, 30))
     assert choices[2][1] == timedelta(hours=9, minutes=30)

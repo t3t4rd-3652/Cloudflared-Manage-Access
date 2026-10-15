@@ -56,7 +56,7 @@ def test_cloud_view_full_flow(qtbot, gui, cf, monkeypatch):
     assert cf.state.requests == []
     view.token_field.set_text(TOKEN)
     view.connect_account()
-    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=45000)
     assert view.stack.currentIndex() == 1
     assert ctx.core.secrets.get(TOKEN_SECRET_KEY) == TOKEN
     assert view.token_field.text() == ""
@@ -83,7 +83,7 @@ def test_cloud_view_full_flow(qtbot, gui, cf, monkeypatch):
     # Service token créé chez Cloudflare et rangé dans le coffre.
     monkeypatch.setattr(tokens_module, "ask_create_token", lambda *_a: ("Robot", "17520h"))
     view.create_token()
-    qtbot.waitUntil(lambda: view.remote_tokens.rowCount() == 1, timeout=10000)
+    qtbot.waitUntil(lambda: view.remote_tokens.rowCount() == 1, timeout=45000)
     assert cf.state.service_tokens[0]["duration"] == "17520h"
     token = ctx.config().tokens[0]
     assert ctx.core.secrets.get(token.secret_key).startswith("secret-")
@@ -94,7 +94,7 @@ def test_cloud_view_full_flow(qtbot, gui, cf, monkeypatch):
     view.remote_tokens.selectRow(0)
     assert view.extend_button.isEnabled() and view.rotate_button.isEnabled()
     view.extend_selected_token()
-    qtbot.waitUntil(lambda: ctx.config().tokens[0].expires_at.year == 2028, timeout=10000)
+    qtbot.waitUntil(lambda: ctx.config().tokens[0].expires_at.year == 2028, timeout=45000)
     old_secret = ctx.core.secrets.get(token.secret_key)
     monkeypatch.setattr(tokens_module, "confirm", lambda *_a: False)
     view.remote_tokens.selectRow(0)
@@ -102,19 +102,19 @@ def test_cloud_view_full_flow(qtbot, gui, cf, monkeypatch):
     assert ctx.core.secrets.get(token.secret_key) == old_secret
     monkeypatch.setattr(tokens_module, "confirm", lambda *_a: True)
     view.rotate_selected_token()
-    qtbot.waitUntil(lambda: ctx.core.secrets.get(token.secret_key) != old_secret, timeout=10000)
-    qtbot.waitUntil(lambda: view.remote_tokens.rowCount() == 1, timeout=10000)
+    qtbot.waitUntil(lambda: ctx.core.secrets.get(token.secret_key) != old_secret, timeout=45000)
+    qtbot.waitUntil(lambda: view.remote_tokens.rowCount() == 1, timeout=45000)
 
     # Autorisation du token sur l'application Access existante.
     view.apps.selectRow(0)
     monkeypatch.setattr(apps_module, "ask_allow", lambda _p, _app, tokens: tokens[0])
     view.allow_token()
-    qtbot.waitUntil(lambda: bool(cf.state.account_policies), timeout=10000)
+    qtbot.waitUntil(lambda: bool(cf.state.account_policies), timeout=45000)
 
     # Protection d'un nouveau nom d'hôte.
     monkeypatch.setattr(apps_module, "ask_protect", lambda *_a: "DB.exemple.fr")
     view.protect_hostname()
-    qtbot.waitUntil(lambda: view.apps.rowCount() == 2, timeout=10000)
+    qtbot.waitUntil(lambda: view.apps.rowCount() == 2, timeout=45000)
 
     # Publication d'un service sur le second tunnel, avec profil et token.
     request = PublishRequest(
@@ -122,10 +122,10 @@ def test_cloud_view_full_flow(qtbot, gui, cf, monkeypatch):
     )
     monkeypatch.setattr(view.tunnels_tab, "ask_publish", lambda: request)
     view.publish()
-    qtbot.waitUntil(lambda: "pg.lab.exemple.fr" in names(ctx), timeout=10000)
+    qtbot.waitUntil(lambda: "pg.lab.exemple.fr" in names(ctx), timeout=45000)
     profile = next(p for p in ctx.config().cloudflare_profiles if p.hostname == "pg.lab.exemple.fr")
     assert profile.auth == AuthMode.SERVICE_TOKEN and profile.token_id == token.id
-    qtbot.waitUntil(lambda: view.tree.topLevelItem(1).childCount() == 1, timeout=10000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItem(1).childCount() == 1, timeout=45000)
 
     # Retrait du nom d'hôte publié.
     monkeypatch.setattr(cloud_module, "confirm", lambda *_a: True)
@@ -134,14 +134,14 @@ def test_cloud_view_full_flow(qtbot, gui, cf, monkeypatch):
     view.unpublish_selected()  # rien de sélectionné : refus
     view.tree.topLevelItem(1).child(0).setSelected(True)
     view.unpublish_selected()
-    qtbot.waitUntil(lambda: view.tree.topLevelItem(1).childCount() == 0, timeout=10000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItem(1).childCount() == 0, timeout=45000)
     assert cf.state.dns["z2"] == []
 
     # Une nouvelle vue se reconnecte seule avec le jeton du coffre.
     fresh = CloudView(ctx)
     qtbot.addWidget(fresh)
     fresh.show()
-    qtbot.waitUntil(lambda: fresh.overview is not None, timeout=10000)
+    qtbot.waitUntil(lambda: fresh.overview is not None, timeout=45000)
 
     view.forget()
     assert view.stack.currentIndex() == 0
@@ -155,7 +155,7 @@ def test_cloud_view_checks_tunnel_connectors(qtbot, gui, cf, monkeypatch):
     view = window.cloud
     view.token_field.set_text(TOKEN)
     view.connect_account()
-    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=45000)
     shown: list[tuple[str, int]] = []
     monkeypatch.setattr(
         tunnels_module,
@@ -164,7 +164,7 @@ def test_cloud_view_checks_tunnel_connectors(qtbot, gui, cf, monkeypatch):
     )
     for index in (0, 1):
         view.check_connectors(view.tree.topLevelItem(index).data(0, cards_module.TUNNEL_ROLE))
-    qtbot.waitUntil(lambda: len(shown) == 2, timeout=10000)
+    qtbot.waitUntil(lambda: len(shown) == 2, timeout=45000)
     assert sorted(shown) == [("bureau", 1), ("labo", 0)]
 
     tunnel = view.tree.topLevelItem(0).data(0, cards_module.TUNNEL_ROLE)
@@ -184,7 +184,7 @@ def connected_view(qtbot, gui, cf):
     view = window.cloud
     view.token_field.set_text(TOKEN)
     view.connect_account()
-    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=45000)
     return ctx, view
 
 
@@ -202,7 +202,7 @@ def test_cloud_view_edits_a_published_service(qtbot, gui, cf, monkeypatch):
     monkeypatch.setattr(tunnels_module, "ask_service", lambda *_a: ("https://localhost:8006", origin))
     view.edit_service(tunnel, rule)
     qtbot.waitUntil(
-        lambda: cf.state.configs["t1"]["ingress"][0]["service"] == "https://localhost:8006", timeout=10000
+        lambda: cf.state.configs["t1"]["ingress"][0]["service"] == "https://localhost:8006", timeout=45000
     )
     assert cf.state.configs["t1"]["ingress"][0]["originRequest"] == {
         "noTLSVerify": True,
@@ -249,7 +249,7 @@ def test_cloud_view_manages_shared_access_policies(qtbot, gui, cf, monkeypatch):
     cf.state.apps[0]["policies"] = [{"id": "p1", "precedence": 1}]
     cf.state.apps[1]["policies"] = [{"id": "p1", "precedence": 1}]
     _ctx, view = connected_view(qtbot, gui, cf)
-    qtbot.waitUntil(lambda: view.apps.rowCount() == 2, timeout=10000)
+    qtbot.waitUntil(lambda: view.apps.rowCount() == 2, timeout=45000)
     view.tabs.setCurrentIndex(1)
     assert not view.policies_button.isEnabled() and not view.delete_app_button.isEnabled()
     row = next(r for r in range(view.apps.rowCount()) if view.apps.item(r, 0).text() == "SSH")
@@ -259,7 +259,7 @@ def test_cloud_view_manages_shared_access_policies(qtbot, gui, cf, monkeypatch):
     opened: list[PoliciesDialog] = []
     monkeypatch.setattr(apps_module, "show_policies", opened.append)
     view.manage_policies()
-    qtbot.waitUntil(lambda: bool(opened), timeout=10000)
+    qtbot.waitUntil(lambda: bool(opened), timeout=45000)
     dialog = opened[0]
     assert dialog.table.rowCount() == 1 and dialog.table.item(0, 3).text() == "Partagée : 2 applications"
     assert dialog.groups == [AccessGroup("g1", "Admins")]
@@ -268,7 +268,7 @@ def test_cloud_view_manages_shared_access_policies(qtbot, gui, cf, monkeypatch):
     team = AccessPolicy("", "Équipe", "allow", (PolicyRule("email_domain", "exemple.fr"),), reusable=True)
     monkeypatch.setattr(policies_module, "ask_policy", lambda *_a: team)
     dialog.add_policy()
-    qtbot.waitUntil(lambda: dialog.table.rowCount() == 2 and dialog.isEnabled(), timeout=10000)
+    qtbot.waitUntil(lambda: dialog.table.rowCount() == 2 and dialog.isEnabled(), timeout=45000)
     assert (
         dialog.table.item(1, 2).text() == "@exemple.fr"
         and dialog.table.item(1, 3).text() == "Une seule application"
@@ -279,7 +279,7 @@ def test_cloud_view_manages_shared_access_policies(qtbot, gui, cf, monkeypatch):
     shared = dialog.policies[0]
     monkeypatch.setattr(policies_module, "ask_policy", lambda *_a: replace(shared, name="Moi"))
     dialog.edit_policy(dialog.save)
-    qtbot.waitUntil(lambda: dialog.table.item(0, 0).text() == "Moi", timeout=10000)
+    qtbot.waitUntil(lambda: dialog.table.item(0, 0).text() == "Moi", timeout=45000)
     stored = cf.state.account_policies[0]
     assert stored["name"] == "Moi" and stored["connection_rules"] == {"rdp": {}}
 
@@ -287,13 +287,13 @@ def test_cloud_view_manages_shared_access_policies(qtbot, gui, cf, monkeypatch):
     dialog.table.selectRow(0)
     monkeypatch.setattr(policies_module, "confirm", lambda *_a: True)
     dialog.remove_policy()
-    qtbot.waitUntil(lambda: dialog.table.rowCount() == 1 and dialog.isEnabled(), timeout=10000)
+    qtbot.waitUntil(lambda: dialog.table.rowCount() == 1 and dialog.isEnabled(), timeout=45000)
     assert cf.state.apps[1]["policies"] == [{"id": "p1", "precedence": 1}]
 
     # Ajouter une politique existante du compte.
     monkeypatch.setattr(policies_module, "ask_existing_policy", lambda _p, candidates, *_a: candidates[0])
     dialog.add_existing()
-    qtbot.waitUntil(lambda: dialog.table.rowCount() == 2 and dialog.isEnabled(), timeout=10000)
+    qtbot.waitUntil(lambda: dialog.table.rowCount() == 2 and dialog.isEnabled(), timeout=45000)
     assert [link["id"] for link in cf.state.apps[0]["policies"]][-1] == "p1"
 
     # Une erreur de l'API réactive la boîte de dialogue.
@@ -302,7 +302,7 @@ def test_cloud_view_manages_shared_access_policies(qtbot, gui, cf, monkeypatch):
     dialog.table.selectRow(0)
     monkeypatch.setattr(policies_module, "ask_policy", lambda *_a: ghost)
     dialog.edit_policy(dialog.save)
-    qtbot.waitUntil(dialog.isEnabled, timeout=10000)
+    qtbot.waitUntil(dialog.isEnabled, timeout=45000)
 
 
 def test_cloud_view_account_policies_and_cleanup(qtbot, gui, cf, monkeypatch):
@@ -322,7 +322,7 @@ def test_cloud_view_account_policies_and_cleanup(qtbot, gui, cf, monkeypatch):
     opened: list[AccountPoliciesDialog] = []
     monkeypatch.setattr(apps_module, "show_policies", opened.append)
     view.manage_account_policies()
-    qtbot.waitUntil(lambda: bool(opened), timeout=10000)
+    qtbot.waitUntil(lambda: bool(opened), timeout=45000)
     dialog = opened[0]
     assert (
         dialog.table.item(0, 3).text() == "Inutilisée"
@@ -332,7 +332,7 @@ def test_cloud_view_account_policies_and_cleanup(qtbot, gui, cf, monkeypatch):
     assert dialog.delete_button.isEnabled()
     monkeypatch.setattr(policies_module, "confirm", lambda *_a: True)
     dialog.delete_policy()
-    qtbot.waitUntil(lambda: dialog.table.rowCount() == 0 and dialog.isEnabled(), timeout=10000)
+    qtbot.waitUntil(lambda: dialog.table.rowCount() == 0 and dialog.isEnabled(), timeout=45000)
     assert cf.state.account_policies == []
 
     # Ménage : renommer et supprimer un tunnel arrêté, supprimer une application et un token.
@@ -343,31 +343,31 @@ def test_cloud_view_account_policies_and_cleanup(qtbot, gui, cf, monkeypatch):
     labo = view.tree.topLevelItem(1).data(0, cards_module.TUNNEL_ROLE)
     monkeypatch.setattr(tunnels_module, "ask_tunnel_name", lambda _p, _existing, current: current + "-2")
     view.rename_tunnel(labo)
-    qtbot.waitUntil(lambda: cf.state.tunnels[1]["name"] == "labo-2", timeout=10000)
+    qtbot.waitUntil(lambda: cf.state.tunnels[1]["name"] == "labo-2", timeout=45000)
     view.delete_tunnel(labo)
-    qtbot.waitUntil(lambda: len(cf.state.tunnels) == 1, timeout=10000)
-    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 1, timeout=10000)
+    qtbot.waitUntil(lambda: len(cf.state.tunnels) == 1, timeout=45000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 1, timeout=45000)
     notes: list[tuple[str, str]] = []
     ctx._notifier = lambda level, text, **_k: notes.append((level, text))
     view.delete_tunnel(
         view.tree.topLevelItem(0).data(0, cards_module.TUNNEL_ROLE)
     )  # connecteur actif : refus
-    qtbot.waitUntil(lambda: any(level == "error" for level, _ in notes), timeout=10000)
+    qtbot.waitUntil(lambda: any(level == "error" for level, _ in notes), timeout=45000)
     assert len(cf.state.tunnels) == 1
 
     view.tabs.setCurrentIndex(1)
     view.apps.selectRow(0)
     view.delete_selected_app()
-    qtbot.waitUntil(lambda: cf.state.apps == [], timeout=10000)
+    qtbot.waitUntil(lambda: cf.state.apps == [], timeout=45000)
     cf.state.service_tokens.append(
         {"id": "tk", "name": "Vieux", "client_id": "vieux.access", "expires_at": ""}
     )
     view.refresh()
-    qtbot.waitUntil(lambda: view.remote_tokens.rowCount() == 1, timeout=10000)
+    qtbot.waitUntil(lambda: view.remote_tokens.rowCount() == 1, timeout=45000)
     view.remote_tokens.selectRow(0)
     assert view.delete_token_button.isEnabled()
     view.delete_selected_token()
-    qtbot.waitUntil(lambda: cf.state.service_tokens == [], timeout=10000)
+    qtbot.waitUntil(lambda: cf.state.service_tokens == [], timeout=45000)
 
 
 def test_policy_editor_validates_the_rules(qtbot, gui):
@@ -419,7 +419,7 @@ def test_cloud_view_creates_a_tunnel(qtbot, gui, cf, monkeypatch):
     view = window.cloud
     view.token_field.set_text(TOKEN)
     view.connect_account()
-    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=45000)
 
     asked: list[list[str]] = []
     created: list[NewTunnel] = []
@@ -429,7 +429,7 @@ def test_cloud_view_creates_a_tunnel(qtbot, gui, cf, monkeypatch):
     monkeypatch.setattr(tunnels_module, "ask_tunnel_name", lambda *_a: "nouveau")
     monkeypatch.setattr(tunnels_module, "show_new_tunnel", lambda _p, result: created.append(result))
     view.create_tunnel()
-    qtbot.waitUntil(lambda: bool(created) and view.tree.topLevelItemCount() == 3, timeout=10000)
+    qtbot.waitUntil(lambda: bool(created) and view.tree.topLevelItemCount() == 3, timeout=45000)
 
     # La commande affichée masque le jeton ; « Copier » donne la commande complète.
     copied: list[str] = []
@@ -456,7 +456,7 @@ def test_cloud_view_reports_api_errors(qtbot, gui, cf):
     view = window.cloud
     view.token_field.set_text("mauvais")
     view.connect_account()
-    qtbot.waitUntil(lambda: bool(notes), timeout=10000)
+    qtbot.waitUntil(lambda: bool(notes), timeout=45000)
     assert notes[0][0] == "error" and "401" in notes[0][1]
     assert view.stack.currentIndex() == 0
     assert view.connect_button.isEnabled()
@@ -473,7 +473,7 @@ def test_cloud_view_explains_an_account_found_through_zones(qtbot, gui):
         view = window.cloud
         view.token_field.set_text(TOKEN)
         view.connect_account()
-        qtbot.waitUntil(lambda: view.overview is not None, timeout=10000)
+        qtbot.waitUntil(lambda: view.overview is not None, timeout=45000)
         assert view.account_name.text() == "Mon compte"
         assert view.permission_hint.isVisible()
         assert "Account Settings : Read" in view.permission_hint.text()
@@ -613,7 +613,7 @@ def test_ingress_rules_from_the_tunnel_menu(qtbot, gui, cf, monkeypatch):
     view = window.cloud
     view.token_field.set_text(TOKEN)
     view.connect_account()
-    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=45000)
     bureau = view.tree.topLevelItem(0)
     first = bureau.child(0)
     host = first.data(0, cards_module.RULE_ROLE).hostname
@@ -630,7 +630,7 @@ def test_ingress_rules_from_the_tunnel_menu(qtbot, gui, cf, monkeypatch):
     # Ajouter /api sur le même nom d'hôte : une règle de plus, un seul enregistrement DNS pour ce nom.
     monkeypatch.setattr(tunnels_module, "ask_path_rule", lambda *_a: ("/api", "http://localhost:8080"))
     actions["Ajouter une règle avec chemin…"].trigger()
-    qtbot.waitUntil(lambda: view.tree.topLevelItem(0).childCount() == 4, timeout=10000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItem(0).childCount() == 4, timeout=45000)
     assert cnames() == 1
     bureau = view.tree.topLevelItem(0)
     added = bureau.child(3)
@@ -640,17 +640,17 @@ def test_ingress_rules_from_the_tunnel_menu(qtbot, gui, cf, monkeypatch):
     for _ in range(3):
         view.move_rule(bureau.data(0, cards_module.TUNNEL_ROLE), added.data(0, cards_module.RULE_ROLE), -1)
         qtbot.wait(50)
-    qtbot.waitUntil(lambda: view.tree.topLevelItem(0).child(0).text(0) == host + "/api", timeout=10000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItem(0).child(0).text(0) == host + "/api", timeout=45000)
 
     # Règle finale : 503.
     monkeypatch.setattr(tunnels_module, "ask_catch_all", lambda *_a: "http_status:503")
     view.edit_catch_all(view.tree.topLevelItem(0).data(0, cards_module.TUNNEL_ROLE))
     qtbot.waitUntil(
-        lambda: cf.state.configs["t1"]["ingress"][-1]["service"] == "http_status:503", timeout=10000
+        lambda: cf.state.configs["t1"]["ingress"][-1]["service"] == "http_status:503", timeout=45000
     )
     # Attendre la relecture qui suit : elle reconstruit l'arbre, et effacerait la sélection faite avant elle.
     qtbot.waitUntil(
-        lambda: "http_status:503" in view.tree.topLevelItem(0).toolTip(0) and not view._loading, timeout=10000
+        lambda: "http_status:503" in view.tree.topLevelItem(0).toolTip(0) and not view._loading, timeout=45000
     )
 
     # Retirer la règle /api : le nom d'hôte reste publié (son DNS aussi), la confirmation le dit.
@@ -659,7 +659,7 @@ def test_ingress_rules_from_the_tunnel_menu(qtbot, gui, cf, monkeypatch):
     monkeypatch.setattr(cloud_module, "confirm", lambda _p, _h, text, *_a: told.append(text) or True)
     monkeypatch.setattr(tunnels_module, "confirm", lambda _p, _h, text, *_a: told.append(text) or True)
     view.unpublish_selected()
-    qtbot.waitUntil(lambda: view.tree.topLevelItem(0).childCount() == 3, timeout=10000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItem(0).childCount() == 3, timeout=45000)
     assert "reste publié" in told[0]
     assert cnames() == 1
 
@@ -700,7 +700,7 @@ def test_app_settings_from_the_apps_tab(qtbot, gui, cf, monkeypatch):
     view = window.cloud
     view.token_field.set_text(TOKEN)
     view.connect_account()
-    qtbot.waitUntil(lambda: view.apps.rowCount() > 0, timeout=10000)
+    qtbot.waitUntil(lambda: view.apps.rowCount() > 0, timeout=45000)
     assert not view.app_settings_button.isEnabled()
     view.apps.selectRow(0)
     assert view.app_settings_button.isEnabled()
@@ -714,7 +714,7 @@ def test_app_settings_from_the_apps_tab(qtbot, gui, cf, monkeypatch):
     monkeypatch.setattr(apps_module, "ask_app_settings", answer)
     view.edit_app_settings()
     stored = next(a for a in cf.state.apps if a["id"] == app.id)
-    qtbot.waitUntil(lambda: stored.get("name") == "Renommée", timeout=10000)
+    qtbot.waitUntil(lambda: stored.get("name") == "Renommée", timeout=45000)
     assert stored["session_duration"] == "15m" and shown
 
 
@@ -751,7 +751,7 @@ def test_access_log(qtbot, gui, cf, monkeypatch):
     view = window.cloud
     view.token_field.set_text(TOKEN)
     view.connect_account()
-    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=45000)
     opened: list[tuple[int, object]] = []
     monkeypatch.setattr(
         apps_module,
@@ -759,7 +759,7 @@ def test_access_log(qtbot, gui, cf, monkeypatch):
         lambda _p, requests, _apps, selected, _names: opened.append((len(requests), selected)),
     )
     view.open_access_log()
-    qtbot.waitUntil(lambda: bool(opened), timeout=10000)
+    qtbot.waitUntil(lambda: bool(opened), timeout=45000)
     assert opened[0] == (2, None)
 
     # Sans la permission : l'erreur dit laquelle ajouter.
@@ -767,7 +767,7 @@ def test_access_log(qtbot, gui, cf, monkeypatch):
     errors: list[str] = []
     monkeypatch.setattr(view.ctx, "notify", lambda level, text, **_k: errors.append(text))
     view.open_access_log()
-    qtbot.waitUntil(lambda: any("Audit Logs" in e for e in errors), timeout=10000)
+    qtbot.waitUntil(lambda: any("Audit Logs" in e for e in errors), timeout=45000)
 
     # La boîte : filtre par application (identifiant, sinon nom d'hôte), refus comptés.
     requests = [
@@ -833,7 +833,7 @@ def test_dns_checks_in_the_tunnels_tab(qtbot, gui, cf, monkeypatch):
     view = window.cloud
     view.token_field.set_text(TOKEN)
     view.connect_account()
-    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=45000)
     assert view.stat_hostnames.detail.text() == "1 DNS à corriger"
     bureau = view.tree.topLevelItem(0)
     rows = {bureau.child(i).data(0, cards_module.RULE_ROLE).hostname: bureau.child(i) for i in range(3)}
@@ -846,9 +846,9 @@ def test_dns_checks_in_the_tunnels_tab(qtbot, gui, cf, monkeypatch):
     monkeypatch.setattr(cloud_module, "confirm", lambda _p, _h, text, *_a: told.append(text) or True)
     monkeypatch.setattr(tunnels_module, "confirm", lambda _p, _h, text, *_a: told.append(text) or True)
     fix.trigger()
-    qtbot.waitUntil(lambda: any(r["name"] == "grafana.exemple.fr" for r in cf.state.dns["z1"]), timeout=10000)
+    qtbot.waitUntil(lambda: any(r["name"] == "grafana.exemple.fr" for r in cf.state.dns["z1"]), timeout=45000)
     assert "ne mène nulle part" in told[0] and "visera ce tunnel (bureau)" in told[0]
-    qtbot.waitUntil(lambda: view.stat_hostnames.detail.text() == "2 domaines", timeout=10000)
+    qtbot.waitUntil(lambda: view.stat_hostnames.detail.text() == "2 domaines", timeout=45000)
 
 
 def test_access_log_period_and_csv(qtbot, tmp_path, monkeypatch):

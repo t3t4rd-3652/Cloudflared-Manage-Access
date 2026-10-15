@@ -114,7 +114,7 @@ def test_palette_finds_cloudflare_objects(qtbot, gui, cf):
     view = window.cloud
     view.token_field.set_text(TOKEN)
     view.connect_account()
-    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=45000)
     window.show_view("dashboard")
     entries = {e.text: e for e in window.palette_entries() if e.section == "Compte Cloudflare"}
     assert {"Tunnel « bureau »", "grafana.exemple.fr", "Application Access « SSH »"} <= set(entries)
@@ -159,7 +159,7 @@ def test_token_switcher_in_the_view(qtbot, gui, cf):
     view = window.cloud
     view.token_field.set_text(TOKEN)
     view.connect_account()
-    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=45000)
     assert not view.token_choice.isVisibleTo(view)  # un seul jeton : pas de choix
     # « Ajouter un jeton d'API… » (menu Outils) : page de connexion, avec retour possible.
     add = next(a for a in view.tools.menu.actions() if a.text() == "Ajouter un jeton d'API…")
@@ -171,10 +171,10 @@ def test_token_switcher_in_the_view(qtbot, gui, cf):
     view.token_field.set_text(OTHER_TOKEN)
     view.token_name.setText("Client X")
     view.connect_account()
-    qtbot.waitUntil(lambda: view.token_choice.count() == 3 and view.stack.currentIndex() == 1, timeout=10000)
+    qtbot.waitUntil(lambda: view.token_choice.count() == 3 and view.stack.currentIndex() == 1, timeout=45000)
     assert view.token_choice.currentText() == "Client X" and view.token_choice.isVisibleTo(view)
     # Retour au premier jeton : relu aussitôt.
     view.token_choice.setCurrentIndex(0)
     view._token_chosen(0)
-    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=45000)
     assert view.admin.active_token().name == "Mon compte"

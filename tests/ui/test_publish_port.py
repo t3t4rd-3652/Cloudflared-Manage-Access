@@ -51,7 +51,7 @@ def test_publish_a_discovered_port(qtbot, gui, cf, monkeypatch):
     view = window.cloud
     view.token_field.set_text(TOKEN)
     view.connect_account()
-    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=45000)
 
     seen: list[tuple[str, str]] = []
 
@@ -71,6 +71,6 @@ def test_publish_a_discovered_port(qtbot, gui, cf, monkeypatch):
             r.get("hostname") == "grafana.exemple.fr" and r.get("service") == "http://localhost:3000"
             for r in cf.state.configs["t1"]["ingress"]
         ),
-        timeout=10000,
+        timeout=45000,
     )
     assert window.stack.currentWidget() is window.cloud

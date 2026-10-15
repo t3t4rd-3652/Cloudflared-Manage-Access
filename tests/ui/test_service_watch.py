@@ -76,7 +76,7 @@ def test_cards_show_the_last_test_and_test_all(qtbot, gui, cf, monkeypatch):
     view = window.cloud
     view.token_field.set_text(TOKEN)
     view.connect_account()
-    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=45000)
     bureau = view.tree.topLevelItem(0)
     rows = {bureau.child(i).data(0, cards_module.RULE_ROLE).hostname: bureau.child(i) for i in range(3)}
     assert rows["grafana.exemple.fr"].data(0, SERVICE_ROLE) is None

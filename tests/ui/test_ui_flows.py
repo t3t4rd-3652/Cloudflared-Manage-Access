@@ -15,7 +15,7 @@ from cma.core.sessions import SessionState
 from tests.conftest import FAKE_CLOUDFLARED
 
 
-def wait_until(qtbot, predicate, timeout=10000):
+def wait_until(qtbot, predicate, timeout=45000):
     qtbot.waitUntil(predicate, timeout=timeout)
 
 

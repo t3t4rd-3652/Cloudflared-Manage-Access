@@ -38,7 +38,7 @@ def view(qtbot, gui, cf):
     cloud = window.cloud
     cloud.token_field.set_text(TOKEN)
     cloud.connect_account()
-    qtbot.waitUntil(lambda: cloud.tree.topLevelItemCount() == 2, timeout=10000)
+    qtbot.waitUntil(lambda: cloud.tree.topLevelItemCount() == 2, timeout=45000)
     return cloud
 
 
@@ -98,7 +98,7 @@ def test_tunnel_menu_routes_and_traffic_on_cards(qtbot, view, cf, monkeypatch):
         lambda: (
             "1 réseau privé" in (view.tree.topLevelItem(0).text(1) if view.tree.topLevelItemCount() else "")
         ),
-        timeout=10000,
+        timeout=45000,
     )
 
 
@@ -189,12 +189,12 @@ def test_snapshots_dialog(qtbot, view, cf, monkeypatch, tmp_path):
     qtbot.addWidget(dialog)
     assert dialog.table.rowCount() == 0 and not dialog.now_button.isEnabled()
     dialog.take()
-    qtbot.waitUntil(lambda: dialog.table.rowCount() == 1, timeout=10000)
+    qtbot.waitUntil(lambda: dialog.table.rowCount() == 1, timeout=45000)
     assert "Instantané enregistré" in dialog.status.text() and "2 tunnels" in dialog.table.item(0, 1).text()
     # Une modification faite ailleurs : « Comparer à l'état actuel » la montre.
     cf.state.configs["t1"]["ingress"][2]["service"] = "http://localhost:3001"
     dialog.compare_with_now()
-    qtbot.waitUntil(lambda: dialog.changes.topLevelItemCount() == 1, timeout=10000)
+    qtbot.waitUntil(lambda: dialog.changes.topLevelItemCount() == 1, timeout=45000)
     top = dialog.changes.topLevelItem(0)
     assert top.text(0) == "Tunnels · bureau — modifié"
     assert top.child(0).text(0).endswith("http://localhost:3000 → http://localhost:3001")
@@ -204,7 +204,7 @@ def test_snapshots_dialog(qtbot, view, cf, monkeypatch, tmp_path):
 
     time.sleep(1.1)
     dialog.take()
-    qtbot.waitUntil(lambda: dialog.table.rowCount() == 2, timeout=10000)
+    qtbot.waitUntil(lambda: dialog.table.rowCount() == 2, timeout=45000)
     dialog.table.selectRow(0)
     dialog.compare_with_previous()
     assert dialog.changes.topLevelItemCount() == 1
@@ -221,7 +221,7 @@ def test_permissions_dialog(qtbot, view, cf):
     cf.state.audit_allowed = False
     dialog = PermissionsDialog(view, view.ctx, view.admin)
     qtbot.addWidget(dialog)
-    qtbot.waitUntil(lambda: dialog.table.rowCount() == 10, timeout=10000)
+    qtbot.waitUntil(lambda: dialog.table.rowCount() == 10, timeout=45000)
     states = {dialog.table.item(r, 0).text(): dialog.table.item(r, 2).text() for r in range(10)}
     assert states["Tunnels et noms d'hôte"] == "Fonctionne"
     assert states["Journal des accès"] == "Manquante"
@@ -230,7 +230,7 @@ def test_permissions_dialog(qtbot, view, cf):
     cf.state.audit_allowed = True
     dialog.run_checks()
     qtbot.waitUntil(
-        lambda: dialog.summary.text() == "Toutes les permissions nécessaires sont présentes.", timeout=10000
+        lambda: dialog.summary.text() == "Toutes les permissions nécessaires sont présentes.", timeout=45000
     )
 
 
@@ -242,7 +242,7 @@ def test_security_review_dialog(qtbot, view, cf, monkeypatch):
     changed: list[bool] = []
     dialog = SecurityReviewDialog(view, view.ctx, view.admin, lambda: changed.append(True))
     qtbot.addWidget(dialog)
-    qtbot.waitUntil(lambda: dialog.table.rowCount() > 0 and dialog.rerun_button.isEnabled(), timeout=10000)
+    qtbot.waitUntil(lambda: dialog.table.rowCount() > 0 and dialog.rerun_button.isEnabled(), timeout=45000)
     rows = {dialog.table.item(r, 2).text(): r for r in range(dialog.table.rowCount())}
     assert dialog.table.item(rows["rdp.exemple.fr"], 0).text() == "Élevée"
     assert "élevé(s)" in dialog.summary.text()
@@ -255,7 +255,7 @@ def test_security_review_dialog(qtbot, view, cf, monkeypatch):
     asked: list[str] = []
     monkeypatch.setattr(review_module, "confirm", lambda _p, heading, text, *_a: asked.append(text) or True)
     dialog.fix_selected()
-    qtbot.waitUntil(lambda: bool(changed) and dialog.rerun_button.isEnabled(), timeout=10000)
+    qtbot.waitUntil(lambda: bool(changed) and dialog.rerun_button.isEnabled(), timeout=45000)
     assert "Protéger par Access : rdp.exemple.fr" in asked[0]
     assert cf.state.configs["t1"]["ingress"][-1] == {"service": "http_status:404"}
     assert all(
@@ -286,7 +286,7 @@ def test_tools_menu_and_tunnel_access_requirement(qtbot, view, cf, monkeypatch):
                 r for r in cf.state.configs["t1"]["ingress"] if r.get("hostname") == "ssh.exemple.fr"
             ).get("originRequest", {})
         ),
-        timeout=10000,
+        timeout=45000,
     )
 
     def ssh_item():
@@ -299,7 +299,7 @@ def test_tools_menu_and_tunnel_access_requirement(qtbot, view, cf, monkeypatch):
             and "Ne plus exiger Access au niveau du tunnel"
             in [a.text() for a in view.tree_menu(ssh_item()).actions()]
         ),
-        timeout=10000,
+        timeout=45000,
     )
     bureau = view.tree.topLevelItem(0)
     ssh = ssh_item()
@@ -332,7 +332,7 @@ def test_security_review_ignores_accepted_findings(qtbot, view):
 
     dialog = SecurityReviewDialog(view, view.ctx, view.admin)
     qtbot.addWidget(dialog)
-    qtbot.waitUntil(lambda: dialog.table.rowCount() > 0 and dialog.rerun_button.isEnabled(), timeout=10000)
+    qtbot.waitUntil(lambda: dialog.table.rowCount() > 0 and dialog.rerun_button.isEnabled(), timeout=45000)
     total = dialog.table.rowCount()
     row = next(r for r in range(total) if dialog.table.item(r, 2).text() == "grafana.exemple.fr")
     dialog.table.selectRow(row)

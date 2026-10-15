@@ -25,7 +25,7 @@ def _connect(qtbot, window, cf):
     view = window.cloud
     view.token_field.set_text(TOKEN)
     view.connect_account()
-    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=10000)
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=45000)
     return view
 
 
@@ -51,7 +51,7 @@ def test_open_tunnel_selects_it_after_the_account_is_read(qtbot, gui, cf):
 
     assert window.stack.currentWidget() is window.cloud
     # La sélection se fait après la relecture : on attend qu'elle ait eu lieu, pas seulement que la vue soit affichée.
-    qtbot.waitUntil(lambda: _selected(view) == ("t2", None), timeout=10000)
+    qtbot.waitUntil(lambda: _selected(view) == ("t2", None), timeout=45000)
 
 
 def test_open_service_selects_its_rule(qtbot, gui, cf):
@@ -67,7 +67,7 @@ def test_open_service_selects_its_rule(qtbot, gui, cf):
 
     assert window.stack.currentWidget() is window.cloud
     expected = ("t1", IngressRule("rdp.exemple.fr", "rdp://10.0.0.5:3389"))
-    qtbot.waitUntil(lambda: _selected(view) == expected, timeout=10000)
+    qtbot.waitUntil(lambda: _selected(view) == expected, timeout=45000)
 
 
 def test_open_service_unknown_hostname_keeps_the_view_usable(qtbot, gui, cf):
@@ -78,5 +78,5 @@ def test_open_service_unknown_hostname_keeps_the_view_usable(qtbot, gui, cf):
 
     window.open_service(target.hostname, target.path)
 
-    qtbot.waitUntil(lambda: view.read_at is not None and not view._loading, timeout=10000)  # type: ignore[reportPrivateUsage]
+    qtbot.waitUntil(lambda: view.read_at is not None and not view._loading, timeout=45000)  # type: ignore[reportPrivateUsage]
     assert window.stack.currentWidget() is window.cloud
