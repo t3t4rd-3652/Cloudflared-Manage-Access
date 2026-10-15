@@ -224,7 +224,7 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   (`ask_*`, `show_*`) que les tests remplacent ; `exec()` bloquerait le test jusqu'au délai de 180 s.
 - **Jours locaux de la disponibilité** (`cma.core.availability`, `availability.json` en version 2) : le jour d'un
   relevé est sa date locale ; les jours enregistrés avant la version 2 (UTC) gardent leur date, sans conversion
-  possible. Le fuseau (`tz`) est un paramètre de `record`, `stats`, `daily`, `report`… pour les tests ; `tzdata`
+  possible. Le fuseau (`tz`) est un paramètre de `record_check`, `stats`, `daily`, `report`… pour les tests ; `tzdata`
   n'est pas installé sous Windows : tester avec des fuseaux fixes (`timezone(timedelta(hours=…))`) ou une petite
   classe `tzinfo` simulée (changement d'heure), jamais `ZoneInfo`.
 - **Maintenance, rappels et résumé** (`cma.core.monitoring`, `alertstate`, `digest`) : une maintenance hebdomadaire
@@ -261,6 +261,9 @@ Qt et PySide :
 - Dans un délégué, l'index peut être un `QPersistentModelIndex` sans `siblingAtColumn` pour pyright :
   passer par `index.model().index(row, column, index.parent())`.
 - `tr()` exige un texte littéral (le test d'i18n extrait les chaînes par analyse statique).
+- `cma.ui.a11y.accessible_name` lit l'interface d'accessibilité : pour une `QComboBox` non modifiable, Windows
+  annonce le nom posé, Linux et macOS le texte affiché. Un test compare `widget.accessibleName()` à la valeur
+  attendue, et ne demande à l'interface qu'un nom non vide (échec en CI seulement, 2026-10-14).
 - Un `QLabel` à retour à la ligne annonce une largeur minimale élevée : dans un en-tête, il bloque le rétrécissement
   de toute la fenêtre. Lui donner une petite `setMinimumWidth` explicite.
 - Un attribut `self.actions` sur un QWidget masque la méthode `actions()` de Qt (pyright le signale).

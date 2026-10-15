@@ -598,7 +598,8 @@ Statut : EN COURS
 
 ### Dette technique à surveiller
 
-- Disponibilité : le journal agrège les relevés par jour UTC (`AvailabilityLog`), alors que le graphique et les
+- (Archivé le 2026-10-14 : résolu par P23.) Disponibilité : le journal agrégeait les relevés par jour UTC
+  (`AvailabilityLog`), alors que le graphique et les
   incidents s'affichent en heure locale. Un incident vers minuit (heure de Paris) peut colorer la barre de la veille.
   Le corriger demande d'agréger par jour local, donc de migrer `availability.json`.
 - La couverture du cœur est juste au-dessus du seuil : chaque nouveau module de `cma.core` arrive avec ses tests.

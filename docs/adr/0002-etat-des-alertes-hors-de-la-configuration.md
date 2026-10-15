@@ -20,3 +20,6 @@ journal de disponibilité, la tâche planifiée n'écrit que si CMA est fermé.
 - Ni la configuration ni le journal ne changent de format pour ces envois ; un export de configuration ne transporte
   pas d'état d'envoi.
 - Un fichier illisible ou absent vaut un état vide : au pire, un rappel ou un résumé part une fois de trop.
+- Aucun verrou entre CMA et la tâche planifiée : si CMA démarre pendant qu'une tâche envoie (son premier relevé
+  vient 20 s après le lancement), le même rappel ou le même résumé peut partir deux fois. Risque accepté : la
+  fenêtre est de quelques secondes, et un envoi en double ne fait rien perdre.
