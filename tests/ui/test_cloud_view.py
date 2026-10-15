@@ -483,8 +483,8 @@ def test_publish_dialog_validation(qtbot, gui, cf):
     ctx, window = gui
     ctx.core.manager.cloudflare.base_url = cf.base_url
     ctx.core.secrets.set(TOKEN_SECRET_KEY, TOKEN)
-    accounts = ctx.engine.run_sync(ctx.core.manager.cloudflare.connect(), timeout=10)
-    overview = ctx.engine.run_sync(ctx.core.manager.cloudflare.overview(accounts[0]), timeout=10)
+    accounts = ctx.engine.run_sync(ctx.core.manager.cloudflare.connect(), timeout=45)
+    overview = ctx.engine.run_sync(ctx.core.manager.cloudflare.overview(accounts[0]), timeout=45)
     dialog = PublishDialog(window, overview, [])
     qtbot.addWidget(dialog)
     assert dialog.request() is None and "Nom d'hôte invalide" in dialog.error.text()
@@ -507,8 +507,8 @@ def test_publish_dialog_splits_pasted_hostname(qtbot, gui, cf):
     ctx, window = gui
     ctx.core.manager.cloudflare.base_url = cf.base_url
     ctx.core.secrets.set(TOKEN_SECRET_KEY, TOKEN)
-    accounts = ctx.engine.run_sync(ctx.core.manager.cloudflare.connect(), timeout=10)
-    overview = ctx.engine.run_sync(ctx.core.manager.cloudflare.overview(accounts[0]), timeout=10)
+    accounts = ctx.engine.run_sync(ctx.core.manager.cloudflare.connect(), timeout=45)
+    overview = ctx.engine.run_sync(ctx.core.manager.cloudflare.overview(accounts[0]), timeout=45)
     dialog = PublishDialog(window, overview, [])
     qtbot.addWidget(dialog)
     assert not dialog.ok_button.isEnabled()

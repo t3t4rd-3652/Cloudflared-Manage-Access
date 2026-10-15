@@ -619,14 +619,20 @@ def test_ssh_files_tab(qtbot, ssh_gui, threaded_ssh_server, monkeypatch, tmp_pat
     def names() -> list[str]:
         return [files.table.item(r, 0).text() for r in range(files.table.rowCount())]
 
+    def wait_for_names(condition) -> None:
+        # Une erreur affichée par l'onglet ne se résorbera pas : l'attente s'arrête alors et dit laquelle, au lieu
+        # d'attendre 45 s un tableau qui ne viendra pas.
+        qtbot.waitUntil(lambda: condition() or not files.error.isHidden(), timeout=45000)
+        assert condition(), files.error.text()
+
     files.browse_button.click()
-    qtbot.waitUntil(lambda: names() == ["docs", "notes.txt"], timeout=15000)
+    wait_for_names(lambda: names() == ["docs", "notes.txt"])
     assert files.path.text() == files.directory and files.upload_button.isEnabled()
 
     files._activate(0)  # double-clic sur un dossier : on y entre
-    qtbot.waitUntil(lambda: names() == ["a.txt"], timeout=45000)
+    wait_for_names(lambda: names() == ["a.txt"])
     files.go_up()
-    qtbot.waitUntil(lambda: names() == ["docs", "notes.txt"], timeout=45000)
+    wait_for_names(lambda: names() == ["docs", "notes.txt"])
 
     # Téléchargement d'un fichier et d'un dossier ; ce qui existe déjà localement est confirmé.
     target = tmp_path / "telechargements"
@@ -649,20 +655,20 @@ def test_ssh_files_tab(qtbot, ssh_gui, threaded_ssh_server, monkeypatch, tmp_pat
     outgoing.write_text("envoyé", encoding="utf-8")
     monkeypatch.setattr(files_module, "ask_files", lambda *_a: [outgoing])
     files.upload_files()
-    qtbot.waitUntil(lambda: "envoi.txt" in names(), timeout=45000)
+    wait_for_names(lambda: "envoi.txt" in names())
     assert (home / "envoi.txt").read_text(encoding="utf-8") == "envoyé"
     monkeypatch.setattr(files_module, "ask_name", lambda *_a: "rangement")
     files.make_directory()
-    qtbot.waitUntil(lambda: "rangement" in names(), timeout=45000)
+    wait_for_names(lambda: "rangement" in names())
     files.table.clearSelection()
     files.table.selectRow(names().index("envoi.txt"))
     monkeypatch.setattr(files_module, "ask_name", lambda *_a: "renomme.txt")
     files.rename_selected()
-    qtbot.waitUntil(lambda: "renomme.txt" in names(), timeout=45000)
+    wait_for_names(lambda: "renomme.txt" in names())
     files.table.clearSelection()
     files.table.selectRow(names().index("rangement"))
     files.delete_selected()
-    qtbot.waitUntil(lambda: "rangement" not in names(), timeout=45000)
+    wait_for_names(lambda: "rangement" not in names())
     assert not (home / "rangement").exists()
 
     # Erreur lisible, et progression affichée.

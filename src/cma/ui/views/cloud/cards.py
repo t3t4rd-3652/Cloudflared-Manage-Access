@@ -116,6 +116,10 @@ class StatTile(QFrame):
         self.value = QLabel("—")
         self.value.setStyleSheet("font-size: 18pt; font-weight: 600;")
         self.caption = label(caption, "muted")
+        # Une légende longue (« Nombres de host publicados ») passe à la ligne au lieu d'être rognée ; la largeur
+        # minimale explicite évite qu'un QLabel à retour à la ligne bloque le rétrécissement de la fenêtre.
+        self.caption.setWordWrap(True)
+        self.caption.setMinimumWidth(60)
         self.detail = label("", "meta")
         texts.addWidget(self.value)
         texts.addWidget(self.caption)
