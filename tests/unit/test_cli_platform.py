@@ -271,3 +271,12 @@ def test_autostart_linux_desktop_file(monkeypatch, tmp_path):
 def test_launch_command_frozen(monkeypatch):
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     assert autostart.launch_command() == [sys.executable, "--minimized"]
+
+
+def test_days_and_month_are_exclusive(paths, capsys):
+    """`cma availability` : une période glissante ou un mois civil, jamais les deux (argparse refuse, code 2)."""
+    with pytest.raises(SystemExit) as stop:
+        build_parser().parse_args(
+            ["--data-dir", str(paths.data_dir), "availability", "--days", "7", "--month", "2026-09"]
+        )
+    assert stop.value.code == 2 and "--month" in capsys.readouterr().err

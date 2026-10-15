@@ -101,8 +101,11 @@ def build_parser() -> argparse.ArgumentParser:
         "availability",
         help=tr("disponibilité des tunnels et services relevés (code 2 si un incident est en cours)"),
     )
-    availability.add_argument("--days", type=int, default=30, choices=(1, 7, 30, 90))
-    availability.add_argument(
+    period = (
+        availability.add_mutually_exclusive_group()
+    )  # une période glissante ou un mois civil, pas les deux
+    period.add_argument("--days", type=int, default=30, choices=(1, 7, 30, 90))
+    period.add_argument(
         "--month",
         metavar="AAAA-MM",
         help=tr(

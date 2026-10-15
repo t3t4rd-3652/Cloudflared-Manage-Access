@@ -244,3 +244,99 @@ def test_availability_chart_and_export(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(availability_module, "ask_report_path", lambda _p, _d: csv_path)
     dialog.export_report()
     assert csv_path.read_text(encoding="utf-8-sig").startswith("Objet;Type")
+
+
+def test_maintenance_badge_on_cards(qtbot, gui, cf):
+    """Pastille « Maintenance » (P29) : un tunnel et ses noms d'hôte en maintenance la portent avec la fin et le
+    libellé en info-bulle ; elle disparaît hors fenêtre ; une maintenance de tout le compte couvre tout."""
+    from cma.core.models import MaintenanceWindow
+    from cma.ui.views.cloud.cards import MAINTENANCE_ROLE, TUNNEL_ROLE
+
+    ctx, window = gui
+    ctx.core.manager.cloudflare.base_url = cf.base_url
+    window.show_view("cloud")
+    window.show()
+    view = window.cloud
+    view.token_field.set_text(TOKEN)
+    view.connect_account()
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=45000)
+    first, second = view.tree.topLevelItem(0), view.tree.topLevelItem(1)
+    assert first.childCount() >= 1
+    first_id = first.data(0, TUNNEL_ROLE).id
+
+    def covered(item) -> bool:
+        return bool(item.data(0, MAINTENANCE_ROLE))
+
+    def anywhere() -> bool:
+        return any(
+            covered(item)
+            for top in (first, second)
+            for item in [top, *(top.child(i) for i in range(top.childCount()))]
+        )
+
+    assert not anywhere()
+    today = datetime.now().astimezone().weekday()
+    # Une journée entière, aujourd'hui, sur le premier tunnel : lui et ses noms d'hôte, pas l'autre.
+    ctx.update_config(
+        lambda c: c.settings.maintenance_windows.append(
+            MaintenanceWindow(
+                weekday=today, start="00:00", end="00:00", target=f"tunnel:{first_id}", label="Mises à jour"
+            )
+        )
+    )
+    view.show_maintenance()
+    assert covered(first) and all(covered(first.child(i)) for i in range(first.childCount()))
+    assert not covered(second) and not any(covered(second.child(i)) for i in range(second.childCount()))
+    tip = first.toolTip(0)
+    assert "Maintenance en cours jusqu'à " in tip and "Mises à jour" in tip and "Tunnel " in tip
+    assert "Mises à jour" in first.child(0).toolTip(0) and "→" in first.child(0).toolTip(0)
+    # Les pastilles sont bien peintes : la carte change.
+    covered_image = view.tree.grab().toImage()
+    ctx.update_config(lambda c: setattr(c.settings, "maintenance_windows", []))
+    view.show_maintenance()
+    assert not anywhere() and "Maintenance" not in first.toolTip(0)
+    assert view.tree.grab().toImage() != covered_image
+    # Une fenêtre un autre jour ne couvre rien.
+    ctx.update_config(
+        lambda c: c.settings.maintenance_windows.append(
+            MaintenanceWindow(weekday=(today + 3) % 7, start="00:00", end="00:00")
+        )
+    )
+    view.show_maintenance()
+    assert not anywhere()
+    # Tout le compte, vu par un relevé de la surveillance (Monitor.refresh) sans relire le compte.
+    ctx.update_config(
+        lambda c: setattr(
+            c.settings, "maintenance_windows", [MaintenanceWindow(weekday=today, start="00:00", end="00:00")]
+        )
+    )
+    window.monitor.refresh()
+    assert covered(first) and covered(second) and covered(second.child(0))
+    assert (
+        "Maintenance en cours jusqu'à " in second.toolTip(0)
+        and ":" not in second.toolTip(0).split("à ")[-1][5:]
+    )
+
+
+def test_maintenance_badge_after_a_reread(qtbot, gui, cf):
+    """La pastille se pose aussi quand le compte est relu (`fill`), sans relevé de la surveillance."""
+    from cma.core.models import MaintenanceWindow
+    from cma.ui.views.cloud.cards import MAINTENANCE_ROLE
+
+    ctx, window = gui
+    ctx.core.manager.cloudflare.base_url = cf.base_url
+    window.show_view("cloud")
+    view = window.cloud
+    ctx.update_config(
+        lambda c: c.settings.maintenance_windows.append(
+            MaintenanceWindow(weekday=datetime.now().astimezone().weekday(), start="00:00", end="00:00")
+        )
+    )
+    view.token_field.set_text(TOKEN)
+    view.connect_account()
+    qtbot.waitUntil(lambda: view.tree.topLevelItemCount() == 2, timeout=45000)
+    first = view.tree.topLevelItem(0)
+    assert first.data(0, MAINTENANCE_ROLE) and first.child(0).data(0, MAINTENANCE_ROLE)
+    # Sans libellé : l'info-bulle ne garde que la fin.
+    assert first.data(0, MAINTENANCE_ROLE).startswith("Maintenance en cours jusqu'à ")
+    assert ":" not in first.data(0, MAINTENANCE_ROLE).split(" : ")[-1][-1:]
