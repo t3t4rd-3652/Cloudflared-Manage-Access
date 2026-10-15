@@ -55,7 +55,9 @@ class SendsDialog(QDialog):
         self.table = data_table(
             [tr("Date"), tr("Canal"), tr("Nature"), tr("Objet"), tr("Résultat")], tr("Envois récents")
         )
-        for column, width in enumerate((140, 190, 80, 190)):
+        for column, width in enumerate(
+            (140, 180, 140, 180)
+        ):  # « Nature » : « Zusammenfassung », « Wiederherstellung »
             self.table.horizontalHeader().resizeSection(column, width)
         self.table.setWordWrap(True)
         self.table.verticalHeader().setMinimumSectionSize(36)

@@ -34,10 +34,11 @@ from cma.core.prompts import NonInteractivePrompter
 from cma.core.secrets import MemorySecretStore
 from cma.core.sessions import SessionInfo, SessionKind, SessionState
 from cma.core.ssh.discovery import DiscoveryResult, RemotePort
-from cma.i18n import set_language
+from cma.i18n import set_language, tr
 from cma.paths import AppPaths
 from cma.ui.bridge import EngineBridge, TaskRunner
 from cma.ui.context import GuiContext
+from cma.ui.states import plural
 from cma.ui.theme import ThemeManager
 
 
@@ -388,7 +389,11 @@ def capture_guide(window, output: Path) -> None:
             SnapshotChange("routes", "r2", "192.168.10.0/24", "added"),
         ]
     )
-    snapshots.status.setText("3 changements depuis le 08/10/2026 10:00.")
+    snapshots.status.setText(
+        tr("{changes} depuis le {date}.").format(
+            changes=plural(3, tr("{n} changement"), tr("{n} changements")), date="08/10/2026 10:00"
+        )
+    )
     save(snapshots, "guide-instantanes.png")
     profile = next(p for p in ctx.config().cloudflare_profiles if p.name == "MongoDB production")
     save(ShareDialog(window, ctx, profile), "guide-partager.png")
@@ -432,8 +437,10 @@ def capture_guide(window, output: Path) -> None:
         [t for t in ctx.config().tokens if t.client_id in remote],
         hostname="grafana",
         service="https://localhost:3000",
-        note="Le service est joint depuis le connecteur du tunnel : choisissez le tunnel dont cloudflared tourne "
-        "sur « NAS » (sinon, remplacez localhost par l'adresse du serveur).",
+        note=tr(
+            "Le service est joint depuis le connecteur du tunnel : choisissez le tunnel dont cloudflared tourne "
+            "sur « {server} » (sinon, remplacez localhost par l'adresse du serveur)."
+        ).format(server="NAS"),
     )
     save(publish, "guide-publier-port.png")
     capture_guide_alerts(window, output)
