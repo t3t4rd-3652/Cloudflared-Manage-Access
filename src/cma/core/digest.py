@@ -74,6 +74,13 @@ def truncate(text: str, limit: int = LIMIT) -> str:
     return cut.rstrip() + "…"
 
 
+def watched(config: Config, kind: str) -> bool:
+    """La surveillance de ce type d'objet (« tunnel » ou « service ») est-elle active ? Un incident d'un type qui
+    n'est plus relevé n'est ni rappelé ni annoncé « en cours » : il ne se clôt plus de lui-même."""
+    settings = config.settings
+    return settings.watch_tunnels if kind == "tunnel" else settings.watch_services
+
+
 def build_digest(
     log: AvailabilityLog, config: Config, now: datetime | None = None, tz: tzinfo | None = None
 ) -> Alert:
@@ -82,7 +89,7 @@ def build_digest(
     local = moment.astimezone(tz)
     rows, incidents = build(log, DAYS, moment, tz)
     rows = [r for r in rows if r.stats.checks or r.incidents]
-    title = tr("CMA — semaine du {date}").format(date=(local - timedelta(days=DAYS)).strftime("%d/%m/%Y"))
+    title = tr("CMA — les 7 derniers jours, au {date}").format(date=local.strftime("%d/%m/%Y"))
     total = sum((r.downtime for r in rows), timedelta())
     count = sum(r.incidents for r in rows)
     head = [tr("Disponibilité sur 7 jours.")]
@@ -94,7 +101,7 @@ def build_digest(
         )
     else:
         head.append(tr("Aucun relevé sur la période : la surveillance n'a rien enregistré."))
-    still = [i.label for i in incidents if i.open]
+    still = [i.label for i in incidents if i.open and watched(config, i.kind)]
     if still:
         names = [_short(name) for name in still[:MAX_STILL]]
         if len(still) > MAX_STILL:

@@ -8,7 +8,7 @@ atomique. Comme pour le journal, la tâche planifiée n'écrit que si CMA est fe
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -28,6 +28,8 @@ class AlertState:
         self.path = path
         self.reminders: dict[str, str] = {}
         self.digest_week = ""
+        # Tunnel de chaque nom d'hôte (clé de service → identifiant du tunnel), d'après le dernier relevé connu.
+        self.tunnels: dict[str, str] = {}
         self.dirty = False
         try:
             data: Any = read_json_lenient(path) if path.exists() else {}
@@ -46,6 +48,13 @@ class AlertState:
         week = values.get("digest_week")
         if isinstance(week, str):
             self.digest_week = week
+        tunnels = values.get("tunnels")
+        if isinstance(tunnels, dict):
+            self.tunnels = {
+                str(key): value
+                for key, value in cast(dict[Any, Any], tunnels).items()
+                if isinstance(value, str)
+            }
 
     # --- Rappels ----------------------------------------------------------------------------------------------
 
@@ -71,6 +80,13 @@ class AlertState:
         if stale:
             self.dirty = True
 
+    def remember_tunnels(self, tunnel_of: Mapping[str, str]) -> None:
+        """Complète la correspondance nom d'hôte → tunnel avec celle d'un relevé (les anciennes clés restent)."""
+        changed = {key: value for key, value in tunnel_of.items() if self.tunnels.get(key) != value}
+        if changed:
+            self.tunnels.update(changed)
+            self.dirty = True
+
     # --- Résumé hebdomadaire ----------------------------------------------------------------------------------
 
     def mark_digest(self, week: str) -> None:
@@ -83,5 +99,7 @@ class AlertState:
         """Écrit le fichier s'il a changé (OSError si le dossier n'est pas accessible)."""
         if not self.dirty:
             return
-        atomic_write_json(self.path, {"reminders": self.reminders, "digest_week": self.digest_week})
+        atomic_write_json(
+            self.path, {"reminders": self.reminders, "digest_week": self.digest_week, "tunnels": self.tunnels}
+        )
         self.dirty = False

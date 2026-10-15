@@ -106,8 +106,22 @@ def test_window_targets():
 
 
 def test_default_time_zone_is_local():
-    config = config_with(*[MaintenanceWindow(weekday=d, start="00:00", end="00:00") for d in range(7)])
-    assert is_muted(config, "tunnel:t1")  # toute la semaine : vrai quel que soit le fuseau du poste
+    """Sans fuseau, l'heure du poste : un créneau d'une heure autour de l'heure locale actuelle joue, et ne joue
+    plus si on lit la même heure à 12 h de décalage."""
+    from datetime import UTC, datetime, timezone
+
+    now = datetime.now(UTC)
+    local = now.astimezone()
+    start = local.replace(minute=0, second=0, microsecond=0)
+    end = start + timedelta(hours=1)
+    window = MaintenanceWindow(
+        weekday=start.weekday(), start=start.strftime("%H:%M"), end=end.strftime("%H:%M")
+    )
+    config = config_with(window)
+    assert is_muted(config, "tunnel:t1", now=now)
+    offset = (local.utcoffset() or timedelta()) + timedelta(hours=12)
+    hours = (offset.total_seconds() / 3600 + 12) % 24 - 12  # ramené entre -12 et +12 h
+    assert not is_muted(config, "tunnel:t1", now=now, tz=timezone(timedelta(hours=hours)))
 
 
 def test_old_and_invalid_configuration():
@@ -166,6 +180,7 @@ def test_alert_state_roundtrip_and_no_useless_write(tmp_path: Path):
     assert json.loads(path.read_text(encoding="utf-8")) == {
         "reminders": {"tunnel:t1": "2026-10-14T06:00:00Z"},
         "digest_week": "2026-W42",
+        "tunnels": {},
     }
     assert not state.dirty
     again = AlertState(path)

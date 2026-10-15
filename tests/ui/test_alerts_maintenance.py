@@ -215,7 +215,7 @@ def test_monitor_digest_only_after_tunnel_checks(qtbot, gui_context, monkeypatch
     monitor.check_tunnels()
     qtbot.waitUntil(lambda: len(sent) == 1, timeout=5000)
     qtbot.waitUntil(lambda: not monitor._follow_up_running, timeout=5000)
-    assert sent[0].startswith("CMA — semaine du ")
+    assert sent[0].startswith("CMA — les 7 derniers jours, au ")
     assert AlertState(state_path(ctx.paths.data_dir)).digest_week == "2026-W42"
     monitor.check_tunnels()
     qtbot.waitUntil(lambda: not monitor.tunnel_check_running, timeout=5000)

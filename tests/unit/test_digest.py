@@ -57,7 +57,7 @@ def test_digest_content(tmp_path: Path):
     log = filled_log(tmp_path)
     log.start("tunnel", "tunnel:t1", "bureau", "down", MONDAY - timedelta(hours=1))
     alert = build_digest(log, config, MONDAY, UTC)
-    assert alert.title == "CMA — semaine du 05/10/2026"
+    assert alert.title == "CMA — les 7 derniers jours, au 12/10/2026"
     assert alert.level == "warning"
     lines = alert.text.splitlines()
     assert lines[0] == "Disponibilité sur 7 jours."
@@ -136,7 +136,7 @@ def test_digest_sent_once_per_week(tmp_path: Path):
 
     assert run(datetime(2026, 10, 12, 8, 0, tzinfo=UTC)) == [] and sent == []  # avant 9 h
     assert run(datetime(2026, 10, 12, 9, 0, tzinfo=UTC)) == []
-    assert [a.title for a in sent] == ["CMA — semaine du 05/10/2026"]
+    assert [a.title for a in sent] == ["CMA — les 7 derniers jours, au 12/10/2026"]
     assert AlertState(path).digest_week == "2026-W42"
     run(datetime(2026, 10, 12, 9, 5, tzinfo=UTC))  # relevé suivant : déjà envoyé
     run(datetime(2026, 10, 12, 18, 0, tzinfo=UTC))
@@ -234,5 +234,5 @@ def test_digest_figures_follow_the_given_time_zone(tmp_path: Path):
     assert "• bureau : 100 %" in in_utc.text.splitlines()
     ahead = build_digest(log, Config(), now, PARIS)  # PARIS = UTC+2 : déjà le 13, la fenêtre commence le 7
     assert "bureau" not in ahead.text and "Aucun relevé sur la période" in ahead.text
-    assert ahead.title == "CMA — semaine du 06/10/2026"  # le titre suit aussi le fuseau (13 - 7 jours)
-    assert in_utc.title == "CMA — semaine du 05/10/2026"
+    assert ahead.title == "CMA — les 7 derniers jours, au 13/10/2026"  # le titre suit aussi le fuseau
+    assert in_utc.title == "CMA — les 7 derniers jours, au 12/10/2026"

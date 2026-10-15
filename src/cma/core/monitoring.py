@@ -22,7 +22,7 @@ from cma.core.alerts import Alert, AlertError, elapsed_text, secret_key, send_al
 from cma.core.alertstate import AlertState
 from cma.core.availability import AvailabilityLog
 from cma.core.cfapi import Tunnel
-from cma.core.digest import build_digest, digest_due, week_id
+from cma.core.digest import build_digest, digest_due, watched, week_id
 from cma.core.hostprobe import HostProbe
 from cma.core.models import Config, MaintenanceWindow
 from cma.core.secrets import SecretStore
@@ -298,6 +298,8 @@ def reminder_events(
     period = timedelta(hours=hours)
     events: list[Event] = []
     for incident in opened:
+        if not watched(config, incident.kind):
+            continue
         elapsed = incident.duration(moment)
         last = state.last_reminder(incident.key)
         if (moment - last if last is not None else elapsed) < period:
@@ -360,7 +362,10 @@ def prepare_follow_up(
     """Rappels dus et, si `check_digest` et que le résumé est dû cette semaine, son contenu. Rapide et sans réseau :
     la fenêtre peut l'appeler sur son fil, puis envoyer (`deliver_follow_up`) dans un autre."""
     moment = now or datetime.now(UTC)
-    plan = FollowUp(state, reminder_events(log, config, state, moment, tz, tunnel_of))
+    # Tunnel de chaque nom d'hôte : mémorisé d'un relevé à l'autre, pour qu'une maintenance ou une sourdine du tunnel
+    # couvre ses noms même avant le premier relevé des services (démarrage, tâche planifiée sans services).
+    state.remember_tunnels(tunnel_of or {})
+    plan = FollowUp(state, reminder_events(log, config, state, moment, tz, state.tunnels))
     if check_digest and digest_due(config, state, moment, tz):
         plan.digest = build_digest(log, config, moment, tz)
         plan.week = week_id(moment.astimezone(tz))

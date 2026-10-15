@@ -13,7 +13,7 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
 | Configuration `config.json` | Ne contient aucun secret. |
 | Instantanés `snapshots/*.json` | Configuration du compte Cloudflare (règles, politiques, DNS, Client ID des tokens) ; aucun jeton ni secret. Les 30 derniers par compte. |
 | Disponibilité `availability.json` | Incidents et taux des tunnels et services (noms d'hôte, états, durées) ; 90 jours au plus. |
-| État des alertes `alert_state.json` | Dates des derniers rappels de pannes et semaine du dernier résumé hebdomadaire ; aucun secret. |
+| État des alertes `alert_state.json` | Dates des derniers rappels de pannes, semaine du dernier résumé hebdomadaire et tunnel de chaque nom d'hôte ; aucun secret. |
 | Rapport de disponibilité exporté | Mêmes données (noms d'hôte, taux, incidents), aucun jeton ni secret. La page HTML est autonome : ni script ni ressource externe. |
 | Adresses des canaux d'alerte | Coffre du système (clé `alert:<id>`) : une adresse ntfy, Slack ou Teams vaut un jeton. |
 | Historique `history.json` | Nom des accès, horaires, compteurs et messages d'incident déjà masqués ; 90 jours au plus, effaçable depuis CMA. |

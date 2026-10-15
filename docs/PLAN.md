@@ -1,7 +1,7 @@
 # Plan du projet
 
-État au 2026-10-14, version **2.11.0** (P13 à P22 : bilan de sécurité, disponibilité et alertes, surveillance hors
-de la fenêtre, automatisation en ligne de commande, publication depuis SSH, « Quoi de neuf », documentation). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+État au 2026-10-15, version **2.11.0** publiée ; P23 à P28 réalisés (2.12 : jours locaux, maintenance, rappels,
+résumé hebdomadaire, pannes dans l'icône, accessibilité au clavier), vérifiés par deux juges. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -29,9 +29,9 @@ anciens plans, qui ont tous été appliqués. L'historique des étapes est dans 
 
 ### Qualité
 
-- 529 tests (unitaires, intégration avec un faux cloudflared et un serveur SSH en mémoire, interface
-  pytest-qt). Couverture : 93 % sur `cma.core` (seuil 90 %), 90 % au total (seuil 80 %). Environ 50 s en
-  parallèle (`pytest -n auto`), 3 min 30 en série.
+- 612 tests (unitaires, intégration avec un faux cloudflared et un serveur SSH en mémoire, interface
+  pytest-qt). Couverture : 94 % sur `cma.core` (seuil 90 %), 90 % au total (seuil 80 %). De 60 à 130 s en
+  parallèle (`pytest -n auto`) selon la charge du poste.
 - CI à chaque push : lint, typage Windows et Linux, tests sous Windows et Linux (et macOS, non bloquant), vrai
   cloudflared, audit des dépendances, scripts serveur sur trois distributions, temps de démarrage, captures à
   trois échelles.

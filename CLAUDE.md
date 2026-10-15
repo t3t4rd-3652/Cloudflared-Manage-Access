@@ -232,7 +232,10 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   lundi (`weekly_digest`, dû à partir de 9 h locales, une fois par semaine ISO) notent leur envoi dans
   `alert_state.json` seulement quand un canal l'a reçu. Rien n'est rappelé pour un objet en sourdine ou en
   maintenance. La tâche planifiée n'écrit cet état que si CMA est fermé, comme le journal. `cma alerts digest`
-  envoie le résumé sans toucher à l'état. Voir l'ADR 0002.
+  envoie le résumé sans toucher à l'état. Voir l'ADR 0002. On ne rappelle que ce qui est encore relevé
+  (`digest.watched` : surveillance des tunnels ou des services active) ; un relevé **réussi** clôt les incidents
+  des objets qui n'y figurent plus (`complete=True` côté `Monitor` et côté tâche quand `check_services` a
+  réussi), un relevé en échec ne clôt rien. `alert_state.json` garde aussi le tunnel de chaque nom d'hôte.
 - **Travail en agents parallèles** : chaque agent a son `git worktree` sous `.claude/worktrees/`, et lance les
   tests depuis ce worktree avec `PYTHONPATH=src` et le `.venv` du dépôt principal. Les traductions passent par un
   JSON que l'orchestrateur réapplique à l'intégration : les trois catalogues entrent en conflit à la fusion. Une
@@ -264,6 +267,10 @@ Qt et PySide :
 - `cma.ui.a11y.accessible_name` lit l'interface d'accessibilité : pour une `QComboBox` non modifiable, Windows
   annonce le nom posé, Linux et macOS le texte affiché. Un test compare `widget.accessibleName()` à la valeur
   attendue, et ne demande à l'interface qu'un nom non vide (échec en CI seulement, 2026-10-14).
+- Navigation au clavier : `QTableWidget` et `QTableView` ont `tabKeyNavigation=True` par défaut, et Tab y reste
+  piégé de case en case. Les fabriques (`data_table`, `_table`…) posent `setTabKeyNavigation(False)`. Un test de
+  tabulation envoie de vraies touches (`QTest.keyClick(focusWidget, Qt.Key.Key_Tab)`) et exige d'atteindre chaque
+  bouton : `focusNextChild()` contourne le tableau et ne voit pas le piège (test de P27 passé à tort, 2026-10-14).
 - Un `QLabel` à retour à la ligne annonce une largeur minimale élevée : dans un en-tête, il bloque le rétrécissement
   de toute la fenêtre. Lui donner une petite `setMinimumWidth` explicite.
 - Un attribut `self.actions` sur un QWidget masque la méthode `actions()` de Qt (pyright le signale).

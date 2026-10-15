@@ -155,11 +155,14 @@ async def test_real_cloudflared(bus, port):
         name="Réel", hostname="cma-test.invalid", local_port=port, auto_reconnect=False
     )
     session = CloudflaredSession(bus=bus, profile=profile, command=build_access_tcp(binary, profile))
-    session.start()
-    await wait_for(session, {SessionState.LISTENING}, timeout=45)
     second = CloudflaredSession(bus=bus, profile=profile, command=build_access_tcp(binary, profile))
-    second.start()
-    await wait_for(second, {SessionState.ERROR}, timeout=45)
-    assert "déjà utilisé" in second.message
-    await second.stop()
-    await session.stop()
+    try:
+        session.start()
+        await wait_for(session, {SessionState.LISTENING}, timeout=45)
+        second.start()
+        await wait_for(second, {SessionState.ERROR}, timeout=45)
+        assert "déjà utilisé" in second.message
+    finally:
+        # Même en échec : aucun vrai cloudflared ne doit survivre au test.
+        await second.stop()
+        await session.stop()

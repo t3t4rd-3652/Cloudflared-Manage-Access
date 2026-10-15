@@ -96,7 +96,7 @@ def test_alerts_digest_sends_to_every_channel(paths, store, capsys):
         assert cli_module.send_digest(paths, secrets=secrets) == 0
     assert capsys.readouterr().out.strip() == "✓ Équipe"
     (body,) = receiver.bodies
-    assert body["title"].startswith("CMA — semaine du ")
+    assert body["title"].startswith("CMA — les 7 derniers jours, au ")
     assert "wiki.exemple.fr" in body["text"] and "En cours : wiki.exemple.fr" in body["text"]
     # L'envoi manuel ne compte pas pour le résumé du lundi.
     assert AlertState(state_path(paths.data_dir)).digest_week == ""
@@ -225,7 +225,7 @@ def test_scheduled_task_sends_the_digest_once_a_week(paths, store, monkeypatch):
     assert scheduled_run(paths, monkeypatch, secrets, healthy, open_app=True) == 0
     assert sent == [] and not state_path(paths.data_dir).exists()  # CMA ouvert : la tâche ne fait rien
     assert scheduled_run(paths, monkeypatch, secrets, healthy, open_app=False) == 0
-    assert len(sent) == 1 and sent[0].startswith("CMA — semaine du ")
+    assert len(sent) == 1 and sent[0].startswith("CMA — les 7 derniers jours, au ")
     assert AlertState(state_path(paths.data_dir)).digest_week == "2026-W42"
     assert scheduled_run(paths, monkeypatch, secrets, healthy, open_app=False) == 0
     assert len(sent) == 1
@@ -243,3 +243,36 @@ def test_scheduled_task_without_reminder_setting_stays_silent(paths, store, monk
     log.save()
     scheduled_run(paths, monkeypatch, secrets, down, open_app=False)
     assert sent == ["CMA — panne : labo"]
+
+
+def test_scheduled_task_closes_incidents_after_a_successful_empty_survey(tmp_path, monkeypatch):
+    """Tâche planifiée, relevé des services réussi mais vide (dernier nom retiré) : l'incident est clos ; après un
+    relevé en échec, il reste ouvert."""
+    from cma import cli
+    from cma.core.availability import AvailabilityLog
+    from cma.core.hostprobe import HostProbe
+    from cma.core.models import Config
+    from cma.core.monitoring import record_services
+    from cma.core.secrets import MemorySecretStore
+    from cma.core.servicewatch import ServiceTarget
+    from cma.paths import AppPaths
+
+    paths = AppPaths(tmp_path / "data")
+    paths.ensure()
+    monkeypatch.setattr("cma.platform.notify.system_notification", lambda *_a, **_k: None)
+    target = ServiceTarget("wiki.exemple.fr", "", "http://localhost:8080", "t1", "bureau")
+    log = AvailabilityLog(paths.data_dir / "availability.json")
+    record_services(log, Config(), [(target, HostProbe("origin_down", 502, ms=5.0))])
+    log.save()
+    secrets = MemorySecretStore()
+    cli._record_and_alert(paths, Config(), secrets, [], [], services_complete=False)
+    assert AvailabilityLog(paths.data_dir / "availability.json").open_incident(
+        "service", "service:wiki.exemple.fr"
+    )
+    cli._record_and_alert(paths, Config(), secrets, [], [], services_complete=True)
+    assert (
+        AvailabilityLog(paths.data_dir / "availability.json").open_incident(
+            "service", "service:wiki.exemple.fr"
+        )
+        is None
+    )

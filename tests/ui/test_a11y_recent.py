@@ -254,10 +254,32 @@ def test_whats_new_dialog_language_variants(qtbot, gui):
     ctx, window = gui
     releases = [Release("2.11.0", "2026-10-09", "Nouvelles fonctionnalités.")]
 
-    for lang in ["en", "de", "es"]:
-        dialog = WhatsNewDialog(window, releases, language=lang)
+    from cma.i18n import get_language, set_language
+
+    previous = get_language()
+    try:
+        for lang in ["en", "de", "es"]:
+            set_language(lang)  # l'interface elle-même change de langue, pas seulement la note de la boîte
+            dialog = WhatsNewDialog(window, releases, language=lang)
+            dialog.show()
+            assert dialog.windowTitle() != "Quoi de neuf dans CMA", f"Langue {lang} : titre non traduit"
+            apply_accessible_names(dialog)
+            assert describe(missing_accessible_names(dialog)) == [], f"Langue {lang}"
+            verify_tab_order(dialog, min_controls=2)
+            dialog.deleteLater()
+    finally:
+        set_language(previous)
+
+
+def test_alert_dialogs_accessibility(qtbot, gui):
+    """Boîtes des canaux d'alerte et des maintenances : noms accessibles et vraie tabulation."""
+    from cma.ui.views.settings_alerts import ChannelDialog, MaintenanceDialog
+
+    _ctx, window = gui
+    for dialog in (ChannelDialog(window), MaintenanceDialog(window, [("tunnel:t1", "Tunnel « bureau »")])):
         dialog.show()
         apply_accessible_names(dialog)
-        assert describe(missing_accessible_names(dialog)) == [], f"Langue {lang}"
+        assert dialog.windowTitle()
+        assert describe(missing_accessible_names(dialog)) == []
         verify_tab_order(dialog, min_controls=2)
         dialog.deleteLater()

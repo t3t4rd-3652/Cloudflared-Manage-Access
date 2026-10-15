@@ -227,8 +227,10 @@ def show_tunnels(
     except (CloudflareApiError, OSError) as exc:
         print(tr("Erreur : {error}").format(error=exc), file=sys.stderr)
         return 1
+    services_complete = False
     try:
         tested = asyncio.run(admin.check_services()) if check_services else []
+        services_complete = bool(check_services)
     except (CloudflareApiError, OSError) as exc:
         if services:
             print(tr("Erreur : {error}").format(error=exc), file=sys.stderr)
@@ -268,7 +270,9 @@ def show_tunnels(
     if notify and send_command(paths, {"cmd": "status"}, timeout=5) is None:
         # CMA fermé : la tâche tient le journal de disponibilité, et ne prévient qu'à un changement (nouvelle panne
         # ou retour), pas à chaque passage tant que la panne dure.
-        _record_and_alert(paths, store.snapshot(), vault, tunnels, tested)
+        _record_and_alert(
+            paths, store.snapshot(), vault, tunnels, tested, services_complete=services_complete
+        )
     return 2 if troubled or down else 0
 
 
@@ -278,7 +282,10 @@ def _record_and_alert(
     secrets: SecretStore,
     tunnels: list[Any],
     tested: list[Any],
+    *,
+    services_complete: bool = False,
 ) -> None:
+    """`services_complete` : le relevé des services a réussi (une liste vide veut alors dire « plus aucun nom »)."""
     from cma.core.alertstate import AlertState, state_path
     from cma.core.availability import AvailabilityLog
     from cma.core.monitoring import (
@@ -292,7 +299,9 @@ def _record_and_alert(
     from cma.platform.notify import system_notification
 
     log = AvailabilityLog(paths.data_dir / "availability.json")
-    events = record_tunnels(log, config, tunnels) + record_services(log, config, tested)
+    events = record_tunnels(log, config, tunnels) + record_services(
+        log, config, tested, complete=True if services_complete else None
+    )
     with contextlib.suppress(OSError):  # un journal non écrit ne doit pas empêcher de prévenir
         log.save()
     shown = [e for e in events if not e.muted]

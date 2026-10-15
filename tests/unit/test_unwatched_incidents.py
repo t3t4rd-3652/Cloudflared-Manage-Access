@@ -142,3 +142,59 @@ def test_service_recovery_is_still_announced(tmp_path: Path):
     events = record_services(log, config, [(WIKI, HostProbe("ok", 200, ms=9.0))], T0 + timedelta(hours=1))
     assert [(e.key, e.recovered) for e in events] == [("service:wiki.exemple.fr", True)]
     assert open_keys(log) == []
+
+
+def test_unwatched_kind_is_neither_reminded_nor_announced(tmp_path: Path):
+    """Surveillance des services (ou des tunnels) coupée : ses incidents ouverts ne sont plus rappelés ni annoncés
+    « en cours » dans le résumé, puisque rien ne les clôt plus."""
+    log = AvailabilityLog(tmp_path / "a.json")
+    config = config_with_reminders()
+    record_services(log, config, [(WIKI, HostProbe("origin_down", 502, ms=12.0))], T0)
+    record_tunnels(log, config, [Tunnel("t2", "labo", "down")], T0)
+    late = T0 + timedelta(days=30)
+    assert sorted(reminders(log, config, tmp_path, late)) == ["service:wiki.exemple.fr", "tunnel:t2"]
+    config.settings.watch_services = False
+    assert reminders(log, config, tmp_path, late) == ["tunnel:t2"]
+    assert not any(
+        "wiki.exemple.fr" in line
+        for line in build_digest(log, config, late, UTC).text.splitlines()
+        if line.startswith("En cours")
+    )
+    config.settings.watch_tunnels = False
+    assert reminders(log, config, tmp_path, late) == []
+
+
+def test_tunnel_of_a_service_is_remembered_for_maintenance(tmp_path: Path):
+    """La maintenance du tunnel couvre ses noms même quand le relevé des services n'a pas encore eu lieu : la
+    correspondance nom d'hôte → tunnel est gardée dans `alert_state.json`."""
+    from cma.core.models import MaintenanceWindow
+    from cma.core.monitoring import prepare_follow_up
+
+    log = AvailabilityLog(tmp_path / "a.json")
+    config = config_with_reminders()
+    record_services(log, config, [(WIKI, HostProbe("origin_down", 502, ms=12.0))], T0)
+    late = T0 + timedelta(days=1)
+    local = late.astimezone(UTC)
+    config.settings.maintenance_windows = [
+        MaintenanceWindow(weekday=local.weekday(), start="00:00", end="23:59", target="tunnel:t1")
+    ]
+    state_file = tmp_path / STATE_FILE
+    # Premier passage avec un relevé des services : la correspondance est notée et le rappel est couvert.
+    plan = prepare_follow_up(
+        log,
+        config,
+        AlertState(state_file),
+        check_digest=False,
+        now=late,
+        tz=UTC,
+        tunnel_of={"service:wiki.exemple.fr": "t1"},
+    )
+    assert plan.reminders == []
+    plan.state.save()
+    # Plus tard, sans relevé des services (démarrage, tâche planifiée) : toujours couvert, d'après le fichier.
+    plan = prepare_follow_up(log, config, AlertState(state_file), check_digest=False, now=late, tz=UTC)
+    assert plan.reminders == []
+    # Sans la maintenance, le rappel repart.
+    config.settings.maintenance_windows = []
+    plan = prepare_follow_up(log, config, AlertState(state_file), check_digest=False, now=late, tz=UTC)
+    assert [e.key for e in plan.reminders] == ["service:wiki.exemple.fr"]

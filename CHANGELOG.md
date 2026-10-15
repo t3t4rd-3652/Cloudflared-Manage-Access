@@ -25,6 +25,10 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
 ### Modifié
 - La disponibilité est agrégée par **jour local** et non plus par jour UTC : un test à 23 h 30 compte pour son jour.
   Les jours déjà enregistrés gardent leur date.
+- Une panne n'est rappelée que si son type (tunnels ou services) est encore surveillé, et l'incident d'un tunnel
+  devenu inactif ou supprimé, ou d'un nom d'hôte retiré, se clôt de lui-même : plus de rappel sans fin.
+- **Touche Tab** : elle ne reste plus piégée dans les tableaux (bilan, disponibilité, raccourcis, journaux,
+  fichiers SFTP…) et atteint les boutons des boîtes.
 - Les dates des derniers rappels et la semaine du dernier résumé sont gardées à part, dans `alert_state.json` du
   dossier de données (aucun secret).
 
