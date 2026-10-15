@@ -692,7 +692,7 @@ Statut : À FAIRE
 | P28 | FAIT | 3ff1e22 | 612 ✓ | 2026-10-15 |
 | P29 | FAIT | 6a31a70 | 622 ✓ | 2026-10-15 |
 | P30 | FAIT | 173fa99 | 643 ✓ | 2026-10-15 |
-| P31 | À FAIRE | — | — | — |
+| P31 | FAIT | 27e2681 | 675 ✓ | 2026-10-15 |
 | P32 | À FAIRE | — | — | — |
 
 **Prochaine action exacte :** P31 — un agent `executant-m` (Sonnet), seul, sur `main` : journal des envois

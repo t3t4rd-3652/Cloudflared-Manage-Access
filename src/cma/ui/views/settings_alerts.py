@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QFormLayout,
     QHBoxLayout,
+    QHeaderView,
     QLineEdit,
     QSpinBox,
     QTableWidgetItem,
@@ -201,6 +202,11 @@ class AlertsSection:
         self.channels: list[AlertChannel] = []
         self.windows: list[MaintenanceWindow] = []
         self.table = data_table([tr("Nom"), tr("Type"), tr("Retours"), tr("Actif")], tr("Canaux d'alerte"))
+        # Colonnes à la largeur de leur en-tête : « Wiederherstellungen » (de) ne tient pas dans la largeur par défaut.
+        for column in (1, 2):
+            self.table.horizontalHeader().setSectionResizeMode(
+                column, QHeaderView.ResizeMode.ResizeToContents
+            )
         self.table.setMinimumHeight(140)
         self.table.itemSelectionChanged.connect(self._update_actions)
         self.table.itemDoubleClicked.connect(lambda _item: self.toggle_enabled())
