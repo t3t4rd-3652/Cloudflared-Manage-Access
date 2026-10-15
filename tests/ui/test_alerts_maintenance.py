@@ -236,3 +236,18 @@ def test_monitor_digest_only_after_tunnel_checks(qtbot, gui_context, monkeypatch
         ("tunnel:t1", "bureau"),
         ("service:wiki.exemple.fr", "wiki.exemple.fr"),
     ]
+
+
+def test_monitor_sends_availability_target_alert_without_reminders(qtbot, gui_context, monkeypatch):
+    """Ni rappels ni résumé, mais un objectif de disponibilité : CMA ouvert prévient quand il est manqué (P33)."""
+    ctx = gui_context
+    monitor, sent = watched_monitor(ctx, monkeypatch, [[Tunnel("t1", "bureau", "healthy")]], repeat=0)
+    ctx.update_config(lambda c: c.settings.availability_targets.update({"tunnel:t1": 99.9}))
+    now = datetime.now(UTC)
+    for hours in range(48):
+        monitor.availability.record_check(
+            "tunnel:t1", "bureau", hours % 4 != 0, None, now - timedelta(hours=hours)
+        )
+    assert monitor.check_tunnels() is True
+    qtbot.waitUntil(lambda: any("objectif manqué" in title for title in sent), timeout=45000)
+    qtbot.waitUntil(lambda: not monitor._follow_up_running, timeout=45000)

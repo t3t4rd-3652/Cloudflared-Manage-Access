@@ -34,6 +34,7 @@ from cma.core.monitoring import (
     tunnel_key,
 )
 from cma.core.servicewatch import ServiceChange, ServiceResult
+from cma.core.slo import has_targets
 from cma.core.tunnelwatch import TunnelChange, TunnelWatch
 from cma.i18n import tr
 from cma.ui.context import GuiContext
@@ -249,7 +250,12 @@ class Monitor(QObject):
         settings = config.settings
         if self._follow_up_running or not settings.alert_channels:
             return
-        if settings.alert_repeat_hours <= 0 and not (digest and settings.weekly_digest):
+        # Rien à rappeler, pas de résumé dû et aucun objectif de disponibilité : rien à préparer.
+        if (
+            settings.alert_repeat_hours <= 0
+            and not (digest and settings.weekly_digest)
+            and not has_targets(config)
+        ):
             return
         tunnel_of = {service_key(r.target): r.target.tunnel_id for r in self.ctx.services.results}
         plan = prepare_follow_up(
