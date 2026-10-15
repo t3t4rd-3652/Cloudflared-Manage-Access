@@ -34,6 +34,7 @@ MAX_ENTRIES = 200
 MAX_MESSAGE = 200
 _FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 _FRAGMENT_MIN = 8  # un morceau d'adresse plus court n'est pas un secret, et masquerait des mots du message
+_LAST_SEGMENT_MIN = 4  # dernier segment du chemin (sujet ntfy, jeton de webhook) : masqué même court
 _URL = re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://\S+")
 _SPLIT = re.compile(r"[/?&=#:@;,]+")
 
@@ -59,7 +60,7 @@ class SendEntry:
     error: str = ""
 
 
-def scrub(text: str, url: str = "") -> str:
+def scrub(text: str, url: str = "", kind: str = "") -> str:
     """Retire d'un message tout ce qui peut venir de l'adresse d'un canal : secrets connus du coffre, adresses
     complètes, puis l'adresse du canal (hôte, identifiants et morceaux de chemin ou de paramètres assez longs
     pour être un jeton) et tronque à `MAX_MESSAGE` caractères."""
@@ -71,8 +72,13 @@ def scrub(text: str, url: str = "") -> str:
         fragments.update(p for p in (parts.netloc, parts.hostname, parts.username, parts.password) if p)
         for piece in (parts.path, parts.query, parts.fragment):
             fragments.update(f for f in _SPLIT.split(piece) if len(f) >= _FRAGMENT_MIN)
+        segments = [s for s in parts.path.split("/") if s]
+        if kind == "ntfy" and segments and len(segments[-1]) >= _LAST_SEGMENT_MIN:
+            # Le sujet ntfy (« mytopic » de https://ntfy.sh/mytopic) vaut un jeton, même court : masqué en mot entier.
+            text = re.sub(rf"(?i)(?<![\w-]){re.escape(segments[-1])}(?![\w-])", MASK, text)
         for fragment in sorted(fragments, key=len, reverse=True):
-            text = text.replace(fragment, MASK)
+            # Sans tenir compte de la casse : un hôte ou un sujet peut revenir en majuscules dans un message.
+            text = re.sub(re.escape(fragment), MASK, text, flags=re.IGNORECASE)
     return text if len(text) <= MAX_MESSAGE else text[: MAX_MESSAGE - 1] + "…"
 
 
@@ -129,6 +135,17 @@ class AlertLog:
         parsed = (_parse(item) for item in cast(list[Any], items))
         return [entry for entry in parsed if entry is not None][-MAX_ENTRIES:]
 
+    def _readable(self) -> bool:
+        """Faux si le fichier existe mais ne peut pas être ouvert (verrou passager de Windows, droits) : le
+        réécrire ferait perdre son contenu. Un contenu illisible (JSON abîmé) reste remplaçable."""
+        if not self.path.exists():
+            return True
+        try:
+            with self.path.open("rb"):
+                return True
+        except OSError:
+            return False
+
     def latest(self) -> list[SendEntry]:
         """Les entrées, la plus récente d'abord."""
         return list(reversed(self.entries()))
@@ -152,9 +169,14 @@ class AlertLog:
             nature,
             subject,
             error is None,
-            scrub(error, url) if error is not None else "",
+            scrub(error, url, kind) if error is not None else "",
         )
         with _lock:
+            if not self._readable():
+                logger.warning(
+                    "Journal des envois illisible pour l'instant : entrée non notée, journal conservé"
+                )
+                return
             kept = [*self.entries(), entry][-MAX_ENTRIES:]
             try:
                 atomic_write_json(self.path, {"entries": [_dump(e) for e in kept]})
@@ -189,7 +211,7 @@ def send_and_note(
     except AlertError as exc:
         if journal is not None:
             journal.note(channel=name, kind=kind, nature=nature, subject=subject, error=str(exc), url=url)
-        return str(exc)
+        return scrub(str(exc), url, kind)  # l'appelant l'affiche : jamais l'adresse du canal non plus
     if journal is not None:
         journal.note(channel=name, kind=kind, nature=nature, subject=subject, url=url)
     return None

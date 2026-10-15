@@ -20,12 +20,16 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
   du dossier de données (aucun secret, hors de la configuration et des exports).
 
 ### Modifié
-- Un objet en maintenance n'apparaît plus dans le sous-menu « Pannes » de l'icône.
 - Couper la surveillance des tunnels ou des services (Paramètres) clôt, sans notification, les incidents ouverts de ce
   type : ils ne restent plus « en cours » pour toujours. Avec la surveillance des tunnels coupée, la tâche planifiée
   ne les journalise plus et n'en alerte plus.
 - Tableau des canaux d'alerte : les colonnes « Type » et « Retours » ont la largeur de leur en-tête (en allemand,
   « Wiederherstellungen » était coupé).
+
+### Corrigé
+- Journal des envois : un sujet ntfy court et un hôte écrit en majuscules sont masqués eux aussi, le message
+  d'erreur rendu à l'interface l'est également, et un journal momentanément verrouillé par Windows n'est plus
+  réécrit avec une seule entrée.
 
 ## [2.12.0] - 2026-10-15
 

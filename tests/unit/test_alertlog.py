@@ -200,7 +200,7 @@ def test_send_events_with_an_error_quoting_the_url_leaves_no_secret(journal):
 
     event = Event("tunnel:t1", "bureau", "error", "hors ligne", False, False)
     errors = send_events([event], config, secrets, refuse, journal)
-    assert errors and TOKEN in errors[0]  # l'erreur renvoyée à l'appelant n'est pas modifiée
+    assert errors and TOKEN not in errors[0]  # l'erreur renvoyée à l'appelant est masquée elle aussi
     assert_no_secret(journal.path)
     (entry,) = journal.entries()
     assert (entry.channel, entry.nature, entry.subject, entry.ok) == ("Équipe", "alert", "bureau", False)
@@ -321,3 +321,37 @@ def test_scheduled_task_notes_its_sends_only_when_cma_is_closed(paths, store, mo
     last = journal.entries()[-1]
     assert (last.nature, last.subject, last.ok) == ("reminder", "labo", False)
     assert_no_secret(journal.path)
+
+
+def test_scrub_hides_short_topics_and_ignores_case():
+    """Sujet ntfy court (dernier segment du chemin) et hôte écrit en majuscules : masqués aussi."""
+    from cma.core.alertlog import scrub
+
+    assert "mytopic" not in scrub("topic mytopic introuvable", "https://ntfy.sh/mytopic", "ntfy")
+    # Hors ntfy, un mot court du message qui ressemble au dernier segment reste lisible.
+    assert "mytopic" in scrub("topic mytopic introuvable", "https://example.invalid/mytopic", "webhook")
+    out = scrub("HOOKS.SLACK.COM a refusé", "https://hooks.slack.com/services/T000/B000/XXXXXXXXXXXXXXXX")
+    assert "hooks.slack.com" not in out.lower()
+
+
+def test_unopenable_log_is_not_overwritten(tmp_path, monkeypatch):
+    """Fichier présent mais impossible à ouvrir (verrou passager) : l'entrée n'est pas notée, le journal reste."""
+    from pathlib import Path
+
+    from cma.core.alertlog import AlertLog
+
+    journal = AlertLog(tmp_path / "alert_log.json")
+    journal.note(channel="Téléphone", kind="ntfy", nature="test")
+    journal.note(channel="Téléphone", kind="ntfy", nature="test")
+    before = journal.path.read_bytes()
+    real_open = Path.open
+
+    def locked(self, *args, **kwargs):
+        if self == journal.path:
+            raise PermissionError("verrouillé")
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", locked)
+    journal.note(channel="Téléphone", kind="ntfy", nature="test")
+    monkeypatch.setattr(Path, "open", real_open)
+    assert journal.path.read_bytes() == before and len(journal.entries()) == 2

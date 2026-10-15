@@ -604,7 +604,8 @@ l'orchestrateur relit, lance les tests et committe. Traductions et documentation
 
 ### P29 — Maintenance visible, incidents clos quand une surveillance est coupée (2.13)
 
-Statut : FAIT
+Statut : FAIT (écarts au plan, relevés par le juge : pas de pastille dans le sous-menu « Pannes », un objet en
+maintenance n'y figure pas du tout, comme avant ; l'incident clos reçoit sa date de fin, sans note à part)
 
 - **Objectif** : voir d'un coup d'œil qu'un objet est en maintenance ; ne plus garder d'incident ouvert pour une
   surveillance coupée (choix resté ouvert en P28).
@@ -634,7 +635,7 @@ Statut : FAIT
 
 ### P31 — Historique des envois d'alertes (2.13)
 
-Statut : À FAIRE
+Statut : FAIT
 
 - **Objectif** : savoir ce qui est parti, quand, vers quel canal, et si l'envoi a réussi.
 - **Tâches** : journal des envois (alertes, rappels, résumés, tests) gardé dans `alert_state.json` ou un fichier voisin
@@ -695,5 +696,5 @@ Statut : À FAIRE
 | P31 | FAIT | 27e2681 | 675 ✓ | 2026-10-15 |
 | P32 | À FAIRE | — | — | — |
 
-**Prochaine action exacte :** P31 — un agent `executant-m` (Sonnet), seul, sur `main` : journal des envois
-d'alertes et boîte « Envois récents… ». (P30, interrompue par l'arrêt du poste, a été reprise et terminée.)
+**Prochaine action exacte :** P32 — écarts du juge corrigés (masquage du journal, documentation) ; suite complète,
+push, CI, puis release 2.13.0 et installation sur le poste.
