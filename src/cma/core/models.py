@@ -7,6 +7,7 @@ référencés par `secret_key`.
 from __future__ import annotations
 
 import ipaddress
+import math
 import re
 import uuid
 from datetime import UTC, datetime
@@ -436,6 +437,15 @@ class KnownHostsMode(StrEnum):
     USER = "user"
 
 
+MIN_TARGET = 50.0
+MAX_TARGET = 100.0
+
+
+def clamp_target(value: float) -> float:
+    """Objectif de disponibilité ramené entre 50 et 100 %."""
+    return min(MAX_TARGET, max(MIN_TARGET, float(value)))
+
+
 class Settings(Model):
     cloudflared_path: str | None = None
     theme: Theme = Theme.SYSTEM
@@ -481,6 +491,21 @@ class Settings(Model):
     maintenance_windows: list[MaintenanceWindow] = Field(default_factory=list[MaintenanceWindow])
     alert_repeat_hours: int = Field(default=0, ge=0, le=168)
     weekly_digest: bool = False
+    # Objectifs de disponibilité sur 30 jours (en %, bornés de 50 à 100) : par objet (« tunnel:<id> » ou
+    # « service:<nom d'hôte et chemin> »), puis un objectif par défaut facultatif pour les autres.
+    availability_targets: dict[str, float] = Field(default_factory=dict[str, float])
+    default_availability_target: float | None = None
+
+    @field_validator("availability_targets", mode="after")
+    @classmethod
+    def _bounded_targets(cls, value: dict[str, float]) -> dict[str, float]:
+        """Un objectif hors de 50 à 100 % est ramené à la borne ; une valeur illisible (NaN) est retirée."""
+        return {key: clamp_target(target) for key, target in value.items() if not math.isnan(target)}
+
+    @field_validator("default_availability_target", mode="after")
+    @classmethod
+    def _bounded_default_target(cls, value: float | None) -> float | None:
+        return None if value is None or math.isnan(value) else clamp_target(value)
 
     @field_validator("language", mode="before")
     @classmethod
