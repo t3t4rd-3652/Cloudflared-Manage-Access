@@ -16,6 +16,7 @@ from cma.core.models import AlertChannel, Config, MaintenanceWindow
 from cma.core.monitoring import (
     deliver_follow_up,
     is_muted,
+    maintenance_until,
     maintenance_window,
     mute,
     prepare_follow_up,
@@ -336,3 +337,51 @@ def test_follow_up_survives_an_unwritable_state(tmp_path: Path):
         tz=UTC,
     )
     assert deliver_follow_up(plan, config, secrets, T0 + timedelta(hours=2), lambda *_a: None) == []
+
+
+# --- Fin d'une maintenance en cours (pastille de la vue Cloudflare, P29) -----------------------------------------
+
+
+def test_maintenance_until_gives_the_end_and_the_window():
+    wednesday = MaintenanceWindow(weekday=2, start="02:00", end="04:00", label="Mises à jour")
+    config = config_with(wednesday)
+    inside = datetime(2026, 10, 14, 3, 0, tzinfo=UTC)
+    found = maintenance_until(config, "tunnel:t1", now=inside, tz=UTC)
+    assert found is not None
+    end, window = found
+    assert end == datetime(2026, 10, 14, 4, 0, tzinfo=UTC) and window.label == "Mises à jour"
+    # La fin est dite dans le fuseau demandé.
+    paris = maintenance_until(config, "tunnel:t1", now=datetime(2026, 10, 14, 1, 0, tzinfo=UTC), tz=PARIS)
+    assert paris is not None and paris[0] == datetime(2026, 10, 14, 4, 0, tzinfo=PARIS)
+    # Hors fenêtre (avant, à la fin exacte, un autre jour) : rien.
+    for outside in (
+        datetime(2026, 10, 14, 1, 59, tzinfo=UTC),
+        datetime(2026, 10, 14, 4, 0, tzinfo=UTC),
+        datetime(2026, 10, 15, 3, 0, tzinfo=UTC),
+    ):
+        assert maintenance_until(config, "tunnel:t1", now=outside, tz=UTC) is None
+
+
+def test_maintenance_end_when_passing_midnight_or_covering_a_day():
+    night = config_with(MaintenanceWindow(weekday=5, start="23:00", end="02:00"))  # samedi soir → dimanche
+    evening = maintenance_until(night, "tunnel:t1", now=datetime(2026, 10, 17, 23, 30, tzinfo=UTC), tz=UTC)
+    morning = maintenance_until(night, "tunnel:t1", now=datetime(2026, 10, 18, 1, 0, tzinfo=UTC), tz=UTC)
+    assert evening is not None and evening[0] == datetime(2026, 10, 18, 2, 0, tzinfo=UTC)
+    assert morning is not None and morning[0] == datetime(2026, 10, 18, 2, 0, tzinfo=UTC)
+    whole = config_with(MaintenanceWindow(weekday=2, start="00:00", end="00:00"))
+    day = maintenance_until(whole, "tunnel:t1", now=datetime(2026, 10, 14, 12, 0, tzinfo=UTC), tz=UTC)
+    assert day is not None and day[0] == datetime(2026, 10, 15, 0, 0, tzinfo=UTC)
+
+
+def test_maintenance_until_follows_the_tunnel_and_covers_the_whole_account():
+    now = datetime(2026, 10, 14, 3, 0, tzinfo=UTC)
+    on_tunnel = config_with(MaintenanceWindow(weekday=2, start="02:00", end="04:00", target="tunnel:t1"))
+    assert maintenance_until(on_tunnel, "tunnel:t1", now=now, tz=UTC) is not None
+    # Un nom d'hôte suit le tunnel qui le publie, pas un autre.
+    assert maintenance_until(on_tunnel, "service:wiki.exemple.fr", "t1", now, UTC) is not None
+    assert maintenance_until(on_tunnel, "service:wiki.exemple.fr", "t2", now, UTC) is None
+    assert maintenance_until(on_tunnel, "tunnel:t2", now=now, tz=UTC) is None
+    everything = config_with(MaintenanceWindow(weekday=2, start="02:00", end="04:00"))
+    assert maintenance_until(everything, "tunnel:t9", now=now, tz=UTC) is not None
+    assert maintenance_until(everything, "service:x", "t2", now, UTC) is not None
+    assert maintenance_until(Config(), "tunnel:t9", now=now, tz=UTC) is None

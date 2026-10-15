@@ -60,6 +60,10 @@ DNS_ROLE = 262  # état du DNS d'un nom d'hôte publié (DnsCheck)
 SERVICE_ROLE = 263  # dernier test du nom d'hôte depuis Internet (ServiceResult)
 TRAFFIC_ROLE = 264  # trafic des dernières 24 heures (HostTraffic)
 MUTED_ROLE = 265  # fin de la sourdine (texte « HH:MM » ou date), vide si les alertes sont actives
+MAINTENANCE_ROLE = 266  # info-bulle d'une maintenance en cours (fin, libellé), vide hors fenêtre
+BASE_TIP_ROLE = (
+    267  # info-bulle de l'élément sans la maintenance (qui s'y ajoute et s'en retire avec la fenêtre)
+)
 
 # Géométrie des cartes de tunnel.
 CARD_GAP = 12
@@ -276,8 +280,24 @@ class TunnelDelegate(QStyledItemDelegate):
         painter.setFont(pill_font)
         painter.setPen(QColor(fg))
         painter.drawText(pill, Qt.AlignmentFlag.AlignCenter, pill_text)
+        right = int(pill.left())
+        if index.data(MAINTENANCE_ROLE):
+            # Même pastille que sur les noms d'hôte, à gauche de l'état.
+            badge_font = _resized(font, -1.0, QFont.Weight.DemiBold)
+            text_m = tr("Maintenance")
+            fg_m, bg_m = status_colors("info", tokens)
+            width_m = QFontMetrics(badge_font).horizontalAdvance(text_m) + 34
+            badge = QRectF(right - 8 - width_m, middle - 11, width_m, 22)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(bg_m))
+            painter.drawRoundedRect(badge, 11, 11)
+            icon("clock", fg_m).paint(painter, QRect(int(badge.left()) + 9, middle - 7, 14, 14))
+            painter.setFont(badge_font)
+            painter.setPen(QColor(fg_m))
+            painter.drawText(badge.adjusted(27, 0, -8, 0), Qt.AlignmentFlag.AlignVCenter, text_m)
+            right = int(badge.left())
         left = band.left() + TEXT_LEFT
-        width = max(0, int(pill.left()) - 12 - left)
+        width = max(0, right - 12 - left)
         name_font = _resized(font, 1.5, QFont.Weight.DemiBold)
         meta_font = _resized(font, -0.5)
         name_metrics, meta_metrics = QFontMetrics(name_font), QFontMetrics(meta_font)
@@ -322,6 +342,8 @@ class TunnelDelegate(QStyledItemDelegate):
             badges.append(probe_badge)
         if index.data(MUTED_ROLE):
             badges.append((tr("Sourdine"), "bell", "neutral"))
+        if index.data(MAINTENANCE_ROLE):
+            badges.append((tr("Maintenance"), "clock", "info"))
         traffic = index.data(TRAFFIC_ROLE)
         if isinstance(traffic, HostTraffic) and traffic.errors:
             badges.append((tr("{n} × 5xx").format(n=traffic.errors), "alert-triangle", "warning"))

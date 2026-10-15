@@ -324,6 +324,7 @@ class CloudView(QWidget):
         self.unpublish_selected = tab.unpublish_selected
         self.check_connectors = tab.check_connectors
         self.show_service_results = tab.show_service_results
+        self.show_maintenance = tab.show_maintenance
         self.test_all_hostnames = tab.test_all_hostnames
         self.test_from_internet = tab.test_from_internet
         self.add_path_rule = tab.add_path_rule

@@ -289,6 +289,7 @@ def _record_and_alert(
     from cma.core.alertstate import AlertState, state_path
     from cma.core.availability import AvailabilityLog
     from cma.core.monitoring import (
+        close_unwatched_kinds,
         deliver_follow_up,
         prepare_follow_up,
         record_services,
@@ -299,8 +300,14 @@ def _record_and_alert(
     from cma.platform.notify import system_notification
 
     log = AvailabilityLog(paths.data_dir / "availability.json")
-    events = record_tunnels(log, config, tunnels) + record_services(
-        log, config, tested, complete=True if services_complete else None
+    settings = config.settings
+    # Une surveillance coupée dans les Paramètres ne relève plus rien : ses incidents ouverts sont clos, sans
+    # événement ni notification (sinon ils resteraient « en cours » pour toujours).
+    close_unwatched_kinds(log, config)
+    events = (record_tunnels(log, config, tunnels) if settings.watch_tunnels else []) + (
+        record_services(log, config, tested, complete=True if services_complete else None)
+        if settings.watch_services
+        else []
     )
     with contextlib.suppress(OSError):  # un journal non écrit ne doit pas empêcher de prévenir
         log.save()

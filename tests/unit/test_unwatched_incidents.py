@@ -198,3 +198,42 @@ def test_tunnel_of_a_service_is_remembered_for_maintenance(tmp_path: Path):
     config.settings.maintenance_windows = []
     plan = prepare_follow_up(log, config, AlertState(state_file), check_digest=False, now=late, tz=UTC)
     assert [e.key for e in plan.reminders] == ["service:wiki.exemple.fr"]
+
+
+def test_switching_off_a_watch_closes_its_open_incidents_without_event(tmp_path: Path):
+    """Surveillance coupée (P29) : les incidents ouverts de son type sont clos, ceux de l'autre type restent, et
+    aucun événement n'est produit (rien à annoncer, rien à notifier)."""
+    from cma.core.monitoring import close_unwatched_kinds
+
+    log = AvailabilityLog(tmp_path / "a.json")
+    config = config_with_reminders()
+    record_tunnels(log, config, [Tunnel("t1", "labo", "down")], T0)
+    record_services(log, config, [(WIKI, HostProbe("origin_down", 502, ms=12.0))], T0)
+    assert open_keys(log) == ["service:wiki.exemple.fr", "tunnel:t1"]
+    # Tout est surveillé : rien n'est clos.
+    assert close_unwatched_kinds(log, config, T0 + timedelta(hours=1)) == 0
+    assert open_keys(log) == ["service:wiki.exemple.fr", "tunnel:t1"]
+    # Services coupés : seul l'incident du service est clos, à l'heure de la coupure.
+    config.settings.watch_services = False
+    assert close_unwatched_kinds(log, config, T0 + timedelta(hours=2)) == 1
+    assert open_keys(log) == ["tunnel:t1"]
+    wiki = next(i for i in log.incidents if i.key == "service:wiki.exemple.fr")
+    assert wiki.ended == "2026-10-14T08:00:00Z"
+    assert close_unwatched_kinds(log, config, T0 + timedelta(hours=3)) == 0  # déjà clos : rien de plus
+    # Tunnels coupés à leur tour : le dernier incident ouvert est clos, l'ancien n'est pas retouché.
+    config.settings.watch_tunnels = False
+    assert close_unwatched_kinds(log, config, T0 + timedelta(hours=4)) == 1
+    assert open_keys(log) == [] and wiki.ended == "2026-10-14T08:00:00Z"
+    assert reminders(log, config, tmp_path, T0 + timedelta(days=30)) == []
+
+
+def test_switching_off_only_the_tunnels_leaves_the_services(tmp_path: Path):
+    from cma.core.monitoring import close_unwatched_kinds
+
+    log = AvailabilityLog(tmp_path / "a.json")
+    config = config_with_reminders()
+    record_tunnels(log, config, [Tunnel("t1", "labo", "down")], T0)
+    record_services(log, config, [(WIKI, HostProbe("origin_down", 502, ms=12.0))], T0)
+    config.settings.watch_tunnels = False
+    assert close_unwatched_kinds(log, config, T0 + timedelta(hours=1)) == 1
+    assert open_keys(log) == ["service:wiki.exemple.fr"]

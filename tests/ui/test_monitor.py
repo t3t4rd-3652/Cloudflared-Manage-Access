@@ -78,3 +78,36 @@ def test_monitor_alone(qtbot, gui_context, monkeypatch):
     assert monitor.check_services() is True
     qtbot.waitUntil(lambda: bool(checked), timeout=5000)
     assert monitor.availability.open_incident("service", service_key) is None
+
+
+def test_monitor_closes_incidents_of_a_switched_off_watch(qtbot, gui_context):
+    """Surveillance coupée dans les Paramètres (P29) : à la vérification suivante, les incidents ouverts de ce type
+    sont clos et enregistrés, sans notification ; l'autre type n'est pas touché."""
+    from cma.core.availability import AvailabilityLog
+
+    ctx = gui_context
+    monitor = Monitor(ctx, None, start=False)
+    notices: list[tuple[str, str, object]] = []
+    monitor.notice.connect(lambda level, text, action: notices.append((level, text, action)))
+    monitor.availability.start("tunnel", "tunnel:t1", "bureau", "down")
+    monitor.availability.start("service", "service:wiki.exemple.fr", "wiki.exemple.fr", "origin_down")
+    monitor.availability.save()
+    path = ctx.paths.data_dir / "availability.json"
+
+    def saved(kind: str, key: str):
+        return AvailabilityLog(path).open_incident(kind, key)
+
+    # Tout est surveillé (ni compte ni jeton : rien à relever) : rien n'est clos.
+    assert monitor.check_tunnels() is False and monitor.check_services() is False
+    assert saved("tunnel", "tunnel:t1") and saved("service", "service:wiki.exemple.fr")
+
+    ctx.update_config(lambda c: setattr(c.settings, "watch_services", False))
+    assert monitor.check_services() is False
+    assert saved("service", "service:wiki.exemple.fr") is None
+    assert saved("tunnel", "tunnel:t1") is not None  # les tunnels sont toujours surveillés
+    assert monitor.availability.open_incident("service", "service:wiki.exemple.fr") is None
+
+    ctx.update_config(lambda c: setattr(c.settings, "watch_tunnels", False))
+    assert monitor.check_tunnels() is False
+    assert saved("tunnel", "tunnel:t1") is None
+    assert notices == []

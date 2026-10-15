@@ -26,14 +26,16 @@ from cma.core.cfapi import Connector, IngressRule, Tunnel
 from cma.core.dnscheck import DnsCheck
 from cma.core.hostprobe import HostProbe, probe_hostname_async
 from cma.core.models import CloudflareProfile, Config
-from cma.core.monitoring import mute, muted_until, tunnel_key
+from cma.core.monitoring import maintenance_until, mute, muted_until, tunnel_key
 from cma.core.servicewatch import ServiceResult, ServiceTarget, probe_token, targets_of
 from cma.core.traffic import HostTraffic
 from cma.i18n import tr
 from cma.ui.icons import token_icon
 from cma.ui.theme import mono_font
 from cma.ui.views.cloud.cards import (
+    BASE_TIP_ROLE,
     DNS_ROLE,
+    MAINTENANCE_ROLE,
     MUTED_ROLE,
     PROFILE_ROLE,
     PROTECTED_ROLE,
@@ -184,12 +186,17 @@ class TunnelsTab(QWidget):
                 summary += " · " + plural(routes, tr("{n} réseau privé"), tr("{n} réseaux privés"))
             summary += summary_suffix
             parent = QTreeWidgetItem([tunnel_view.tunnel.name, summary, f"{symbol} {text}"])
-            parent.setToolTip(
+            parent.setData(
                 0,
+                BASE_TIP_ROLE,
                 tr("Tunnel {name} ({id})").format(name=tunnel_view.tunnel.name, id=tunnel_view.tunnel.id)
                 + "\n"
                 + tr("Règle finale : {service}").format(service=tunnel_view.catch_all),
             )
+            parent.setData(
+                0, MAINTENANCE_ROLE, self._maintenance_text(tunnel_key(tunnel_view.tunnel.id), None)
+            )
+            self._apply_tip(parent)
             parent.setData(0, TUNNEL_ROLE, tunnel_view.tunnel)
             parent.setData(
                 0, Qt.ItemDataRole.AccessibleTextRole, f"{tunnel_view.tunnel.name}, {text}, {summary}"
@@ -213,6 +220,9 @@ class TunnelsTab(QWidget):
                 child.setData(0, TRAFFIC_ROLE, overview.traffic.get(rule.hostname.lower()))
                 until = muted_until(config, rule_key(rule)) or tunnel_muted
                 child.setData(0, MUTED_ROLE, mute_label(until) if until is not None else "")
+                child.setData(
+                    0, MAINTENANCE_ROLE, self._maintenance_text(rule_key(rule), tunnel_view.tunnel.id)
+                )
                 self._set_service_result(child, self.ctx.services.result(rule.hostname, rule.path))
                 if dns is not None and not dns.ok:
                     notes.append(dns.label())
@@ -478,7 +488,46 @@ class TunnelsTab(QWidget):
             )
         if result is not None:
             parts.append(service_tooltip(result))
-        item.setToolTip(0, "\n\n".join(parts))
+        item.setData(0, BASE_TIP_ROLE, "\n\n".join(parts))
+        self._apply_tip(item)
+
+    def _maintenance_text(self, key: str, tunnel_id: str | None) -> str:
+        """Info-bulle de la maintenance en cours qui couvre l'objet (fin, libellé) ; vide hors fenêtre. Un nom d'hôte
+        suit son tunnel, et une maintenance de tout le compte couvre tout."""
+        found = maintenance_until(self.ctx.config(), key, tunnel_id)
+        if found is None:
+            return ""
+        end, window = found
+        if window.label:
+            return tr("Maintenance en cours jusqu'à {time} : {label}").format(
+                time=mute_label(end), label=window.label
+            )
+        return tr("Maintenance en cours jusqu'à {time}").format(time=mute_label(end))
+
+    @staticmethod
+    def _apply_tip(item: QTreeWidgetItem) -> None:
+        parts = [str(item.data(0, role) or "") for role in (BASE_TIP_ROLE, MAINTENANCE_ROLE)]
+        item.setToolTip(0, "\n\n".join(part for part in parts if part))
+        # La pastille ne se voit qu'à l'écran : la maintenance est aussi annoncée par l'accessibilité.
+        item.setData(0, Qt.ItemDataRole.AccessibleDescriptionRole, parts[1])
+
+    def show_maintenance(self) -> None:
+        """Remet à jour les pastilles « Maintenance » sans relire le compte : une fenêtre commence ou se termine entre
+        deux lectures (appelé après chaque relevé de la surveillance)."""
+        for row in range(self.tree.topLevelItemCount()):
+            parent = self.tree.topLevelItem(row)
+            tunnel = parent.data(0, TUNNEL_ROLE) if parent is not None else None
+            if parent is None or not isinstance(tunnel, Tunnel):
+                continue
+            parent.setData(0, MAINTENANCE_ROLE, self._maintenance_text(tunnel_key(tunnel.id), None))
+            self._apply_tip(parent)
+            for index in range(parent.childCount()):
+                child = parent.child(index)
+                rule = child.data(0, RULE_ROLE) if child is not None else None
+                if child is not None and isinstance(rule, IngressRule):
+                    child.setData(0, MAINTENANCE_ROLE, self._maintenance_text(rule_key(rule), tunnel.id))
+                    self._apply_tip(child)
+        self.tree.viewport().update()
 
     def show_service_results(self) -> None:
         """Reporte les derniers tests (surveillance ou test manuel) sur les cartes, sans relire le compte."""

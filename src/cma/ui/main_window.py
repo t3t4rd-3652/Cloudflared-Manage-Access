@@ -421,6 +421,7 @@ class MainWindow(QMainWindow):
                 text for text in (troubled_summary(troubled), troubled_services_summary(services)) if text
             ]
             item.setToolTip(" · ".join(parts) or base)
+        self.cloud.show_maintenance()  # une maintenance a pu commencer ou finir depuis le dernier relevé
         self.tunnels_troubled.emit(troubled)
         self.services_troubled.emit(services)
         self.dashboard.health.update_state(

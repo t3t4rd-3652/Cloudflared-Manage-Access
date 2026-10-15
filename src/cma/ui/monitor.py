@@ -22,6 +22,7 @@ from cma.core.cfapi import Tunnel
 from cma.core.hostprobe import HostProbe
 from cma.core.monitoring import (
     Event,
+    close_unwatched_kinds,
     deliver_follow_up,
     is_muted,
     prepare_follow_up,
@@ -90,6 +91,8 @@ class Monitor(QObject):
         settings = self.ctx.config().settings
         admin = self.ctx.manager.cloudflare
         account = settings.cloudflare_account_id
+        if not settings.watch_tunnels:
+            self._close_unwatched()
         if self.tunnel_check_running or not settings.watch_tunnels or not account or not admin.has_token():
             if self.tunnel_watch.troubled and not self.tunnel_check_running:
                 # Surveillance coupée ou jeton oublié : un ancien relevé ne doit pas rester affiché.
@@ -123,6 +126,8 @@ class Monitor(QObject):
         admin = self.ctx.manager.cloudflare
         account = settings.cloudflare_account_id
         watch = self.ctx.services
+        if not settings.watch_services:
+            self._close_unwatched()
         if self.service_check_running or not settings.watch_services or not account or not admin.has_token():
             if watch.troubled and not self.service_check_running:
                 watch.forget()
@@ -152,6 +157,14 @@ class Monitor(QObject):
         return True
 
     # --- Suites d'un relevé -----------------------------------------------------------------------------------
+
+    def _close_unwatched(self) -> None:
+        """Surveillance coupée : les incidents ouverts de ce type sont clos, sans événement ni notification."""
+        if close_unwatched_kinds(self.availability, self.ctx.config()):
+            try:
+                self.availability.save()
+            except OSError as exc:
+                log.warning("Journal de disponibilité non enregistré : %s", exc)
 
     def _record(self, events: list[Event]) -> None:
         """Journal enregistré ; les nouveaux incidents et les retours partent vers les canaux d'alerte."""

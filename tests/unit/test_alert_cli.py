@@ -276,3 +276,44 @@ def test_scheduled_task_closes_incidents_after_a_successful_empty_survey(tmp_pat
         )
         is None
     )
+
+
+def test_scheduled_task_closes_incidents_of_a_switched_off_watch(tmp_path, monkeypatch):
+    """Tâche planifiée (CMA fermé) : une surveillance coupée dans les Paramètres clôt ses incidents ouverts, sans
+    notification ni alerte, et ne les rouvre pas même si l'objet est toujours en panne (P29). L'autre type reste suivi."""
+    from cma import cli
+    from cma.core.hostprobe import HostProbe
+    from cma.core.models import Config
+    from cma.core.monitoring import record_services, record_tunnels
+    from cma.core.servicewatch import ServiceTarget
+    from cma.paths import AppPaths
+
+    paths = AppPaths(tmp_path / "data")
+    paths.ensure()
+    shown: list[str] = []
+    sent: list[str] = []
+    monkeypatch.setattr("cma.platform.notify.system_notification", lambda _t, text: shown.append(text))
+    monkeypatch.setattr("cma.core.monitoring.send_alert", lambda _k, _u, alert: sent.append(alert.title))
+    target = ServiceTarget("wiki.exemple.fr", "", "http://localhost:8080", "t1", "bureau")
+    down = Tunnel("t1", "bureau", "down")
+    probe = HostProbe("origin_down", 502, ms=5.0)
+    log = AvailabilityLog(paths.data_dir / "availability.json")
+    record_tunnels(log, Config(), [down])
+    record_services(log, Config(), [(target, probe)])
+    log.save()
+
+    def open_incidents() -> list[str]:
+        return sorted(
+            i.key for i in AvailabilityLog(paths.data_dir / "availability.json").incidents if i.open
+        )
+
+    secrets = MemorySecretStore()
+    config = Config()
+    config.settings.watch_tunnels = False
+    # Le tunnel est toujours en panne, mais plus surveillé : incident clos, rien n'est annoncé ni rouvert.
+    cli._record_and_alert(paths, config, secrets, [down], [(target, probe)], services_complete=True)
+    assert open_incidents() == ["service:wiki.exemple.fr"]
+    assert shown == [] and sent == []
+    config.settings.watch_services = False
+    cli._record_and_alert(paths, config, secrets, [down], [(target, probe)], services_complete=True)
+    assert open_incidents() == [] and shown == [] and sent == []

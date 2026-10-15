@@ -6,6 +6,8 @@ sourdine, alertes vers l'extérieur.
 - Un objet en sourdine (maintenance) est toujours relevé et journalisé, mais ne déclenche ni notification ni alerte.
   La sourdine d'un tunnel couvre aussi ses noms d'hôte.
 - Une maintenance hebdomadaire (`MaintenanceWindow`) met en sourdine, pendant son créneau, un objet ou tout le compte.
+- Une surveillance coupée (`watch_tunnels`, `watch_services`) clôt les incidents ouverts de son type, sans événement
+  (`close_unwatched_kinds`) ; `digest.watched` reste le filet des rappels.
 - Les alertes partent vers chaque canal actif ; un canal en échec n'empêche pas les autres.
 - Une panne qui dure est rappelée toutes les N heures, et le résumé hebdomadaire part le lundi (état des envois dans
   `alert_state.json`, ADR 0002) : mêmes règles CMA ouvert et tâche planifiée.
@@ -92,6 +94,32 @@ def maintenance_window(
     return None
 
 
+def window_end(window: MaintenanceWindow, local: datetime) -> datetime:
+    """Fin de l'occurrence du créneau qui couvre `local` (heure locale) : à n'appeler que si `window_active`. Un
+    créneau qui passe minuit finit le lendemain de son jour, donc encore à venir le soir, déjà là le matin."""
+    hours, minutes = window.end.split(":")
+    end = local.replace(hour=int(hours), minute=int(minutes), second=0, microsecond=0)
+    if _minutes(window.start) >= _minutes(window.end) and local.weekday() == window.weekday:
+        end += timedelta(days=1)
+    return end
+
+
+def maintenance_until(
+    config: Config,
+    key: str,
+    tunnel_id: str | None = None,
+    now: datetime | None = None,
+    tz: tzinfo | None = None,
+) -> tuple[datetime, MaintenanceWindow] | None:
+    """(fin, fenêtre) de la maintenance en cours qui vise l'objet, son tunnel ou tout le compte ; None hors fenêtre.
+    La fin est une heure locale (`tz`, par défaut celle du poste)."""
+    moment = now or datetime.now(UTC)
+    window = maintenance_window(config, key, tunnel_id, moment, tz)
+    if window is None:
+        return None
+    return window_end(window, moment.astimezone(tz)), window
+
+
 def is_muted(
     config: Config,
     key: str,
@@ -136,6 +164,18 @@ def _close_unwatched(log: AvailabilityLog, kind: str, watched: set[str], now: da
     pour toujours, avec un rappel toutes les N heures et une ligne « En cours » dans chaque résumé."""
     for incident in [i for i in log.incidents if i.open and i.kind == kind and i.key not in watched]:
         log.end(kind, incident.key, now)
+
+
+def close_unwatched_kinds(log: AvailabilityLog, config: Config, now: datetime | None = None) -> int:
+    """Clôt, sans événement ni notification, les incidents ouverts d'un type dont la surveillance est coupée
+    (`watch_tunnels`, `watch_services`) : rien ne les clôturerait plus, et ils resteraient « en cours » pour toujours.
+    Renvoie le nombre d'incidents clos ; l'appelant enregistre le journal s'il est non nul. Une coupure brève clôt
+    donc un incident qui sera rouvert au relevé suivant si l'objet est toujours en panne."""
+    closed = 0
+    for incident in [i for i in log.incidents if i.open and not watched(config, i.kind)]:
+        if log.end(incident.kind, incident.key, now) is not None:
+            closed += 1
+    return closed
 
 
 def record_tunnels(
