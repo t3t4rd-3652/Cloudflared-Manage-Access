@@ -690,10 +690,10 @@ Statut : À FAIRE
 | P26 | FAIT | bfb1fdf, 5917839 | 594 ✓ | 2026-10-14 |
 | P27 | FAIT | c9b5265, 66fef5e | 594 ✓ | 2026-10-14 |
 | P28 | FAIT | 3ff1e22 | 612 ✓ | 2026-10-15 |
-| P29 | À FAIRE | — | — | — |
+| P29 | FAIT | 6a31a70 | 622 ✓ | 2026-10-15 |
 | P30 | À FAIRE | — | — | — |
 | P31 | À FAIRE | — | — | — |
 | P32 | À FAIRE | — | — | — |
 
-**Prochaine action exacte :** P29 — un agent `executant-m` (Sonnet), seul, sur `main` : pastille « Maintenance »
-et clôture des incidents d'une surveillance coupée.
+**Prochaine action exacte :** P30 — un agent `executant-m` (Sonnet), seul, sur `main` : canaux d'alerte et
+maintenances dans l'export de configuration (adresse seulement dans un export chiffré).
