@@ -756,7 +756,7 @@ CATALOG: dict[str, str] = {
     "Gérer les tokens…": "Tokens verwalten…",
     "Heure": "Uhrzeit",
     "Heure invalide : attendu HH:MM, par exemple 02:30": "Ungültige Uhrzeit: erwartet HH:MM, zum Beispiel 02:30",
-    "Heures locales. Si la fin est avant le début, la maintenance passe minuit.": "Ortszeit. Liegt das Ende vor dem Beginn, geht die Wartung über Mitternacht.",
+    "Heures locales. Si la fin est avant le début, la maintenance passe minuit ; si elle est égale au début, elle couvre la journée entière.": "Ortszeit. Liegt das Ende vor dem Beginn, geht die Wartung über Mitternacht; entspricht es dem Beginn, gilt sie den ganzen Tag.",
     "Historique de cet accès": "Verlauf dieses Zugangs",
     "Historique des sessions": "Sitzungsverlauf",
     "Historique des sessions…": "Sitzungsverlauf…",

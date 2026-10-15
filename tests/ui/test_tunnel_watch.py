@@ -40,7 +40,7 @@ def test_main_window_warns_when_a_tunnel_falls_and_recovers(qtbot, gui, monkeypa
     level, text, action = notes[0]
     assert level == "error" and "« bureau » est hors ligne" in text
     diagnosed: list[str] = []
-    monkeypatch.setattr(window.cloud, "refresh", lambda: None)
+    monkeypatch.setattr(window.cloud, "refresh", lambda then=None: None)
     monkeypatch.setattr(window.cloud, "check_connectors", lambda tunnel: diagnosed.append(tunnel.id))
     assert isinstance(action, tuple) and action[0] == "Diagnostiquer…"
     action[1]()

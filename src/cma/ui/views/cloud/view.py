@@ -98,6 +98,7 @@ class CloudView(QWidget):
         self._auto_done = False
         self._loading = False
         self._refresh_again = False
+        self._after_refresh: list[Callable[[], None]] = []  # actions à jouer une fois le compte relu
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 16)
         layout.setSpacing(4)
@@ -425,6 +426,7 @@ class CloudView(QWidget):
 
     def _error(self, error: BaseException) -> None:
         self._loading = False
+        self._after_refresh.clear()
         self.connect_button.setEnabled(True)
         self.refresh_button.setEnabled(True)
         self.tabs.setEnabled(True)
@@ -492,10 +494,15 @@ class CloudView(QWidget):
             self.tabs.setEnabled(False)
             self.refresh()
 
-    def refresh(self) -> None:
+    def refresh(self, then: Callable[[], None] | None = None) -> None:
+        """Relit le compte. `then` est joué une fois la dernière lecture affichée (jamais si la lecture échoue) :
+        c'est le moment où un objet du compte peut être sélectionné."""
         account = self.account.currentData()
         if not isinstance(account, Account):
+            self._after_refresh.clear()
             return
+        if then is not None:
+            self._after_refresh.append(then)
         if self._loading:
             # Une lecture est en cours, peut-être d'avant la dernière modification : relire juste après elle.
             self._refresh_again = True
@@ -513,6 +520,10 @@ class CloudView(QWidget):
             self._fill(overview)
             if self._refresh_again:
                 self.refresh()
+                return
+            pending, self._after_refresh = self._after_refresh, []
+            for action in pending:
+                action()
 
         self.ctx.run(self.admin.overview(account), done, self._error)
 

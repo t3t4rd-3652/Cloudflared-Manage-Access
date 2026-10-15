@@ -65,6 +65,7 @@ def end_label(record: SessionRecord) -> str:
 def _table(headers: list[str], name: str) -> QTableWidget:
     table = QTableWidget(0, len(headers))
     table.setAccessibleName(name)
+    table.setTabKeyNavigation(False)  # Tab quitte le tableau au lieu de passer de case en case
     table.setHorizontalHeaderLabels(headers)
     table.verticalHeader().hide()
     table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)

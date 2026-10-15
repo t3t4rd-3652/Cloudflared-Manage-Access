@@ -391,6 +391,7 @@ class CardTable(QTableWidget):
         super().__init__(0, len(headers))
         self.setObjectName("CardTable")
         self.setAccessibleName(name)
+        self.setTabKeyNavigation(False)  # Tab quitte le tableau au lieu de passer de case en case
         self.setHorizontalHeaderLabels(headers)
         self.horizontalHeader().hide()
         self.verticalHeader().hide()

@@ -53,6 +53,7 @@ def _dialog(parent: QWidget | None, window_title: str) -> tuple[QDialog, QVBoxLa
 def _table(headers: list[str], name: str) -> QTableWidget:
     table = QTableWidget(0, len(headers))
     table.setAccessibleName(name)
+    table.setTabKeyNavigation(False)  # Tab quitte le tableau au lieu de passer de case en case
     table.setHorizontalHeaderLabels(headers)
     table.verticalHeader().hide()
     table.verticalHeader().setDefaultSectionSize(34)

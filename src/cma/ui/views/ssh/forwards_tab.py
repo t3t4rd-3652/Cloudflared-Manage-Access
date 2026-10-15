@@ -74,6 +74,7 @@ class ForwardsTab(QWidget):
         layout.addWidget(self.scope)
         self.table = QTableWidget(0, len(headers))
         self.table.setAccessibleName(tr("Redirections enregistrées"))
+        self.table.setTabKeyNavigation(False)  # Tab quitte le tableau au lieu de passer de case en case
         self.table.setHorizontalHeaderLabels(headers)
         self.table.verticalHeader().hide()
         self.table.verticalHeader().setDefaultSectionSize(36)
