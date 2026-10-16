@@ -29,7 +29,7 @@ anciens plans, qui ont tous été appliqués. L'historique des étapes est dans 
 
 ### Qualité
 
-- 761 tests (unitaires, intégration avec un faux cloudflared et un serveur SSH en mémoire, interface
+- 760 tests (unitaires, intégration avec un faux cloudflared et un serveur SSH en mémoire, interface
   pytest-qt). Couverture : 94 % sur `cma.core` (seuil 90 %), 91 % au total (seuil 80 %). De 60 à 130 s en
   parallèle (`pytest -n auto`) selon la charge du poste.
 - CI à chaque push : lint, typage Windows et Linux, tests sous Windows et Linux (et macOS, non bloquant), vrai
