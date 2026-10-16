@@ -489,8 +489,12 @@ def test_logs_view(qtbot, gui, monkeypatch, tmp_path):
     assert view.table_stack.currentWidget() is view.no_match
     view.reset_filters()
     assert view.proxy.rowCount() == 2
-    view.table.selectRow(1)
-    qtbot.waitUntil(lambda: "Access a refusé le jeton" in view.detail.toPlainText(), timeout=45000)
+    # Sélection explicite : `selectRow` laisse parfois la sélection vide (vu en CI sur les trois systèmes).
+    from PySide6.QtCore import QItemSelectionModel
+
+    flags = QItemSelectionModel.SelectionFlag.ClearAndSelect | QItemSelectionModel.SelectionFlag.Rows
+    view.table.selectionModel().setCurrentIndex(view.proxy.index(1, 0), flags)
+    assert "Access a refusé le jeton" in view.detail.toPlainText()
     assert "sélectionnée" in view.copy_button.accessibleName()
     view._copy()
     assert QApplication.clipboard().text().endswith("Bureau labo : Access a refusé le jeton")

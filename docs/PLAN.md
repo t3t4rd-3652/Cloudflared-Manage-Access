@@ -671,7 +671,7 @@ attitrés ; les traductions passent par un JSON réappliqué à l'intégration.
 
 ### P33 — Objectifs de disponibilité (2.14)
 
-Statut : À FAIRE
+Statut : FAIT
 
 - **Objectif** : savoir quand un service tient moins que ce qu'on attend de lui.
 - **Tâches** : objectif de disponibilité par objet (`Settings.availability_targets`, clé d'objet → pourcentage, et un
@@ -685,7 +685,7 @@ Statut : À FAIRE
 
 ### P34 — Surveillance de plusieurs comptes (2.14)
 
-Statut : À FAIRE
+Statut : FAIT
 
 - **Objectif** : un utilisateur qui a plusieurs jetons d'API nommés (plusieurs comptes Cloudflare) est prévenu des
   pannes de tous ses comptes, pas seulement de celui choisi dans la vue.
@@ -700,7 +700,7 @@ Statut : À FAIRE
 
 ### P35 — La disponibilité sur la page Sessions (2.14)
 
-Statut : À FAIRE
+Statut : FAIT
 
 - **Objectif** : voir la tenue des 7 derniers jours sans ouvrir les outils du compte.
 - **Tâches** : tuile « Disponibilité » sur la page Sessions (taux global sur 7 jours, nombre d'incidents, objet le
@@ -712,7 +712,7 @@ Statut : À FAIRE
 
 ### P36 — Qualité des langues et stabilité des tests (2.14)
 
-Statut : À FAIRE
+Statut : FAIT
 
 - **Objectif** : des traductions allemandes et espagnoles relues, aucune étiquette coupée, une suite stable sous charge.
 - **Tâches** : relecture des entrées allemandes et espagnoles ajoutées depuis la 2.10 (cohérence des termes avec
@@ -725,7 +725,7 @@ Statut : À FAIRE
 
 ### P37 — Intégration, juge, release 2.14.0 (2.14)
 
-Statut : À FAIRE
+Statut : EN COURS
 
 - **Tâches** : fusion des branches, traductions, suite complète trois fois, CHANGELOG, guide, README, SECURITE,
   ARCHITECTURE, captures, juge neutre, release 2.14.0 et installation.
@@ -771,11 +771,12 @@ Statut : À FAIRE
 | P30 | FAIT | 173fa99 | 643 ✓ | 2026-10-15 |
 | P31 | FAIT | 27e2681 | 675 ✓ | 2026-10-15 |
 | P32 | FAIT | 42d0b22 | 677 ✓ | 2026-10-15 |
-| P33 | À FAIRE | — | — | — |
-| P34 | À FAIRE | — | — | — |
-| P35 | À FAIRE | — | — | — |
-| P36 | À FAIRE | — | — | — |
-| P37 | À FAIRE | — | — | — |
+| P33 | FAIT | 6339c0e, 3df1fa3 | 758 ✓ | 2026-10-16 |
+| P34 | FAIT | 66964f1, b6ba3ee | 758 ✓ | 2026-10-16 |
+| P35 | FAIT | 7535bf0 | 758 ✓ | 2026-10-16 |
+| P36 | FAIT | f06f21d, dee9945 | 758 ✓ | 2026-10-16 |
+| P37 | EN COURS | — | — | — |
 
-**Prochaine action exacte :** lancer les agents E (P33), F (P34, Opus), G (P35) et H (P36) en parallèle, chacun
-dans son worktree (`.claude/worktrees/p33` à `p36`), puis intégrer en P37.
+**Prochaine action exacte :** P37 — intégration faite (bcb399f : 4 branches fusionnées, alertes d'objectif
+branchées dans le Monitor, détail des journaux corrigé, test SFTP stabilisé ; 758 tests verts quatre fois) ;
+documentation en cours, puis juge neutre (Opus), release 2.14.0 et installation.
