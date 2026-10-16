@@ -312,8 +312,9 @@ surveillance, s'il est choisi, passe d'abord).
 - Les objectifs, sourdines et maintenances restent par tunnel et par nom d'hôte : rien à refaire en activant ou en
   coupant le réglage.
 
-Limites : **Ouvrir** (sous-menu **Pannes**) et **Diagnostiquer…** sur un objet d'un autre compte mènent au compte
-affiché, pas au sien : choisissez d'abord son jeton dans la vue Cloudflare ; la carte « Santé du compte » ne nomme le
+Limites : **Ouvrir** (sous-menu **Pannes**) sur un objet d'un autre compte mène au compte affiché, pas au sien :
+choisissez d'abord son jeton dans la vue Cloudflare ; la notification d'une panne d'un autre compte ne propose pas
+**Diagnostiquer…** ; la carte « Santé du compte » ne nomme le
 compte que pour une panne unique (avec plusieurs pannes, elle les résume).
 
 Attention : **tous les jetons du coffre servent alors à la surveillance**, tâche planifiée comprise. Pour un compte

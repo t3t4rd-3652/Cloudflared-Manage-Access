@@ -1,7 +1,7 @@
 # Plan du projet
 
-État au 2026-10-15, version **2.13.0** (P29 à P32) ; P23 à P28 réalisés (2.12 : jours locaux, maintenance, rappels,
-résumé hebdomadaire, pannes dans l'icône, accessibilité au clavier), vérifiés par deux juges. Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+État au 2026-10-16, version **2.13.0** publiée ; P33 à P36 réalisés (2.14 : objectifs de disponibilité,
+surveillance de plusieurs comptes, tuile Disponibilité, traductions et stabilité), en cours de validation (P37). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -29,8 +29,8 @@ anciens plans, qui ont tous été appliqués. L'historique des étapes est dans 
 
 ### Qualité
 
-- 612 tests (unitaires, intégration avec un faux cloudflared et un serveur SSH en mémoire, interface
-  pytest-qt). Couverture : 94 % sur `cma.core` (seuil 90 %), 90 % au total (seuil 80 %). De 60 à 130 s en
+- 761 tests (unitaires, intégration avec un faux cloudflared et un serveur SSH en mémoire, interface
+  pytest-qt). Couverture : 94 % sur `cma.core` (seuil 90 %), 91 % au total (seuil 80 %). De 60 à 130 s en
   parallèle (`pytest -n auto`) selon la charge du poste.
 - CI à chaque push : lint, typage Windows et Linux, tests sous Windows et Linux (et macOS, non bloquant), vrai
   cloudflared, audit des dépendances, scripts serveur sur trois distributions, temps de démarrage, captures à
@@ -733,6 +733,10 @@ Statut : EN COURS
 
 ### Dette technique à surveiller
 
+- Surveillance de plusieurs comptes : un compte vu par deux jetons n'est relevé qu'une fois (jeton de la
+  surveillance d'abord) ; si ce jeton est refusé, le jeton actif n'est pas essayé à sa place (relevé à 2026-10-16 par
+  le juge). Un repli sur le jeton suivant rendrait la surveillance plus robuste.
+- Les messages d'erreur du journal des envois sont enregistrés en français et ne sont pas retraduits à l'affichage.
 - (Archivé le 2026-10-14 : résolu par P23.) Disponibilité : le journal agrégeait les relevés par jour UTC
   (`AvailabilityLog`), alors que le graphique et les
   incidents s'affichent en heure locale. Un incident vers minuit (heure de Paris) peut colorer la barre de la veille.

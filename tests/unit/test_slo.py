@@ -598,3 +598,11 @@ def test_cli_parser_accepts_month():
     args = cli.build_parser().parse_args(["availability", "--month", "2026-10", "--json"])
     assert args.month == "2026-10" and args.json and args.days == 30
     assert cli.build_parser().parse_args(["availability"]).month is None
+
+
+def test_gap_is_rounded_down():
+    """Un objectif manqué de peu ne s'écrit jamais « -0.00 » (on lirait l'objectif tenu)."""
+    from cma.core.slo_report import _gap  # pyright: ignore[reportPrivateUsage]
+
+    assert _gap(-0.004) == "-0.01" and _gap(0.004) == "+0.00" and _gap(None) == "—"
+    assert _gap(100 - 99.9) == "+0.10"  # 0,0999999… en virgule flottante

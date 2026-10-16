@@ -57,8 +57,8 @@ class SendsDialog(QDialog):
             [tr("Date"), tr("Canal"), tr("Nature"), tr("Objet"), tr("Résultat")], tr("Envois récents")
         )
         for column, width in enumerate(
-            (140, 180, 140, 180)
-        ):  # « Nature » : « Zusammenfassung », « Wiederherstellung »
+            (170, 180, 140, 180)
+        ):  # date et heure complètes ; « Nature » : « Zusammenfassung »
             self.table.horizontalHeader().resizeSection(column, width)
         self.table.setWordWrap(True)
         self.table.verticalHeader().setMinimumSectionSize(36)

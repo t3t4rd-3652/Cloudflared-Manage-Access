@@ -1679,7 +1679,7 @@ CATALOG: dict[str, str] = {
     "Supprimer sur le serveur ?": "Auf dem Server löschen?",
     "Supprimer…": "Löschen…",
     "supprimé": "entfernt",
-    "Sur les 30 derniers jours, CMA prévient une fois quand elle passe dessous, puis quand elle remonte (canaux d'alerte).": "Über die letzten 30 Tage warnt CMA einmal, wenn sie darunter fällt, und dann, wenn sie wieder steigt (Alarmkanäle).",
+    "Sur les 30 derniers jours, CMA prévient une fois quand elle passe dessous, puis quand elle remonte (canaux d'alerte).": "Über die letzten 30 Tage warnt CMA einmal, wenn sie darunter fällt, und dann, wenn sie wieder steigt (Warnkanäle).",
     "Surveillance des tunnels planifiée, même CMA fermé.": "Tunnelüberwachung geplant, auch bei geschlossenem CMA.",
     "Surveiller aussi quand CMA est fermé (tâche planifiée, toutes les 15 minutes)": "Auch bei geschlossenem CMA überwachen (geplante Aufgabe, alle 15 Minuten)",
     "Surveiller les tunnels du compte et prévenir s'ils tombent": "Tunnel des Kontos überwachen und bei Ausfall warnen",

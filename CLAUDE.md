@@ -266,7 +266,8 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   gardent leur forme (identifiants uniques chez Cloudflare), donc journal, sourdines, maintenances et `alert_state.json`
   n'ont rien à migrer ; seul le libellé reçoit « (Compte A) » dès que deux comptes sont surveillés. Un jeton en échec est
   journalisé (`WatchFailure`) sans arrêter les autres, et le relevé incomplet (`complete=False`) ne clôt aucun incident.
-  Limites connues : « Ouvrir » et « Diagnostiquer… » sur un objet d'un autre compte ouvrent le compte affiché, et la carte
+  Limites connues : « Ouvrir » sur un objet d'un autre compte ouvre le compte affiché ; aucune action « Diagnostiquer… »
+  n'est proposée pour un autre compte (`monitor.py`) ; la carte
   « Santé du compte » ne nomme le compte que pour une panne unique. Les tests de durée utilisent `delay` du faux serveur
   (`two_accounts`).
 - **Verrou des règles d'ingress** (`cfapi._INGRESS_LOCK`, P36) : toute modification de la configuration d'un tunnel

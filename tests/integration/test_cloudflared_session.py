@@ -45,7 +45,7 @@ async def wait_for(session, states, timeout=45.0):
         if session.state in states:
             return session.state
         await asyncio.sleep(0.05)
-    journal = " | ".join(line.message for line in session.logs[-6:])
+    journal = " | ".join(line.message for line in list(session.logs)[-6:])
     raise AssertionError(
         f"état {session.state} au lieu de {states} ; message : {session.message} ; journal : {journal}"
     )

@@ -22,8 +22,9 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), num
   A) ») dans les notifications, les alertes, le menu « Pannes » et le journal de disponibilité. Un jeton refusé ne
   bloque pas les autres : `cma tunnels` le signale sur la sortie d'erreur (code 1 si rien d'autre ne va mal) et ajoute
   le champ `account` à sa sortie `--json`. Pour surveiller deux comptes d'un même jeton, l'enregistrer deux fois.
-  Limites : **Ouvrir** et **Diagnostiquer…** sur un objet d'un autre compte mènent au compte affiché ; la carte « Santé
-  du compte » ne nomme le compte que pour une panne unique. Voir l'ADR 0003.
+  Limites : **Ouvrir** (sous-menu « Pannes ») sur un objet d'un autre compte mène au compte affiché, et la
+  notification d'une panne d'un autre compte ne propose pas « Diagnostiquer… » ; la carte « Santé du compte » ne nomme
+  le compte que pour une panne unique. Voir l'ADR 0003.
 - **Tuile « Disponibilité » sur la page Sessions** : taux des 7 derniers jours, incidents et objet le moins disponible ;
   **Détail** ouvre la boîte Disponibilité sur cet objet. Elle reste cachée tant que rien n'a été relevé. La carte
   « Santé du compte » a de même un bouton **Disponibilité** qui ouvre la boîte sur le premier objet en panne.

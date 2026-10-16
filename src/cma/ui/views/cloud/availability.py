@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
+    QHeaderView,
     QSplitter,
     QTableWidgetItem,
     QToolTip,
@@ -291,7 +292,8 @@ class AvailabilityDialog(QDialog):
         )
         for column, width in enumerate((300, 90, 100, 100, 120)):
             self.table.horizontalHeader().resizeSection(column, width)
-        self.table.horizontalHeader().resizeSection(5, 110)
+        # À la largeur de son en-tête et de son contenu : « Incidentes (30 d) » (es) ne tient pas dans 110 px.
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         self.table.itemSelectionChanged.connect(self._show_incidents)
         splitter.addWidget(self.table)
         self.incidents = data_table(

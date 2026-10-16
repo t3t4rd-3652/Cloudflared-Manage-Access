@@ -11,6 +11,7 @@ import csv
 import html
 import io
 import json
+import math
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -22,7 +23,8 @@ from cma.i18n import get_language, tr
 
 def _gap(value: float | None) -> str:
     """Écart à l'objectif en points : « +0.12 » ou « -0.40 » ; « — » sans objectif ou sans relevé."""
-    return "—" if value is None else f"{value:+.2f}"
+    # Vers le bas, comme le taux : un écart de -0.004 point s'écrit « -0.01 », jamais « -0.00 » (objectif manqué).
+    return "—" if value is None else f"{math.floor(value * 100 + 1e-9) / 100:+.2f}"
 
 
 def _uptime(row: MonthRow) -> str:
@@ -68,7 +70,7 @@ def report_lines(report: MonthReport) -> list[str]:
     incidents, nom). Liste vide si rien n'a été relevé."""
     lines: list[str] = []
     for row in report.rows:
-        uptime = f"{row.uptime:6.2f} %" if row.uptime is not None else "     — "
+        uptime = f"{math.floor(row.uptime * 100 + 1e-9) / 100:6.2f} %" if row.uptime is not None else "     — "
         mean = f"{row.stats.mean_ms:5.0f} ms" if row.stats.mean_ms is not None else "        "
         target = target_text(row.target).rjust(8)
         lines.append(f"{uptime}  {target}  {_gap(row.gap):>6}  {mean}  {row.incidents:>3}  {row.label}")
