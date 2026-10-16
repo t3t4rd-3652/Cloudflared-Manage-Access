@@ -200,8 +200,9 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   d'office (le vrai compte a des sites publics voulus). Un constat accepté est gardé par `Finding.ident` dans
   `Settings.ignored_findings`. « Exiger Access au niveau du tunnel » écrit `originRequest.access` (`required`,
   `teamName` lu dans `/access/organizations`, `audTag` de l'application qui couvre le nom).
-- **Jeton de la surveillance** (`Settings.watch_token_id`, `CloudflareAdmin.watch_api`) : `tunnel_states` et
-  `service_targets` le prennent ; tout le reste utilise le jeton actif.
+- **Jeton de la surveillance** (`Settings.watch_token_id`) : les relevés l'essaient en premier, puis le jeton actif,
+  puis les autres jetons du même compte (repli de P38, `CloudflareAdmin._watch_plan` et `_read_with_fallback`) ;
+  `watch_api` reste pour un usage direct ; tout le reste utilise le jeton actif.
 - **Disponibilité et alertes** (`cma.core.availability`, `alerts`, `monitoring`) : `record_tunnels` et
   `record_services` tiennent le journal et renvoient les incidents ouverts ou fermés ; CMA ouvert et la tâche
   planifiée s'en servent de la même façon (la tâche n'écrit que si CMA est fermé). La sourdine (`Settings.muted`,
@@ -248,14 +249,20 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   configuration et de `alert_state.json`, 200 entrées au plus. Plusieurs fils notent en même temps : un verrou
   de processus sérialise « lire, ajouter, écrire », et un journal qui ne s'écrit pas n'empêche jamais une alerte
   de partir. Aucune adresse, même en morceaux : messages passés par `scrub` (200 caractères). La tâche planifiée
-  ne l'écrit que si CMA est fermé ; `cma alerts test` et `digest` y notent leurs envois.
+  ne l'écrit que si CMA est fermé ; `cma alerts test` et `digest` y notent leurs envois. Depuis P41, un échec garde
+  aussi `error_code` (`invalid_address`, `refused`, `timeout`, `dns`, `tls`, `unreachable`, `other` ; porté par
+  `AlertError`) et `error_args` (code HTTP, nom de type d'exception ; `safe_args` refuse tout ce qui n'est pas un
+  entier ou un mot simple absent de l'adresse), traduits à l'affichage par `sends.error_text` ; le texte `error`
+  reste le repli (anciennes entrées, code inconnu). Un nouveau code se traduit dans `error_text`.
 - **Objectifs de disponibilité** (`cma.core.slo`, `slo_report`, P33) : objectif par objet
   (`Settings.availability_targets`, clés `tunnel:<id>` et `service:<nom>`) puis `default_availability_target`, de 50 à
   100 %, comparé à la disponibilité des 30 derniers jours locaux. Les objets déjà annoncés sous leur objectif sont dans
   l'état `slo` de `alert_state.json` (ADR 0002) : **une alerte par franchissement**, puis le retour (aux canaux qui
   veulent les retours) ; l'état note l'envoi seulement quand un canal l'a reçu (le retour, dans tous les cas). Rien pour
-  un objet en sourdine ou en maintenance, ni sans relevé (un trou n'est pas une panne). **Pas d'hystérésis** : un objet
-  qui oscille autour de l'objectif alterne alerte et retour, c'est une limite assumée. Les alertes partent aussi CMA
+  un objet en sourdine ou en maintenance, ni sans relevé (un trou n'est pas une panne). **Marge de retour** (P40,
+  `Settings.availability_margin`, 0,05 point par défaut, de 0 à 1, commune à tous les objets) : l'alerte part sous
+  l'objectif, le retour seulement à objectif + marge, plafonné à 100 % (`slo.recovery_level`, `is_recovered`) ;
+  entre les deux, l'état annoncé ne change pas. La marge est lue à chaque relevé : `alert_state.json` ne change pas. Les alertes partent aussi CMA
   ouvert sans rappels ni résumé (`has_targets` garde le calcul quand aucun objectif n'existe). `cma availability --month`
   vit dans `cli.show_month_availability` (code 0, 1 si mois invalide ou à venir) ; le mois se calcule sur des dates
   locales, pas des instants.
@@ -267,8 +274,13 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   gardent leur forme (identifiants uniques chez Cloudflare), donc journal, sourdines, maintenances et `alert_state.json`
   n'ont rien à migrer ; seul le libellé reçoit « (Compte A) » dès que deux comptes sont surveillés. Un jeton en échec est
   journalisé (`WatchFailure`) sans arrêter les autres, et le relevé incomplet (`complete=False`) ne clôt aucun incident.
-  Limites connues : « Ouvrir » sur un objet d'un autre compte ouvre le compte affiché ; aucune action « Diagnostiquer… »
-  n'est proposée pour un autre compte (`monitor.py`) ; la carte
+  **Repli** (P38) : un jeton refusé (401, 403) ou absent du coffre laisse la place au jeton suivant enregistré sur le
+  même compte, jamais sur une erreur réseau, un 5xx ou un 404 ; le repli est journalisé et porté par
+  `TunnelSweep.fallbacks` / `ServiceSweep.fallbacks`, et un échec est noté par jeton essayé. **Ouvrir un autre
+  compte** (P39) : `Monitor.token_for_account` / `can_open` cherchent un jeton du compte (dernier relevé, sinon
+  `ApiToken.account_id`, présent dans le coffre) ; `CloudView.show_account` bascule jeton et compte actifs (enregistrés
+  comme le sélecteur, jamais `watch_token_id`) puis sélectionne l'objet ; le compteur `_epoch` (`_invalidate`) fait
+  ignorer une lecture ou une connexion lancée avant la bascule. Limite connue : la carte
   « Santé du compte » ne nomme le compte que pour une panne unique. Les tests de durée utilisent `delay` du faux serveur
   (`two_accounts`).
 - **Verrou des règles d'ingress** (`cfapi._INGRESS_LOCK`, P36) : toute modification de la configuration d'un tunnel
@@ -280,7 +292,10 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   tests depuis ce worktree avec `PYTHONPATH=src` et le `.venv` du dépôt principal. Les traductions passent par un
   JSON que l'orchestrateur réapplique à l'intégration : les trois catalogues entrent en conflit à la fusion. Une
   capture lancée par un script qui importe `tests/conftest.py` doit forcer `QT_QPA_PLATFORM=windows` : ce fichier
-  impose `offscreen`, sans police sur ce poste.
+  impose `offscreen`, sans police sur ce poste. Depuis un worktree, pyright demande `--pythonpath` vers le
+  `python.exe` du `.venv` principal ; sous Git Bash, `PYTHONPATH=src` seul (`src:.` charge le `cma` du dépôt
+  principal par l'installation éditable). Cinq agents qui lancent chacun `-n auto` saturent la machine : les
+  tests qui démarrent un vrai processus (cloudflared, PowerShell) échouent alors ; relancés seuls, ils passent.
 
 ## Pièges déjà rencontrés
 
@@ -344,6 +359,19 @@ Tests et CI :
 - En parallèle (`-n auto`), la machine est chargée : une poignée de main SSH vers le serveur de test peut dépasser
   10 s. Les attentes d'état des tests (`wait_state`, `wait_listening`) vont jusqu'à 45 s et rendent la main dès que
   l'état est atteint ; ne pas les raccourcir.
+- Arrêt simultané de tous les processus de travail de xdist (code Windows `0x80010002`, une fois sur huit passages
+  le 2026-10-16) : cause non établie. Piste mesurée en P42 : la **mémoire validée du système** peut tomber à
+  quelques dizaines de Mo (43 Mo relevés) alors que la RAM est libre, quand plusieurs sessions lancent `-n auto`
+  (un processus de test UI valide environ 150 Mo) ; les démarrages de processus échouent alors. Diagnostic
+  permanent (`tests/diagnostic_workers.py`) : `%TEMP%\cma-pytest-diag\<pid du contrôleur>\<pid>.log`, gardé
+  seulement si un processus a été perdu ou si la session échoue (chemin affiché en fin de test). Le journal
+  **sans ligne de fin normale** est celui du processus mort : lire son dernier test, puis `commit_free`, puis
+  `controleur_vivant`, puis le disque. `CMA_TEST_DIAG=0` le coupe, `CMA_TEST_DIAG_KEEP=1` garde le dossier. Sous
+  charge, lancer `-n 8`. Les tests n'ouvrent plus le backend réseau COM du système (`_no_system_network_backend`,
+  `CMA_TEST_REAL_NETWORK=1` pour le rétablir).
+- `scripts/capture_screenshots.py` : le menu « Pannes » est reconstruit (`Tray._rebuild_menu`, `deleteLater` de
+  l'ancien) à chaque `config_changed` ; le relire (`tray._health_menu`) après avoir vidé la boucle d'événements et
+  vérifier `shiboken6.isValid` avant `grab`.
 
 Réseau et bibliothèques :
 

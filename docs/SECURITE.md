@@ -14,7 +14,9 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
 | Instantanés `snapshots/*.json` | Configuration du compte Cloudflare (règles, politiques, DNS, Client ID des tokens) ; aucun jeton ni secret. Les 30 derniers par compte. |
 | Disponibilité `availability.json` | Incidents et taux des tunnels et services (noms d'hôte, états, durées) ; 90 jours au plus. Avec « Surveiller tous les comptes », le libellé d'un objet suit le nom de son compte (pas sa clé). |
 | État des alertes `alert_state.json` | Dates des derniers rappels de pannes, semaine du dernier résumé hebdomadaire, tunnel de chaque nom d'hôte et objets déjà annoncés sous leur objectif de disponibilité (`slo`, avec la date de l'annonce) ; aucun secret. |
-| Journal des envois `alert_log.json` | Les 200 derniers envois vers les canaux d'alerte (date, nom et type du canal, nature, objet, résultat). Aucun secret : l'adresse d'un canal n'y est jamais écrite, ni en entier ni en morceaux ; les erreurs sont rédigées, les adresses masquées, 200 caractères au plus. Fichier local du dossier de données, hors de la configuration et de tout export, effaçable depuis CMA. |
+| Journal des envois `alert_log.json` | Les 200 derniers envois vers les canaux d'alerte (date, nom et type du canal, nature, objet, résultat). Aucun secret : l'adresse d'un canal n'y est jamais écrite, ni en entier ni en morceaux ; les erreurs sont rédigées, les adresses masquées, 200 caractères au plus. Le code d'erreur et ses paramètres
+(`error_code`, `error_args`) n'acceptent que des entiers et des mots simples absents de l'adresse du canal, à
+l'écriture comme à la lecture. Fichier local du dossier de données, hors de la configuration et de tout export, effaçable depuis CMA. |
 | Rapport de disponibilité exporté | Mêmes données (noms d'hôte, taux, incidents), aucun jeton ni secret. La page HTML est autonome : ni script ni ressource externe. |
 | Adresses des canaux d'alerte | Coffre du système (clé `alert:<id>`) : une adresse ntfy, Slack ou Teams vaut un jeton. |
 | Historique `history.json` | Nom des accès, horaires, compteurs et messages d'incident déjà masqués ; 90 jours au plus, effaçable depuis CMA. |
@@ -52,7 +54,10 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
 - **« Surveiller tous les comptes »** (désactivé par défaut) étend la surveillance à **tous les jetons d'API du
   coffre**, tâche planifiée comprise : chacun sert, à chaque relevé, avec son dernier compte choisi. Un jeton qui
   peut écrire sur un compte qu'on ne fait que surveiller élargit ce qu'un poste compromis atteint : enregistrez pour
-  ces comptes des jetons en lecture seule. Un jeton refusé est seulement journalisé (jamais sa valeur).
+  ces comptes des jetons en lecture seule. Un jeton refusé est seulement journalisé (jamais sa valeur), et le jeton
+  suivant enregistré sur le même compte prend le relais : si celui-ci peut écrire, le compte est alors lu par un
+  jeton plus puissant (lecture seulement, repli signalé dans le journal). Enregistrez de préférence uniquement des
+  jetons en lecture seule pour un compte surveillé.
 - Le nom du compte accompagne alors chaque panne, et part **vers les canaux d'alerte** et dans les libellés du
   journal de disponibilité. Chez Cloudflare, le nom par défaut d'un compte contient l'adresse e-mail de son
   propriétaire (« …'s Account ») : un canal public (un sujet ntfy) la verrait. Renommez le compte chez Cloudflare si

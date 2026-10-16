@@ -201,7 +201,9 @@ en sourdine ou en maintenance (le message vient à la fin de la sourdine si la s
 relevé sur les 30 jours, ni pour un type que la surveillance ne relève plus. **Envois récents…** note ces messages avec
 la nature **Objectif**.
 
-Limite : une disponibilité qui oscille autour de l'objectif peut alterner alerte et retour (pas d'hystérésis).
+Pour qu'une disponibilité qui oscille autour de l'objectif ne fasse pas alterner alerte et retour, le message de
+retour n'est envoyé qu'au-dessus de l'objectif plus une **marge de retour**, réglée dans **Objectif par défaut…**
+(0,05 point par défaut, commune à tous les objets ; le retour à 100 % reste possible avec un objectif de 100 %).
 
 Pour un compte rendu mensuel, `cma availability --month 2026-10` donne la disponibilité du mois civil (en jours
 locaux) de chaque tunnel et service, avec son objectif et l'écart en points ; le mois en cours va jusqu'à aujourd'hui.
@@ -312,10 +314,12 @@ surveillance, s'il est choisi, passe d'abord).
 - Les objectifs, sourdines et maintenances restent par tunnel et par nom d'hôte : rien à refaire en activant ou en
   coupant le réglage.
 
-Limites : **Ouvrir** (sous-menu **Pannes**) sur un objet d'un autre compte mène au compte affiché, pas au sien :
-choisissez d'abord son jeton dans la vue Cloudflare ; la notification d'une panne d'un autre compte ne propose pas
-**Diagnostiquer…** ; la carte « Santé du compte » ne nomme le
-compte que pour une panne unique (avec plusieurs pannes, elle les résume).
+**Ouvrir** (sous-menu **Pannes**) sur un objet d'un autre compte passe la vue Cloudflare sur ce compte et sur un
+jeton qui le voit, puis sélectionne l'objet : ce jeton et ce compte deviennent ceux de la vue, comme si vous les
+aviez choisis dans l'en-tête. Les notifications proposent aussi **Diagnostiquer…** et **Voir…**. Si un jeton est
+refusé, la surveillance essaie le jeton suivant enregistré sur le même compte et l'écrit dans le journal.
+Limite : la carte « Santé du compte » ne nomme le compte que pour une panne unique (avec plusieurs pannes, elle les
+résume).
 
 Attention : **tous les jetons du coffre servent alors à la surveillance**, tâche planifiée comprise. Pour un compte
 que vous ne faites que surveiller, enregistrez un jeton en lecture seule. Le nom du compte part vers les canaux

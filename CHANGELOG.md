@@ -2,6 +2,31 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Ajouté
+- **Marge de retour des objectifs** (Outils › Disponibilité… › **Objectif par défaut…**) : le message « objectif
+  retrouvé » n'est envoyé que lorsque la disponibilité remonte à l'objectif plus la marge (0,05 point par défaut, de 0
+  à 1, plafonné à 100 %). Une disponibilité qui oscille autour de l'objectif ne fait plus alterner alerte et retour.
+  Une marge de 0 rend le comportement d'avant.
+
+### Modifié
+- **Repli sur un autre jeton** (surveillance de plusieurs comptes) : si le jeton qui relève un compte est refusé
+  (401, 403) ou absent du coffre, le jeton suivant enregistré sur ce même compte prend le relais (jeton de la
+  surveillance, puis jeton actif, puis les autres). Le repli est écrit dans le journal, jamais le secret. Une erreur
+  réseau ou une erreur de Cloudflare (5xx) ne fait pas changer de jeton.
+- **« Ouvrir » sur une panne d'un autre compte** (sous-menu « Pannes » de l'icône, notifications) : la vue Cloudflare
+  passe au jeton et au compte de l'objet, relit le compte puis sélectionne le tunnel ou le nom d'hôte. Les
+  notifications proposent aussi **Diagnostiquer…** et **Voir…** pour un autre compte. Le jeton de la surveillance ne
+  change pas ; sans jeton qui voit ce compte, un message l'explique.
+- **Envois récents…** : les erreurs d'envoi s'affichent dans la langue de l'interface (délai dépassé, nom
+  introuvable, échec TLS, refus du canal…). Les entrées enregistrées avant cette version gardent leur texte.
+
+### Publication et tests
+- Le script de captures ne s'arrête plus au hasard sur le menu « Pannes ».
+- Diagnostic des arrêts de processus de test : un journal par processus (test en cours, mémoire et disque libres),
+  gardé seulement quand un processus s'est arrêté.
+
 ## [2.14.0] - 2026-10-16
 
 ### Ajouté

@@ -74,9 +74,10 @@ Unicité des clés, vérifiée :
 - Requêtes : par compte et par relevé, une pour les tunnels ; pour les services, une plus une par tunnel en service.
   S'y ajoute une `/accounts` par jeton pour les noms : une fois par session quand CMA est ouvert, à chaque passage de
   la tâche planifiée. C'est loin de la limite de l'API (1 200 requêtes par 5 minutes et par utilisateur).
-- « Diagnostiquer… » et « Voir… » ne sont proposés que pour les objets du compte affiché dans la vue Cloudflare ;
-  « Ouvrir » du sous-menu « Pannes » ouvre la vue Cloudflare sur le compte actif : pour un autre compte, il faut y
-  choisir son jeton.
+- (Levée en P39, 2026-10-16.) « Ouvrir », « Diagnostiquer… » et « Voir… » sur un objet d'un autre compte passent la
+  vue Cloudflare sur un jeton qui voit ce compte (`Monitor.token_for_account`, `can_open`) puis sélectionnent
+  l'objet (`CloudView.show_account`). La bascule est enregistrée comme un choix dans l'en-tête de la vue : si ce
+  jeton voit plusieurs comptes, son « dernier compte choisi », donc le compte qu'il surveille, change aussi.
 - Avec plusieurs pannes, la carte « Santé du compte » résume (« 2 tunnels en panne ») sans nommer les comptes ; le
   sous-menu « Pannes » et les notifications les nomment.
 - Un test manuel d'un nom (onglet Tunnels de la vue) enregistre un résultat sans compte : le libellé perd son compte
