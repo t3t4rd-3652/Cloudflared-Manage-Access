@@ -731,6 +731,88 @@ Statut : FAIT (deux juges ; écarts corrigés ; 1 échec non expliqué sur 8 pas
   ARCHITECTURE, captures, juge neutre, release 2.14.0 et installation.
 - **Critère de fin** : suite et CI vertes, verdict du juge, `cma --version` = 2.14.0 sur le poste.
 
+### Organisation de P38 à P43 : cinq agents en parallèle
+
+Choix de l'utilisateur (2026-10-16) : nombre « gourmand » (5 agents simultanés), modèles « normal » (la grille).
+Chaque agent a son `git worktree` sous `.claude/worktrees/` et ses fichiers attitrés ; traductions par JSON
+réappliqué à l'intégration (P43).
+
+| Agent | Phase | Modèle | Fichiers attitrés |
+| --- | --- | --- | --- |
+| I | P38 | Opus (`executant-c`) | `core/cfadmin.py` (`_watch_plan`, relevés), `docs/adr/0003-…` |
+| J | P39 | Sonnet (`executant-m`) | `ui/monitor.py`, `ui/main_window.py`, `ui/views/cloud/view.py`, `ui/tray.py` |
+| K | P40 | Sonnet (`executant-m`) | `core/slo.py`, `ui/views/cloud/availability.py` |
+| L | P41 | Sonnet (`executant-m`) | `core/alertlog.py`, `core/alerts.py`, `ui/dialogs/sends.py` |
+| M | P42 | Sonnet (`executant-m`) | `scripts/capture_screenshots.py`, `tests/conftest.py`, outillage de diagnostic des tests |
+
+`core/models.py` est partagé (ajout de champs en fin de `Settings` seulement).
+
+### P38 — Repli sur un autre jeton (2.15)
+
+Statut : À FAIRE
+
+- **Objectif** : un compte vu par plusieurs jetons reste surveillé si le premier jeton est refusé (dette de P34).
+- **Tâches** : dans `_watch_plan` et les relevés de tous les comptes, essayer le jeton suivant qui voit le même
+  compte quand le premier échoue (refus, 401/403, coffre vide) ; journaliser le repli ; ADR 0003 complété.
+- **Critère de fin** : tests (jeton de la surveillance refusé → jeton actif utilisé ; tous refusés → échec comme
+  avant ; aucun double relevé) ; couverture du cœur ≥ 90 %.
+- **Risques** : un jeton en lecture seule refusé ne doit pas faire basculer sur un jeton en écriture sans le dire.
+
+### P39 — « Ouvrir » sur une panne d'un autre compte (2.15)
+
+Statut : À FAIRE
+
+- **Objectif** : depuis le sous-menu « Pannes » ou une notification, ouvrir le bon compte.
+- **Tâches** : « Ouvrir » sur un objet d'un autre compte bascule la vue Cloudflare sur le jeton et le compte de cet
+  objet (sans changer le jeton de la surveillance), relit, puis sélectionne l'objet ; « Diagnostiquer… » proposé
+  aussi pour un autre compte s'il est sûr de le faire.
+- **Critère de fin** : tests avec deux comptes du faux serveur (bascule, sélection, retour au compte précédent) ;
+  captures clair et sombre.
+- **Risques** : changer de jeton pendant une lecture en cours.
+
+### P40 — Marge de retour des objectifs (2.15)
+
+Statut : À FAIRE
+
+- **Objectif** : ne pas alterner alerte et retour quand la disponibilité oscille autour de l'objectif.
+- **Tâches** : hystérésis : le retour n'est annoncé que lorsque la disponibilité repasse au-dessus de l'objectif plus
+  une marge (`Settings.availability_margin`, 0,05 point par défaut, de 0 à 1) ; réglage dans la boîte « Objectif par
+  défaut… » ; compatibilité des fichiers existants.
+- **Critère de fin** : tests d'oscillation (une seule alerte, retour seulement au-dessus de la marge) ; boîte en clair
+  et en sombre.
+- **Risques** : un objectif à 100 % (marge impossible à franchir : retour à 100 %).
+
+### P41 — Messages d'erreur des envois traduits (2.15)
+
+Statut : À FAIRE
+
+- **Objectif** : le journal des envois s'affiche dans la langue de l'interface, erreurs comprises.
+- **Tâches** : enregistrer un code d'erreur et ses paramètres (en plus du texte masqué, pour les anciens fichiers) et
+  traduire à l'affichage ; les anciennes entrées gardent leur texte.
+- **Critère de fin** : tests (nouvelle entrée affichée en allemand, ancienne entrée relue) ; aucun secret (test
+  négatif conservé).
+- **Risques** : ne jamais mettre l'adresse d'un canal dans les paramètres enregistrés.
+
+### P42 — Robustesse des captures et diagnostic des arrêts de tests (2.15)
+
+Statut : À FAIRE
+
+- **Objectif** : un script de captures qui ne s'arrête plus au hasard ; comprendre les arrêts simultanés des processus
+  de test (passage du 2026-10-16, `0x80010002`).
+- **Tâches** : `capture_guide_health_menu` résistant à la perte de focus (« QMenu already deleted ») ; outil ou
+  réglage de diagnostic (journal par processus de travail, mémoire et disque libres au moment d'un arrêt) ; conclusion
+  écrite dans CLAUDE.md (pièges) si la cause est trouvée, sinon ce qui a été exclu.
+- **Critère de fin** : script de captures lancé dix fois sans échec ; suite complète verte cinq fois de suite.
+- **Risques** : cause extérieure au projet (disque D: plein ce jour-là, autres sessions).
+
+### P43 — Intégration, juge, release 2.15.0 (2.15)
+
+Statut : À FAIRE
+
+- **Tâches** : fusion, traductions, suite complète, CHANGELOG, guide, README, SECURITE, ARCHITECTURE, CLAUDE.md,
+  captures, juge neutre, release 2.15.0 et installation.
+- **Critère de fin** : suite et CI vertes, verdict du juge, `cma --version` = 2.15.0 sur le poste.
+
 ### Dette technique à surveiller
 
 - Surveillance de plusieurs comptes : un compte vu par deux jetons n'est relevé qu'une fois (jeton de la
@@ -780,7 +862,12 @@ Statut : FAIT (deux juges ; écarts corrigés ; 1 échec non expliqué sur 8 pas
 | P35 | FAIT | 7535bf0 | 760 ✓ | 2026-10-16 |
 | P36 | FAIT | f06f21d, dee9945 | 760 ✓ | 2026-10-16 |
 | P37 | FAIT | a82e631, f76c35d | 760 ✓ | 2026-10-16 |
+| P38 | À FAIRE | — | — | — |
+| P39 | À FAIRE | — | — | — |
+| P40 | À FAIRE | — | — | — |
+| P41 | À FAIRE | — | — | — |
+| P42 | À FAIRE | — | — | — |
+| P43 | À FAIRE | — | — | — |
 
-**Prochaine action exacte :** 2.14.0 publiée et installée le 2026-10-16. Prochain plan à proposer (P38 et
-suivantes), dont le repli sur un autre jeton (dette) ; en attente côté propriétaire : soumission winget, signature,
-nettoyage des worktrees.
+**Prochaine action exacte :** lancer les agents I (P38, Opus), J (P39), K (P40), L (P41) et M (P42) en
+parallèle, chacun dans son worktree (`.claude/worktrees/p38` à `p42`), puis intégrer en P43.
