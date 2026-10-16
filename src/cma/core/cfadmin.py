@@ -10,8 +10,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -195,6 +196,68 @@ class WatchFailure:
 
 
 @dataclass(frozen=True)
+class WatchFallback:
+    """Repli (ADR 0003, P38) : le compte `account_id` a été relevé par le jeton `used`, parce que `token_name`, avant lui
+    dans l'ordre, a été refusé (401, 403) ou n'est plus dans le coffre (`error`). Journalisé et porté par le relevé : un
+    jeton en lecture seule refusé ne fait jamais lire le compte par un jeton qui sait écrire sans le dire."""
+
+    token_name: str
+    account_id: str
+    error: str
+    used: str
+
+
+# Refus du jeton lui-même (authentification ou permission) : seuls ces statuts font essayer le jeton suivant.
+REFUSED_STATUSES = (401, 403)
+
+# Replis d'un relevé d'un seul compte : `tunnel_states` et `check_services` gardent leur forme (l'interface et ses tests
+# les appellent ou les remplacent tels quels) ; `watch_tunnels` et `watch_services` recueillent ici leurs replis.
+_fallbacks_seen: ContextVar[list[WatchFallback] | None] = ContextVar("cma_watch_fallbacks", default=None)
+
+
+def token_refused(error: BaseException) -> bool:
+    """Le jeton est refusé (401, 403) : un autre jeton qui voit le même compte peut le relever. Une erreur du réseau ou
+    de Cloudflare (5xx, réponse sans succès) n'est pas un refus : changer de jeton n'y changerait rien."""
+    return isinstance(error, CloudflareApiError) and error.status in REFUSED_STATUSES
+
+
+class _Unread(Exception):
+    """Aucun jeton n'a lu le compte : chaque jeton essayé (`failures`) et la première erreur rencontrée."""
+
+    def __init__(self, failures: list[WatchFailure], error: BaseException | None) -> None:
+        super().__init__("; ".join(f"{f.token_name} : {f.error}" for f in failures))
+        self.failures = failures
+        self.error = error
+
+
+def _report_fallbacks(fallbacks: list[WatchFallback]) -> None:
+    """Un repli n'est jamais silencieux : il est journalisé (nom du jeton, jamais son secret) et, pendant un relevé d'un
+    seul compte, recueilli pour être porté par le relevé."""
+    for fallback in fallbacks:
+        log.warning(
+            "Surveillance : jeton « %s » écarté (%s) ; compte %s relevé avec le jeton « %s »",
+            fallback.token_name,
+            fallback.error,
+            fallback.account_id,
+            fallback.used,
+        )
+    seen = _fallbacks_seen.get()
+    if seen is not None:
+        seen.extend(fallbacks)
+
+
+async def _collecting[T](read: Awaitable[T]) -> tuple[T, list[WatchFallback]]:
+    """Attend un relevé d'un seul compte en recueillant ses replis, notés par `_single_read` dans la même tâche : deux
+    relevés en même temps (tunnels et services) ont chacun leur contexte, donc leur liste."""
+    fallbacks: list[WatchFallback] = []
+    mark = _fallbacks_seen.set(fallbacks)
+    try:
+        return await read, fallbacks
+    finally:
+        _fallbacks_seen.reset(mark)
+
+
+@dataclass(frozen=True)
 class TunnelSweep:
     """Relevé des tunnels de la surveillance, d'un compte ou de plusieurs. Dès que deux comptes sont surveillés, le nom
     de chaque tunnel est suivi de celui de son compte : notifications, alertes, journal de disponibilité et pannes
@@ -205,6 +268,8 @@ class TunnelSweep:
     # Surveillance de tous les comptes : compte de chaque tunnel et nom d'origine (sans le compte), par identifiant.
     accounts: dict[str, WatchedAccount] = field(default_factory=dict[str, WatchedAccount])
     names: dict[str, str] = field(default_factory=dict[str, str])
+    # Comptes relevés par un autre jeton que le premier de leur ordre (repli) : lus, donc pas des échecs.
+    fallbacks: list[WatchFallback] = field(default_factory=list[WatchFallback])
 
     @property
     def complete(self) -> bool:
@@ -218,6 +283,7 @@ class ServiceSweep:
 
     results: list[tuple[ServiceTarget, HostProbe]]
     failures: list[WatchFailure] = field(default_factory=list[WatchFailure])
+    fallbacks: list[WatchFallback] = field(default_factory=list[WatchFallback])
 
     @property
     def complete(self) -> bool:
@@ -493,14 +559,73 @@ class CloudflareAdmin:
 
     async def tunnel_states(self) -> list[Tunnel]:
         """Tunnels du compte choisi avec leur état, en une seule requête (relevé de la surveillance)."""
-        api = self.watch_api()
-        return await asyncio.to_thread(api.list_tunnels, self.account_id())
+        return await self._single_read(lambda api, account: api.list_tunnels(account))
 
     async def service_targets(self, *, web_only: bool = True) -> list[ServiceTarget]:
         """Noms d'hôte publiés par les tunnels en service : la liste des tunnels, puis leurs règles en même temps."""
-        api = self.watch_api()
+        return await self._single_read(lambda api, account: self._active_targets(api, account, web_only))
+
+    def _single_tokens(self) -> list[ApiToken]:
+        """Jetons qui peuvent relever le compte choisi (un seul compte), dans l'ordre du repli : le jeton de la
+        surveillance, le jeton actif, puis les autres jetons dont le dernier compte choisi est celui-là."""
+        settings = self.store.snapshot().settings
+        active = self.active_token()
+        own = {settings.watch_token_id, active.id if active is not None else None}
+        account = settings.cloudflare_account_id
+        return [
+            token
+            for token in self._ranked_tokens()
+            if token.id in own or (account is not None and token.account_id == account)
+        ]
+
+    async def _single_read[T](self, read: Callable[[CloudflareApi, str], T]) -> T:
+        """Relevé du compte choisi, par le premier jeton qui l'accepte (`_single_tokens`). Tous refusés : l'erreur du
+        premier jeton essayé, comme avant le repli."""
+        candidates = [
+            (token, self.secrets.get(token_secret_key(token.id))) for token in self._single_tokens()
+        ]
+        if not any(value for _token, value in candidates):
+            raise CloudflareApiError(tr("Aucun jeton d'API Cloudflare : connectez-vous d'abord."))
         account = self.account_id()
-        return await asyncio.to_thread(self._active_targets, api, account, web_only)
+
+        def attempt(_token: ApiToken, value: str) -> T:
+            return read(CloudflareApi(value, base_url=self.base_url), account)
+
+        try:
+            used, result, skipped = await asyncio.to_thread(
+                self._read_with_fallback, candidates, account, attempt
+            )
+        except _Unread as exc:
+            unread = exc
+        else:
+            _report_fallbacks([WatchFallback(s.token_name, account, s.error, used.name) for s in skipped])
+            return result
+        # Levée hors du bloc except : l'erreur garde sa propre cause (réponse HTTP), sans le signal interne.
+        raise unread.error or CloudflareApiError(str(unread))
+
+    @staticmethod
+    def _read_with_fallback[T](
+        candidates: list[tuple[ApiToken, str | None]],
+        account: str | None,
+        read: Callable[[ApiToken, str], T],
+    ) -> tuple[ApiToken, T, list[WatchFailure]]:
+        """Lit un compte avec le premier jeton qui l'accepte, dans l'ordre de `candidates` (jeton, secret du coffre). Un
+        jeton absent du coffre ou refusé (401, 403) passe la main au suivant ; toute autre erreur (réseau, 5xx) arrête
+        là. Renvoie le jeton qui a lu, sa lecture et les jetons écartés avant lui ; lève `_Unread` si aucun n'a lu."""
+        skipped: list[WatchFailure] = []
+        first: BaseException | None = None
+        for token, value in candidates:
+            if not value:
+                skipped.append(WatchFailure(token.name, account, tr("jeton absent du coffre")))
+                continue
+            try:
+                return token, read(token, value), skipped
+            except (CloudflareApiError, OSError) as exc:
+                skipped.append(WatchFailure(token.name, account, str(exc)))
+                first = first or exc
+                if not token_refused(exc):
+                    break
+        raise _Unread(skipped, first)
 
     @staticmethod
     def _active_targets(api: CloudflareApi, account: str, web_only: bool = True) -> list[ServiceTarget]:
@@ -522,11 +647,9 @@ class CloudflareAdmin:
 
     # --- Surveillance de tous les comptes (ADR 0003) -----------------------------------------------------------
 
-    def _watch_plan(self) -> list[tuple[ApiToken, str | None]]:
-        """Jetons à relever avec « Surveiller tous les comptes », et leur compte : le dernier compte choisi avec chacun
-        (pour le jeton actif, celui de la vue Cloudflare), None s'il n'en a encore choisi aucun. Le jeton de la
-        surveillance passe en premier, puis le jeton actif : un compte lu par deux jetons n'est relevé qu'une fois, par
-        le premier (le jeton de la surveillance est conseillé en lecture seule)."""
+    def _ranked_tokens(self) -> list[ApiToken]:
+        """Jetons dans l'ordre où la surveillance les essaie : le jeton de la surveillance (conseillé en lecture seule),
+        le jeton actif, puis les autres dans l'ordre de `Settings.cloudflare_tokens`."""
         settings = self.store.snapshot().settings
         active = self.active_token()
         active_id = active.id if active is not None else None
@@ -534,28 +657,41 @@ class CloudflareAdmin:
         def rank(token: ApiToken) -> int:
             return 0 if token.id == settings.watch_token_id else 1 if token.id == active_id else 2
 
-        plan: list[tuple[ApiToken, str | None]] = []
-        seen: set[str] = set()
-        for token in sorted(self.tokens(), key=rank):
+        return sorted(self.tokens(), key=rank)
+
+    def _watch_plan(self) -> list[tuple[str | None, list[ApiToken]]]:
+        """Comptes à relever avec « Surveiller tous les comptes » et, pour chacun, ses jetons dans l'ordre du repli
+        (`_ranked_tokens`). Le compte d'un jeton est le dernier choisi avec lui (pour le jeton actif, celui de la vue
+        Cloudflare). Un compte vu par plusieurs jetons n'est relevé qu'une fois, par le premier qui l'accepte ; un jeton
+        qui n'a encore choisi aucun compte (None) est seul de son groupe : son compte n'est connu qu'à la lecture."""
+        settings = self.store.snapshot().settings
+        active = self.active_token()
+        active_id = active.id if active is not None else None
+        plan: list[tuple[str | None, list[ApiToken]]] = []
+        groups: dict[str, list[ApiToken]] = {}
+        for token in self._ranked_tokens():
             account = token.account_id
             if token.id == active_id:
                 account = settings.cloudflare_account_id or account
-            if account is not None:
-                if account in seen:
-                    continue
-                seen.add(account)
-            plan.append((token, account))
+            if account is None:
+                plan.append((None, [token]))
+            elif account in groups:
+                groups[account].append(token)
+            else:
+                groups[account] = [token]
+                plan.append((account, groups[account]))
         return plan
 
     def watch_scope(self) -> str:
-        """Ce que relève la surveillance de tous les comptes : chaque jeton présent dans le coffre et son compte ; vide
-        s'il n'y a rien à relever. Quand elle change (jeton ajouté ou oublié, autre compte choisi), le résultat d'un
-        relevé en cours est ignoré."""
-        return "|".join(
-            f"{token.id}={account or '?'}"
-            for token, account in self._watch_plan()
-            if self.secrets.get(token_secret_key(token.id))
-        )
+        """Ce que relève la surveillance de tous les comptes : pour chaque compte, le premier de ses jetons présent dans
+        le coffre ; vide s'il n'y a rien à relever. Quand elle change (jeton ajouté ou oublié, autre compte choisi), le
+        résultat d'un relevé en cours est ignoré. Un jeton refusé pendant le relevé ne la change pas."""
+        parts: list[str] = []
+        for account, tokens in self._watch_plan():
+            token = next((t for t in tokens if self.secrets.get(token_secret_key(t.id))), None)
+            if token is not None:
+                parts.append(f"{token.id}={account or '?'}")
+        return "|".join(parts)
 
     def _resolve(
         self, token: ApiToken, account: str | None, value: str, named: bool
@@ -584,52 +720,68 @@ class CloudflareAdmin:
 
     async def _each_account[T](
         self, read: Callable[[CloudflareApi, str], T]
-    ) -> tuple[list[tuple[WatchedAccount, T]], list[WatchFailure], bool]:
-        """Lit chaque compte surveillé, tous en même temps (un fil par compte). Un jeton refusé, absent du coffre ou
-        injoignable est journalisé et noté dans les échecs, sans arrêter les autres. Renvoie aussi si plusieurs comptes
-        sont surveillés (leur nom accompagne alors celui des objets). Lève CloudflareApiError si aucun compte n'a pu être
-        lu."""
+    ) -> tuple[list[tuple[WatchedAccount, T]], list[WatchFailure], list[WatchFallback], bool]:
+        """Lit chaque compte surveillé, tous en même temps (un fil par compte), chacun par le premier de ses jetons qui
+        l'accepte (repli : un jeton refusé ou absent du coffre passe la main au suivant, journalisé). Un compte qu'aucun
+        jeton n'a lu (tous refusés, réseau, 5xx) est journalisé et noté dans les échecs, un par jeton essayé, sans arrêter
+        les autres. Renvoie aussi les replis et si plusieurs comptes sont surveillés (leur nom accompagne alors celui des
+        objets). Lève CloudflareApiError si aucun compte n'a pu être lu."""
         plan = self._watch_plan()
         if not plan:
             raise CloudflareApiError(tr("Aucun jeton d'API Cloudflare : connectez-vous d'abord."))
         named = len(plan) > 1
-        failures: list[WatchFailure] = []
-        pending: list[tuple[ApiToken, str | None, str]] = []
-        for token, account in plan:
-            value = self.secrets.get(token_secret_key(token.id))
-            if value:
-                pending.append((token, account, value))
-            else:
-                failures.append(WatchFailure(token.name, account, tr("jeton absent du coffre")))
+        # Le coffre est lu ici, une fois par jeton ; les fils ne font que des requêtes.
+        groups = [
+            (account, [(token, self.secrets.get(token_secret_key(token.id))) for token in tokens])
+            for account, tokens in plan
+        ]
 
-        def one(token: ApiToken, account: str | None, value: str) -> tuple[WatchedAccount, T] | WatchFailure:
-            try:
+        def one(
+            account: str | None, candidates: list[tuple[ApiToken, str | None]]
+        ) -> tuple[WatchedAccount, T, list[WatchFallback]] | list[WatchFailure]:
+            def attempt(token: ApiToken, value: str) -> tuple[WatchedAccount, T]:
                 watched, api = self._resolve(token, account, value, named)
                 return watched, read(api, watched.account_id)
-            except (CloudflareApiError, OSError) as exc:
-                return WatchFailure(token.name, account, str(exc))
 
-        outcomes = await asyncio.gather(*(asyncio.to_thread(one, *item) for item in pending))
+            try:
+                _used, (watched, result), skipped = self._read_with_fallback(candidates, account, attempt)
+            except _Unread as exc:
+                return exc.failures
+            moved = [
+                WatchFallback(s.token_name, watched.account_id, s.error, watched.token_name) for s in skipped
+            ]
+            return watched, result, moved
+
+        outcomes = await asyncio.gather(*(asyncio.to_thread(one, *group) for group in groups))
         found: list[tuple[WatchedAccount, T]] = []
+        failures: list[WatchFailure] = []
+        fallbacks: list[WatchFallback] = []
+        unread = 0
         seen: set[str] = set()
         for outcome in outcomes:
-            if isinstance(outcome, WatchFailure):
-                failures.append(outcome)
+            if isinstance(outcome, list):
+                failures.extend(outcome)
+                unread += 1
             elif outcome[0].account_id not in seen:  # un compte trouvé par deux jetons sans compte choisi
                 seen.add(outcome[0].account_id)
-                found.append(outcome)
+                found.append((outcome[0], outcome[1]))
+                fallbacks.extend(outcome[2])
         for failure in failures:
             log.warning("Surveillance : jeton « %s » illisible (%s)", failure.token_name, failure.error)
+        _report_fallbacks(fallbacks)
         if not found and failures:
             raise CloudflareApiError("; ".join(f"{f.token_name} : {f.error}" for f in failures))
-        return _distinct_names(found), failures, len(found) + len(failures) > 1
+        return _distinct_names(found), failures, fallbacks, len(found) + unread > 1
 
     async def watch_tunnels(self) -> TunnelSweep:
         """Relevé des tunnels de la surveillance : le compte choisi (comme `tunnel_states`) ou, avec « Surveiller tous
         les comptes », chaque jeton avec son compte (ADR 0003). Un tunnel vu par deux comptes compte une fois."""
         if not self.store.snapshot().settings.watch_all_accounts:
-            return TunnelSweep(await self.tunnel_states())
-        found, failures, several = await self._each_account(lambda api, account: api.list_tunnels(account))
+            tunnels, fallbacks = await _collecting(self.tunnel_states())
+            return TunnelSweep(tunnels, fallbacks=fallbacks)
+        found, failures, fallbacks, several = await self._each_account(
+            lambda api, account: api.list_tunnels(account)
+        )
         tunnels: list[Tunnel] = []
         accounts: dict[str, WatchedAccount] = {}
         names: dict[str, str] = {}
@@ -642,14 +794,15 @@ class CloudflareAdmin:
                 tunnels.append(
                     replace(tunnel, name=with_account(tunnel.name, watched.name)) if several else tunnel
                 )
-        return TunnelSweep(tunnels, failures, accounts, names)
+        return TunnelSweep(tunnels, failures, accounts, names, fallbacks)
 
     async def watch_services(self) -> ServiceSweep:
         """Relevé des services publiés de la surveillance : le compte choisi (comme `check_services`) ou chaque compte.
         Un nom public n'a qu'une destination : déclaré par deux comptes, il n'est testé qu'une fois, avec le premier."""
         if not self.store.snapshot().settings.watch_all_accounts:
-            return ServiceSweep(await self.check_services())
-        found, failures, several = await self._each_account(self._active_targets)
+            results, fallbacks = await _collecting(self.check_services())
+            return ServiceSweep(results, fallbacks=fallbacks)
+        found, failures, fallbacks, several = await self._each_account(self._active_targets)
         targets: list[ServiceTarget] = []
         seen: set[str] = set()
         for watched, listed in found:
@@ -660,7 +813,7 @@ class CloudflareAdmin:
                 targets.append(
                     replace(target, account_id=watched.account_id, account=watched.name if several else "")
                 )
-        return ServiceSweep(await self.probe_services(targets), failures)
+        return ServiceSweep(await self.probe_services(targets), failures, fallbacks)
 
     # --- Réseaux privés, audit, instantanés, permissions -------------------------------------------------
 
