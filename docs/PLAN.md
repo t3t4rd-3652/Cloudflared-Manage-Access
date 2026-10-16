@@ -1,7 +1,7 @@
 # Plan du projet
 
-État au 2026-10-16, version **2.13.0** publiée ; P33 à P36 réalisés (2.14 : objectifs de disponibilité,
-surveillance de plusieurs comptes, tuile Disponibilité, traductions et stabilité), en cours de validation (P37). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
+État au 2026-10-16, version **2.14.0** (P33 à P37 : objectifs de disponibilité, surveillance de plusieurs comptes,
+tuile Disponibilité, traductions et stabilité). Ce document dit où en est CMA et ce qui vient ensuite. Il remplace les
 anciens plans, qui ont tous été appliqués. L'historique des étapes est dans [CLAUDE.md](../CLAUDE.md) et
 [CHANGELOG.md](../CHANGELOG.md).
 
@@ -725,7 +725,7 @@ Statut : FAIT
 
 ### P37 — Intégration, juge, release 2.14.0 (2.14)
 
-Statut : EN COURS
+Statut : FAIT (deux juges ; écarts corrigés ; 1 échec non expliqué sur 8 passages de la suite, tous les processus de travail arrêtés ensemble ; release 2.14.0)
 
 - **Tâches** : fusion des branches, traductions, suite complète trois fois, CHANGELOG, guide, README, SECURITE,
   ARCHITECTURE, captures, juge neutre, release 2.14.0 et installation.
@@ -775,12 +775,12 @@ Statut : EN COURS
 | P30 | FAIT | 173fa99 | 643 ✓ | 2026-10-15 |
 | P31 | FAIT | 27e2681 | 675 ✓ | 2026-10-15 |
 | P32 | FAIT | 42d0b22 | 677 ✓ | 2026-10-15 |
-| P33 | FAIT | 6339c0e, 3df1fa3 | 758 ✓ | 2026-10-16 |
-| P34 | FAIT | 66964f1, b6ba3ee | 758 ✓ | 2026-10-16 |
-| P35 | FAIT | 7535bf0 | 758 ✓ | 2026-10-16 |
-| P36 | FAIT | f06f21d, dee9945 | 758 ✓ | 2026-10-16 |
-| P37 | EN COURS | — | — | — |
+| P33 | FAIT | 6339c0e, 3df1fa3 | 760 ✓ | 2026-10-16 |
+| P34 | FAIT | 66964f1, b6ba3ee | 760 ✓ | 2026-10-16 |
+| P35 | FAIT | 7535bf0 | 760 ✓ | 2026-10-16 |
+| P36 | FAIT | f06f21d, dee9945 | 760 ✓ | 2026-10-16 |
+| P37 | FAIT | a82e631, f76c35d | 760 ✓ | 2026-10-16 |
 
-**Prochaine action exacte :** P37 — intégration faite (bcb399f : 4 branches fusionnées, alertes d'objectif
-branchées dans le Monitor, détail des journaux corrigé, test SFTP stabilisé ; 758 tests verts quatre fois) ;
-documentation en cours, puis juge neutre (Opus), release 2.14.0 et installation.
+**Prochaine action exacte :** 2.14.0 publiée et installée le 2026-10-16. Prochain plan à proposer (P38 et
+suivantes), dont le repli sur un autre jeton (dette) ; en attente côté propriétaire : soumission winget, signature,
+nettoyage des worktrees.

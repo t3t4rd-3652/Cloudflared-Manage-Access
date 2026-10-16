@@ -13,7 +13,7 @@ applications protégées par Cloudflare Access (`cloudflared access tcp`) et des
 Elle sait aussi administrer un compte Cloudflare (tunnels, noms d'hôte publiés, applications Access,
 service tokens) avec un jeton d'API.
 
-- Version courante : voir `src/cma/__init__.py` (2.13.0 au 2026-10-15). Historique utilisateur : `CHANGELOG.md`,
+- Version courante : voir `src/cma/__init__.py` (2.14.0 au 2026-10-16). Historique utilisateur : `CHANGELOG.md`,
   embarqué dans les paquets (`cma/resources/CHANGELOG.md`) : la boîte « Quoi de neuf » en montre les sections.
 - Architecture, threads, cycle de vie des sessions : [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - Sécurité et modèle de menace : [docs/SECURITE.md](docs/SECURITE.md). Scripts serveur : [docs/SERVEUR.md](docs/SERVEUR.md).
@@ -104,6 +104,7 @@ l'échec en annotations » (`check-runs` du commit, puis `annotations_url` du jo
 | 2026-10-09 → 10-14 | P13 à P22, Release **2.11.0** : bilan de sécurité, Access exigé au niveau du tunnel, jeton de la surveillance, disponibilité (graphique, rapport HTML/CSV), alertes ntfy/Slack/Teams/Discord, sourdine, import de `~/.ssh/config`, carte « Santé du compte », surveillance sortie de la fenêtre (`ui/monitor.py`, ADR 0001), `cma review`, `cma availability`, `cma alerts test`, publication d'un port découvert, « Quoi de neuf », raccourcis (F1). |
 | 2026-10-14 → 10-15 | P23 à P28 en agents parallèles (worktrees, Sonnet et Haiku, intégration et juges Opus) : disponibilité par jour local, maintenance planifiée, rappel des pannes longues, résumé hebdomadaire, `cma alerts digest`, `cma availability --output`, pannes dans le menu de l'icône, touche Tab libérée des tableaux. Deux juges, écarts corrigés. Release **2.12.0**. |
 | 2026-10-15 | P29 à P32, un agent Sonnet à la fois (quota) : pastille « Maintenance », incidents clos quand une surveillance est coupée, canaux d'alerte et maintenances dans l'export (adresse seulement chiffrée), journal des envois (`alert_log.json`, « Envois récents… »). Juge : écarts corrigés. Release **2.13.0**. |
+| 2026-10-15 → 10-16 | P33 à P37, quatre agents en parallèle (Sonnet, Opus pour P34) : objectifs de disponibilité et rapport mensuel, surveillance de plusieurs comptes (ADR 0003), tuile Disponibilité, traductions relues et verrou des règles d'ingress. Deux juges, écarts corrigés. Release **2.14.0**. |
 
 Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff-filter=D --name-only`).
 

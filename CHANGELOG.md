@@ -2,7 +2,7 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
-## [Non publié]
+## [2.14.0] - 2026-10-16
 
 ### Ajouté
 - **Objectifs de disponibilité** (Outils › Disponibilité…) : **Définir l'objectif…** pose, change ou retire
