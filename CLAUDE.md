@@ -248,6 +248,32 @@ Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff
   de processus sérialise « lire, ajouter, écrire », et un journal qui ne s'écrit pas n'empêche jamais une alerte
   de partir. Aucune adresse, même en morceaux : messages passés par `scrub` (200 caractères). La tâche planifiée
   ne l'écrit que si CMA est fermé ; `cma alerts test` et `digest` y notent leurs envois.
+- **Objectifs de disponibilité** (`cma.core.slo`, `slo_report`, P33) : objectif par objet
+  (`Settings.availability_targets`, clés `tunnel:<id>` et `service:<nom>`) puis `default_availability_target`, de 50 à
+  100 %, comparé à la disponibilité des 30 derniers jours locaux. Les objets déjà annoncés sous leur objectif sont dans
+  l'état `slo` de `alert_state.json` (ADR 0002) : **une alerte par franchissement**, puis le retour (aux canaux qui
+  veulent les retours) ; l'état note l'envoi seulement quand un canal l'a reçu (le retour, dans tous les cas). Rien pour
+  un objet en sourdine ou en maintenance, ni sans relevé (un trou n'est pas une panne). **Pas d'hystérésis** : un objet
+  qui oscille autour de l'objectif alterne alerte et retour, c'est une limite assumée. Les alertes partent aussi CMA
+  ouvert sans rappels ni résumé (`has_targets` garde le calcul quand aucun objectif n'existe). `cma availability --month`
+  vit dans `cli.show_month_availability` (code 0, 1 si mois invalide ou à venir) ; le mois se calcule sur des dates
+  locales, pas des instants.
+- **Plusieurs comptes** (P34, [ADR 0003](docs/adr/0003-surveillance-de-plusieurs-comptes.md)) : avec
+  `watch_all_accounts`, `CloudflareAdmin.watch_tunnels` et `watch_services` relèvent **chaque jeton d'API avec son
+  dernier compte choisi** (`ApiToken.account_id` ; pour le jeton actif, le compte de la vue), pas tous les comptes qu'il
+  voit : deux comptes d'un même jeton, c'est le jeton enregistré deux fois. Un compte lu par deux jetons n'est relevé
+  qu'une fois (jeton de la surveillance, puis jeton actif). **Clés non préfixées** : `tunnel:<id>` et `service:<nom>`
+  gardent leur forme (identifiants uniques chez Cloudflare), donc journal, sourdines, maintenances et `alert_state.json`
+  n'ont rien à migrer ; seul le libellé reçoit « (Compte A) » dès que deux comptes sont surveillés. Un jeton en échec est
+  journalisé (`WatchFailure`) sans arrêter les autres, et le relevé incomplet (`complete=False`) ne clôt aucun incident.
+  Limites connues : « Ouvrir » et « Diagnostiquer… » sur un objet d'un autre compte ouvrent le compte affiché, et la carte
+  « Santé du compte » ne nomme le compte que pour une panne unique. Les tests de durée utilisent `delay` du faux serveur
+  (`two_accounts`).
+- **Verrou des règles d'ingress** (`cfapi._INGRESS_LOCK`, P36) : toute modification de la configuration d'un tunnel
+  (lecture, changement, PUT complet) passe par `@_ingress_exclusive`. Une instance de `CloudflareApi` est recréée à chaque
+  appel de `CloudflareAdmin.api()` : le verrou est donc global au module (un `RLock`), pas un attribut de l'instance.
+  Sans lui, trois « Monter » rapprochés lisaient la même configuration et le dernier écrasait les autres. Une nouvelle
+  méthode qui écrit l'ingress prend le même décorateur.
 - **Travail en agents parallèles** : chaque agent a son `git worktree` sous `.claude/worktrees/`, et lance les
   tests depuis ce worktree avec `PYTHONPATH=src` et le `.venv` du dépôt principal. Les traductions passent par un
   JSON que l'orchestrateur réapplique à l'intégration : les trois catalogues entrent en conflit à la fusion. Une
@@ -269,6 +295,11 @@ Qt et PySide :
   des tunnels, puis sur le tableau des service tokens après un premier correctif limité aux arbres. Reproduit
   dans un conteneur avec la suite complète répétée (un abandon toutes les deux ou trois exécutions) ou la vue
   Cloudflare en boucle avec `pytest --no-qt-log -s` (Python 3.14 affiche alors la pile C).
+- `table.selectRow(n)` laisse parfois la sélection vide sous la charge (suite en parallèle) : un test qui en dépend
+  sélectionne explicitement par le modèle de sélection (`selectionModel().setCurrentIndex(index, ClearAndSelect | Rows)`,
+  test SFTP de `test_views.py`).
+- `selectRow` annonce la sélection **avant** de poser l'index courant : un détail qui dépend de l'index courant doit
+  aussi suivre `currentChanged`, sinon il reste parfois vide (détail des journaux, corrigé en P37).
 - `monkeypatch.setattr(QMenu, "exec", …)` n'intercepte pas l'appel : le menu modal bloque le test. Séparer la
   construction du menu de son `exec`.
 - Un widget d'une vue non affichée a `isVisible() == False` : afficher la vue avant de tester la visibilité.

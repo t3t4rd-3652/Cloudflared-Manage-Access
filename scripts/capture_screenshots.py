@@ -424,8 +424,8 @@ def capture_guide(window, output: Path) -> None:
     review.table.selectRow(0)
     save(review, "guide-bilan.png")
 
-    demo_availability(ctx.paths.data_dir / "availability.json")
-    availability = AvailabilityDialog(window, ctx.paths.data_dir / "availability.json")
+    # Le journal de démonstration est créé une fois, par `main` (la tuile de la page Sessions le lit aussi).
+    availability = AvailabilityDialog(window, ctx.paths.data_dir / "availability.json", ctx)
     availability.table.selectRow(availability.keys.index("service:wiki.exemple.fr"))
     save(availability, "guide-disponibilite.png")
 
@@ -447,6 +447,40 @@ def capture_guide(window, output: Path) -> None:
     capture_guide_health_menu(window, output)
     capture_guide_sends(window, output)
     capture_guide_maintenance_card(window, output)
+    capture_guide_objectives(window, output)
+
+
+def capture_guide_objectives(window, output: Path) -> None:
+    """`guide-objectifs.png` : boîte Disponibilité avec la colonne « Objectif » : un objectif par défaut, un objectif
+    propre tenu et un autre manqué (▼ et teinte d'alerte). Les objectifs de démonstration sont retirés ensuite."""
+    from cma.core.slo import set_target
+    from cma.ui.views.cloud.availability import AvailabilityDialog
+
+    ctx = window.ctx
+    settings = ctx.config().settings
+    saved = (dict(settings.availability_targets), settings.default_availability_target)
+
+    def demo(config) -> None:
+        set_target(config, "service:wiki.exemple.fr", 99.9)  # 99,45 % sur 30 jours : sous l'objectif
+        set_target(config, "service:grafana.lab.exemple.fr", 99.5)  # tenu
+        config.settings.default_availability_target = 99.0  # tunnels sans objectif propre
+
+    def restore(config) -> None:
+        config.settings.availability_targets, config.settings.default_availability_target = saved
+
+    ctx.update_config(demo)
+    try:
+        dialog = AvailabilityDialog(window, ctx.paths.data_dir / "availability.json", ctx)
+        dialog.table.selectRow(dialog.keys.index("service:grafana.lab.exemple.fr"))
+        dialog.show()
+        for _ in range(8):
+            QApplication.processEvents()
+        dialog.grab().save(str(output / "guide-objectifs.png"))
+        dialog.close()
+        dialog.deleteLater()
+    finally:
+        ctx.update_config(restore)
+        QApplication.processEvents()
 
 
 def capture_guide_alerts(window, output: Path) -> None:
@@ -628,7 +662,9 @@ def main() -> int:
         core=core, engine=engine, runner=TaskRunner(engine), bridge=bridge, theme=theme, prompter=None
     )  # type: ignore[arg-type]
     demo_config(ctx)
+    demo_availability(paths.data_dir / "availability.json")
 
+    from cma.core.availability import AvailabilityLog
     from cma.ui.main_window import MainWindow
     from cma.ui.views import settings as settings_view
 
@@ -677,6 +713,10 @@ def main() -> int:
         window.settings.data_dir.setText(r"C:\Users\<utilisateur>\AppData\Roaming\CloudflaredManager")
         suffix = "sombre" if theme_name == Theme.DARK else "clair"
         show_demo_health(window)
+        # Tuile « Disponibilité » de la page Sessions : le journal de la surveillance est tenu en mémoire par la
+        # fenêtre ; on lui donne celui de démonstration.
+        window.availability = AvailabilityLog(paths.data_dir / "availability.json")
+        window.dashboard.uptime.refresh()
         for key in ("dashboard", "profiles", "tokens", "ssh", "cloud", "logs", "settings"):
             window.show_view(key)
             if key == "profiles":

@@ -166,16 +166,47 @@ importé **désactivé** : ressaisissez son adresse dans Paramètres › Génér
 export chiffré (case **Inclure les secrets**, avec une phrase de passe), l'adresse suit, chiffrée comme les
 autres secrets, et le canal reste actif.
 
+### Suivre la disponibilité, fixer des objectifs
+
+Sur la page **Sessions**, la tuile **Disponibilité** donne d'un coup d'œil le taux des 7 derniers jours, le nombre
+d'incidents et l'objet le moins disponible ; **Détail** ouvre la boîte ci-dessous sur cet objet. Elle reste cachée
+tant que la surveillance n'a rien relevé. Quand la carte « Santé du compte » signale une panne, son bouton
+**Disponibilité** ouvre la même boîte sur le premier objet en panne.
+
+![La tuile Disponibilité, sous la carte Santé du compte](captures/dashboard-clair.png)
+
 **Outils › Disponibilité…** montre, pour chaque tunnel et service, le taux de disponibilité sur 7 et 30 jours, le
-temps de réponse moyen et la liste des incidents (début, fin, durée, cause). Choisissez une ligne pour son
-graphique jour par jour (7, 30 ou 90 jours) : une barre par jour local (verte à partir de 99,9 %, orange à partir de
-98 %, rouge en dessous) et la courbe du temps de réponse moyen.
+temps de réponse moyen, le nombre d'incidents, l'objectif et la liste des incidents (début, fin, durée, cause).
+Choisissez une ligne pour son graphique jour par jour (7, 30 ou 90 jours) : une barre par jour local (verte à partir
+de 99,9 %, orange à partir de 98 %, rouge en dessous) et la courbe du temps de réponse moyen.
 
 ![Disponibilité d'un service sur 30 jours](captures/guide-disponibilite.png)
 
 **Exporter le rapport…** enregistre la période choisie en page HTML autonome (à joindre à un compte rendu) ou en CSV
 pour un tableur : disponibilité, durée des pannes et incidents de chaque objet.
 En ligne de commande, `cma availability --output rapport.html` (ou `.csv`, `.json`) écrit le même rapport.
+
+Un service doit tenir au moins 99,9 % du temps ? **Définir l'objectif…** (même boîte) fixe la disponibilité minimale
+attendue du tunnel ou du service choisi, de 50 à 100 %. **Objectif par défaut…** fixe celle de tous les objets qui
+n'ont pas d'objectif propre, et **Retirer l'objectif**, dans la boîte de saisie, supprime l'objectif d'un objet. La
+colonne **Objectif** le compare à la disponibilité des 30 derniers jours : sous l'objectif, la valeur porte un ▼ et,
+avec le taux sur 30 jours, la teinte d'alerte. Sans objectif, elle affiche « — ».
+
+![Disponibilité : l'objectif de chaque objet, wiki.exemple.fr sous le sien](captures/guide-objectifs.png)
+
+Quand un tunnel ou un service passe sous son objectif, CMA envoie **une seule alerte** à chaque canal d'alerte actif
+(« objectif manqué »), puis un message de retour quand il remonte au-dessus (« objectif retrouvé », seulement aux
+canaux qui reçoivent les retours), depuis CMA ouvert comme depuis la tâche planifiée. Rien n'est envoyé pour un objet
+en sourdine ou en maintenance (le message vient à la fin de la sourdine si la situation dure), ni pour un objet sans
+relevé sur les 30 jours, ni pour un type que la surveillance ne relève plus. **Envois récents…** note ces messages avec
+la nature **Objectif**.
+
+Limite : une disponibilité qui oscille autour de l'objectif peut alterner alerte et retour (pas d'hystérésis).
+
+Pour un compte rendu mensuel, `cma availability --month 2026-10` donne la disponibilité du mois civil (en jours
+locaux) de chaque tunnel et service, avec son objectif et l'écart en points ; le mois en cours va jusqu'à aujourd'hui.
+Avec `--output rapport.html` (ou `.csv`, `.json`), le rapport part dans un fichier : une ligne par objet, puis les
+incidents du mois.
 
 ## Renouveler un service token
 
@@ -260,6 +291,37 @@ Cloudflare. Pour un autre accès Cloudflare (un client, un compte personnel), **
 collez le jeton et donnez-lui un nom. Le choix du jeton apparaît alors dans l'en-tête ; chaque jeton revient à son
 dernier compte, et la surveillance suit le jeton choisi.
 
+### Être prévenu des pannes de tous les comptes
+
+Par défaut, la surveillance ne relève que le compte affiché dans la vue Cloudflare : les pannes des autres comptes ne
+vous préviennent pas. Cochez **Paramètres › Général › Cloudflare › Surveiller tous les comptes** (la case est
+disponible à partir de deux jetons) pour relever **chaque jeton d'API enregistré**, avec le dernier compte choisi avec
+lui, CMA ouvert comme depuis la tâche planifiée. Le jeton affiché garde le compte de la vue ; un jeton qui n'a encore
+choisi aucun compte prend le premier qu'il voit. Un compte vu par deux jetons n'est relevé qu'une fois (le jeton de la
+surveillance, s'il est choisi, passe d'abord).
+
+- Dès que deux comptes sont surveillés, le nom du compte suit chaque tunnel et chaque nom d'hôte en panne : « labo
+  (Compte A) ». Il apparaît dans les notifications, les alertes envoyées aux canaux, le sous-menu **Pannes** de l'icône
+  et le journal de disponibilité. Deux comptes du même nom sont distingués par le nom de leur jeton.
+- Un jeton refusé, absent du coffre ou injoignable n'arrête pas les autres : il est signalé dans le journal de CMA et,
+  pour `cma tunnels`, sur la sortie d'erreur (code de retour 1 si rien d'autre ne va mal ; avec `--json`, chaque
+  tunnel porte son compte dans `account`). Tant qu'un compte n'a pas pu être lu, CMA ne clôt aucun de ses incidents et
+  n'annonce pas de faux retour.
+- Pour surveiller **deux comptes d'un même jeton**, enregistrez le jeton deux fois, sous deux noms, et choisissez un
+  compte différent avec chacun.
+- Les objectifs, sourdines et maintenances restent par tunnel et par nom d'hôte : rien à refaire en activant ou en
+  coupant le réglage.
+
+Limites : **Ouvrir** (sous-menu **Pannes**) et **Diagnostiquer…** sur un objet d'un autre compte mènent au compte
+affiché, pas au sien : choisissez d'abord son jeton dans la vue Cloudflare ; la carte « Santé du compte » ne nomme le
+compte que pour une panne unique (avec plusieurs pannes, elle les résume).
+
+Attention : **tous les jetons du coffre servent alors à la surveillance**, tâche planifiée comprise. Pour un compte
+que vous ne faites que surveiller, enregistrez un jeton en lecture seule. Le nom du compte part vers les canaux
+d'alerte : chez Cloudflare, le nom par défaut d'un compte contient l'adresse e-mail de son propriétaire (« …'s
+Account »). Renommez le compte si un canal est public (un sujet ntfy). Voir [SECURITE.md](SECURITE.md) et l'[ADR
+0003](adr/0003-surveillance-de-plusieurs-comptes.md).
+
 ## Automatiser en ligne de commande
 
 La commande `cma` (installée avec l'application) lit les mêmes données que l'interface, avec le jeton d'API actif
@@ -270,8 +332,9 @@ message d'usage et le code 2 : essayez la commande à la main avant de la planif
 
 | Commande | Ce qu'elle fait | Code 2 si… |
 | --- | --- | --- |
-| `cma tunnels [--services] [--json]` | état des tunnels, et avec `--services` le test de chaque nom d'hôte HTTP | un tunnel ou un service est en panne |
+| `cma tunnels [--services] [--json]` | état des tunnels, et avec `--services` le test de chaque nom d'hôte HTTP ; avec « Surveiller tous les comptes », chaque jeton avec son compte | un tunnel ou un service est en panne (code 1 si un jeton est illisible et que rien d'autre ne va mal) |
 | `cma availability [--days 1/7/30/90] [--json] [--output FICHIER]` | disponibilité et incidents relevés par la surveillance ; `--output` écrit le rapport dans un fichier `.html`, `.csv` ou `.json` (selon l'extension) au lieu de l'afficher | un incident est en cours (code 1 si le fichier ne peut pas être écrit ou si l'extension est inconnue) |
+| `cma availability --month AAAA-MM [--json] [--output FICHIER]` | rapport d'un mois civil (jours locaux) avec l'objectif et l'écart de chaque objet ; le mois en cours va jusqu'à aujourd'hui ; exclusif avec `--days` ; sans relevé ce mois-là : « Aucun relevé en AAAA-MM. » | — (code 1 si le mois est invalide ou à venir, ou si le fichier ne peut pas être écrit) |
 | `cma review [--json] [--all]` | bilan de sécurité du compte (`--all` : avec les constats ignorés) | un constat de gravité élevée n'est pas ignoré |
 | `cma snapshot` | instantané de la configuration, et ce qui a changé depuis le précédent | quelque chose a changé |
 | `cma alerts test` | un message de test vers chaque canal d'alerte actif | — (code 1 si un canal échoue) |
@@ -279,7 +342,8 @@ message d'usage et le code 2 : essayez la commande à la main avant de la planif
 
 Exemples : `cma review` planifié chaque lundi, qui échoue si un constat élevé apparaît ;
 `cma availability --days 30 --json` en fin de mois pour alimenter un tableau de bord ; `cma availability --days 30
---output rapport.html` pour en tirer une page à joindre à un compte rendu.
+--output rapport.html` pour en tirer une page à joindre à un compte rendu ; `cma availability --month 2026-10 --output
+octobre.html` pour le rapport du mois, objectifs compris.
 
 ## Raccourcis clavier et nouveautés
 

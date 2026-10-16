@@ -250,3 +250,20 @@ def test_tile_module_is_light_at_import():
     assert tile_module.__file__
     result = subprocess.run([sys.executable, "-c", code], check=False, capture_output=True, timeout=60)
     assert result.returncode == 0, result.stderr.decode(errors="replace")
+
+
+def test_dialog_opened_from_the_window_gets_its_context(qtbot, gui, tmp_path, monkeypatch):
+    """Ouverte depuis la tuile ou la carte « Santé » (parent : la fenêtre), la boîte reçoit le contexte : objectifs
+    affichés et boutons « Définir l'objectif… » et « Objectif par défaut… » actifs."""
+    _ctx, window = gui
+    path = tmp_path / "availability.json"
+    sample_log(path).save()
+    shown: list[AvailabilityDialog] = []
+    monkeypatch.setattr(
+        AvailabilityDialog, "exec", lambda self: shown.append(self) or QDialog.DialogCode.Accepted
+    )
+    show_availability_on(window, path, "service:wiki.exemple.fr")
+    dialog = shown[0]
+    qtbot.addWidget(dialog)
+    assert dialog.ctx is window.ctx
+    assert dialog.default_button.isEnabled() and dialog.target_button.isEnabled()

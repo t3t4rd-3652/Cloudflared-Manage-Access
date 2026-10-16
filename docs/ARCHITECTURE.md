@@ -40,11 +40,12 @@ Deux règles structurent le code :
 | `src/cma/core/cloudflared/` | Commande sans shell, analyse des journaux, session, binaire et téléchargement vérifié. |
 | `src/cma/core/ssh/` | Connexions asyncssh (rebond ProxyJump compris), clés d'hôte, clés, redirections locales, inverses et SOCKS 5, découverte de ports (Linux et Windows), transfert de fichiers SFTP (`sftp.py`). |
 | `src/cma/core/cfapi.py` | Client de l'API Cloudflare v4 : comptes, zones, tunnels, DNS, Access, service tokens. |
-| `src/cma/core/cfadmin.py` | Relie l'API à la configuration et au coffre : import de profils, tokens, publication, tunnels, jetons d'API nommés, lecture du compte en parallèle. |
+| `src/cma/core/cfadmin.py` | Relie l'API à la configuration et au coffre : import de profils, tokens, publication, tunnels, jetons d'API nommés, lecture du compte en parallèle, relevé de la surveillance d'un ou de tous les comptes (`watch_tunnels`, `watch_services` ; [ADR 0003](adr/0003-surveillance-de-plusieurs-comptes.md)). |
 | `src/cma/core/dnscheck.py`, `hostprobe.py` | DNS des noms d'hôte publiés ; test d'un nom d'hôte depuis Internet (Access, vérification de navigateur, 1033, 502…). |
 | `src/cma/core/tunnelwatch.py`, `servicewatch.py` | Ce qui a changé d'un relevé à l'autre : tunnels (état de l'API), services publiés (tests depuis Internet). |
 | `src/cma/core/availability.py`, `alerts.py`, `monitoring.py` | Journal de disponibilité (incidents, taux par jour local, 90 jours), alertes vers ntfy, Slack, Teams, Discord ou un webhook, sourdine et maintenances hebdomadaires, rappels des pannes qui durent ; suites d'un relevé communes à l'interface et à la tâche planifiée. |
-| `src/cma/core/alertstate.py`, `digest.py` | État des envois (`alert_state.json` : derniers rappels, semaine du dernier résumé, [ADR 0002](adr/0002-etat-des-alertes-hors-de-la-configuration.md)) ; résumé hebdomadaire de la disponibilité, dû le lundi à partir de 9 h. |
+| `src/cma/core/alertstate.py`, `digest.py` | État des envois (`alert_state.json` : derniers rappels, semaine du dernier résumé, objets annoncés sous leur objectif, [ADR 0002](adr/0002-etat-des-alertes-hors-de-la-configuration.md)) ; résumé hebdomadaire de la disponibilité, dû le lundi à partir de 9 h. |
+| `src/cma/core/slo.py`, `slo_report.py` | Objectifs de disponibilité : objectif d'un objet ou par défaut, état sous l'objectif sur 30 jours, franchissements à annoncer (une alerte, puis le retour) ; rapport d'un mois civil en jours locaux (texte, CSV, JSON, HTML). Sans Qt ni envoi : la sourdine vient de `monitoring`. |
 | `src/cma/core/alertlog.py` | Journal des envois d'alertes (`alert_log.json`, 200 derniers, [ADR 0002](adr/0002-etat-des-alertes-hors-de-la-configuration.md)) : date, canal, nature, objet, résultat ; aucune adresse (`scrub`), écriture atomique, verrou de processus, tâche planifiée seulement si CMA est fermé. |
 | `src/cma/core/security.py` | Bilan de sécurité du compte (analyse pure) : constats, gravité, correction possible. |
 | `src/cma/core/privnet.py`, `audit.py`, `traffic.py`, `snapshot.py`, `permissions.py` | Outils du compte : réseaux privés (WARP), journal d'audit, trafic GraphQL, instantanés comparés, permissions du jeton vérifiées en lecture. |
@@ -62,6 +63,7 @@ Deux règles structurent le code :
 | `src/cma/platform/` | Job Object Windows, démarrage automatique, lanceurs (terminal, RDP, Compass), tâche planifiée, notification système, liens `cma://`, nom du réseau Wi-Fi. |
 | `src/cma/ui/` | Interface : fenêtre, vues, boîtes de dialogue (palette Ctrl+K, espaces de travail, diagnostic), thème, verrouillage, zone de notification. |
 | `src/cma/ui/dialogs/sends.py` | Boîte « Envois récents » (Paramètres › Général › Alertes) : lit `alert_log.json`, échecs en rouge, effacement du journal après confirmation. |
+| `src/cma/ui/views/uptime_tile.py` | Tuile « Disponibilité » de la page Sessions (7 derniers jours, lue dans le journal en mémoire de la surveillance) et ouverture de la boîte Disponibilité sur un objet. |
 | `src/cma/ui/monitor.py`, `wake.py` | Surveillance du compte côté Qt (minuteurs, signaux ; [ADR 0001](adr/0001-surveillance-hors-de-la-fenetre.md)) ; sortie de veille et retour du réseau. |
 | `src/cma/ui/views/cloud/` | Vue Cloudflare : `view.py` (compte, en-tête, tuiles), onglets `tunnels_tab.py`, `apps_tab.py`, `tokens_tab.py`, menu Outils (`account_tools.py`) et ses boîtes. |
 | `src/cma/i18n.py`, `i18n_<code>.py` | Traduction : source en français, catalogues anglais, allemand et espagnol vérifiés par test, repli sur l'anglais. |
@@ -114,8 +116,8 @@ au premier usage, et l'application les précharge dans un thread 300 ms après l
 
 ```text
 Monitor (ui/monitor.py)                tâche planifiée (cma tunnels --notify, CMA fermé)
-  ├─ toutes les 5 min : tunnel_states()     ├─ tunnel_states() + check_services()
-  ├─ toutes les 15 min : check_services()   │
+  ├─ toutes les 5 min : watch_tunnels()     ├─ watch_tunnels() + watch_services()
+  ├─ toutes les 15 min : watch_services()   │
   │   (jeton de la surveillance, lecture)   │
   ▼                                         ▼
 TunnelWatch / ServiceWatch          core/monitoring.record_tunnels / record_services
@@ -124,6 +126,14 @@ TunnelWatch / ServiceWatch          core/monitoring.record_tunnels / record_serv
   ▼                                         │
 troubled(tunnels, services) ──► navigation « Cloudflare · N ! », zone de notification, carte « Santé du compte »
 ```
+
+Avec « Surveiller tous les comptes », les deux relevés passent par `CloudflareAdmin.watch_tunnels` et `watch_services` :
+chaque jeton d'API nommé est lu avec son dernier compte choisi, un fil par compte, et un jeton en échec n'arrête pas les
+autres (relevé alors incomplet : aucun incident clos). Les clés (`tunnel:<id>`, `service:<nom>`) ne portent pas le
+compte ; seul le libellé le reçoit dès que deux comptes sont surveillés ([ADR
+0003](adr/0003-surveillance-de-plusieurs-comptes.md)). Après chaque relevé, `core/slo.py` compare la disponibilité des
+30 derniers jours à l'objectif de chaque objet et annonce un franchissement une seule fois (état `slo` de
+`alert_state.json`).
 
 La tâche planifiée n'écrit le journal que si CMA est fermé ; elle s'en sert de mémoire pour ne prévenir qu'au début
 et à la fin d'une panne. Un objet en sourdine est relevé et journalisé, sans notification ni alerte. Une

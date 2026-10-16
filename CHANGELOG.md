@@ -2,6 +2,44 @@
 
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), numérotation [SemVer](https://semver.org/lang/fr/).
 
+## [Non publié]
+
+### Ajouté
+- **Objectifs de disponibilité** (Outils › Disponibilité…) : **Définir l'objectif…** pose, change ou retire
+  l'objectif d'un tunnel ou d'un service, **Objectif par défaut…** celui des objets qui n'en ont pas (de 50 à 100 %).
+  La disponibilité des 30 derniers jours est comparée à l'objectif : la colonne « Objectif » le montre, avec un ▼ et la
+  teinte d'alerte sous l'objectif. CMA prévient **une seule fois** sur les canaux d'alerte quand un objet passe
+  dessous, puis quand il remonte (aux canaux qui veulent les retours), CMA ouvert comme depuis la tâche planifiée.
+  Rien pour un objet en sourdine ou en maintenance, ni sans relevé. Les envois ont la nature « Objectif » dans le
+  journal des envois. Limite : pas d'hystérésis, une disponibilité qui oscille autour de l'objectif peut alterner alerte
+  et retour.
+- **Rapport mensuel** : `cma availability --month AAAA-MM` donne la disponibilité d'un mois civil (en jours locaux) avec
+  l'objectif et l'écart de chaque objet ; le mois en cours va jusqu'à aujourd'hui. `--json` et `--output` (HTML, CSV ou
+  JSON selon l'extension) fonctionnent comme pour `--days`, avec lequel `--month` est exclusif.
+- **Surveillance de plusieurs comptes** (Paramètres › Général › Cloudflare › **Surveiller tous les comptes**,
+  désactivé par défaut) : chaque jeton d'API nommé est relevé avec le dernier compte choisi avec lui, CMA ouvert comme
+  depuis la tâche planifiée. Dès que deux comptes sont surveillés, le nom du compte suit chaque panne (« labo (Compte
+  A) ») dans les notifications, les alertes, le menu « Pannes » et le journal de disponibilité. Un jeton refusé ne
+  bloque pas les autres : `cma tunnels` le signale sur la sortie d'erreur (code 1 si rien d'autre ne va mal) et ajoute
+  le champ `account` à sa sortie `--json`. Pour surveiller deux comptes d'un même jeton, l'enregistrer deux fois.
+  Limites : **Ouvrir** et **Diagnostiquer…** sur un objet d'un autre compte mènent au compte affiché ; la carte « Santé
+  du compte » ne nomme le compte que pour une panne unique. Voir l'ADR 0003.
+- **Tuile « Disponibilité » sur la page Sessions** : taux des 7 derniers jours, incidents et objet le moins disponible ;
+  **Détail** ouvre la boîte Disponibilité sur cet objet. Elle reste cachée tant que rien n'a été relevé. La carte
+  « Santé du compte » a de même un bouton **Disponibilité** qui ouvre la boîte sur le premier objet en panne.
+
+### Modifié
+- Traductions allemandes et espagnoles relues (en espagnol, « Paramètres » se dit « Configuración »). La colonne
+  « Nature » du journal des envois est plus large, et la légende des tuiles de la vue Cloudflare passe à la ligne au
+  lieu d'être coupée.
+- `alert_state.json` garde aussi les objets déjà annoncés sous leur objectif (clé `slo`, absente sans objectif).
+
+### Corrigé
+- Plusieurs modifications rapprochées des règles d'un tunnel (« Monter » cliqué trois fois de suite) ne s'écrasent
+  plus : la lecture, le changement et l'écriture de la configuration d'un tunnel se font l'un après l'autre.
+- Journaux : le détail d'une ligne suit aussi l'index courant, il restait parfois vide.
+- Les alertes d'objectif de disponibilité partent aussi CMA ouvert quand ni rappel ni résumé n'est réglé.
+
 ## [2.13.0] - 2026-10-15
 
 ### Ajouté

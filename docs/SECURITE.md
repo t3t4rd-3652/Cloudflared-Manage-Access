@@ -12,8 +12,8 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
 | Clés privées SSH générées | Dossier `ssh_keys` du dossier de données, chiffrables par phrase de passe (bcrypt/OpenSSH). |
 | Configuration `config.json` | Ne contient aucun secret. |
 | Instantanés `snapshots/*.json` | Configuration du compte Cloudflare (règles, politiques, DNS, Client ID des tokens) ; aucun jeton ni secret. Les 30 derniers par compte. |
-| Disponibilité `availability.json` | Incidents et taux des tunnels et services (noms d'hôte, états, durées) ; 90 jours au plus. |
-| État des alertes `alert_state.json` | Dates des derniers rappels de pannes, semaine du dernier résumé hebdomadaire et tunnel de chaque nom d'hôte ; aucun secret. |
+| Disponibilité `availability.json` | Incidents et taux des tunnels et services (noms d'hôte, états, durées) ; 90 jours au plus. Avec « Surveiller tous les comptes », le libellé d'un objet suit le nom de son compte (pas sa clé). |
+| État des alertes `alert_state.json` | Dates des derniers rappels de pannes, semaine du dernier résumé hebdomadaire, tunnel de chaque nom d'hôte et objets déjà annoncés sous leur objectif de disponibilité (`slo`, avec la date de l'annonce) ; aucun secret. |
 | Journal des envois `alert_log.json` | Les 200 derniers envois vers les canaux d'alerte (date, nom et type du canal, nature, objet, résultat). Aucun secret : l'adresse d'un canal n'y est jamais écrite, ni en entier ni en morceaux ; les erreurs sont rédigées, les adresses masquées, 200 caractères au plus. Fichier local du dossier de données, hors de la configuration et de tout export, effaçable depuis CMA. |
 | Rapport de disponibilité exporté | Mêmes données (noms d'hôte, taux, incidents), aucun jeton ni secret. La page HTML est autonome : ni script ni ressource externe. |
 | Adresses des canaux d'alerte | Coffre du système (clé `alert:<id>`) : une adresse ntfy, Slack ou Teams vaut un jeton. |
@@ -49,6 +49,14 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
   par une lecture.
 - La surveillance (CMA ouvert ou tâche planifiée) peut utiliser son propre jeton, en lecture seule : un poste
   compromis n'ouvre alors pas l'écriture sur le compte (Paramètres › Général › Cloudflare).
+- **« Surveiller tous les comptes »** (désactivé par défaut) étend la surveillance à **tous les jetons d'API du
+  coffre**, tâche planifiée comprise : chacun sert, à chaque relevé, avec son dernier compte choisi. Un jeton qui
+  peut écrire sur un compte qu'on ne fait que surveiller élargit ce qu'un poste compromis atteint : enregistrez pour
+  ces comptes des jetons en lecture seule. Un jeton refusé est seulement journalisé (jamais sa valeur).
+- Le nom du compte accompagne alors chaque panne, et part **vers les canaux d'alerte** et dans les libellés du
+  journal de disponibilité. Chez Cloudflare, le nom par défaut d'un compte contient l'adresse e-mail de son
+  propriétaire (« …'s Account ») : un canal public (un sujet ntfy) la verrait. Renommez le compte chez Cloudflare si
+  un canal n'est pas privé. Décision et limites : [ADR 0003](adr/0003-surveillance-de-plusieurs-comptes.md).
 - « Exiger Access au niveau du tunnel » fait vérifier le jeton Access par cloudflared lui-même
   (`originRequest.access`) : sans application Access, le service reste fermé au lieu de s'ouvrir. Le bilan de
   sécurité (Outils) signale les noms d'hôte publiés sans Access, les politiques ouvertes à tous et les secrets
@@ -72,7 +80,9 @@ Ce document décrit ce que CMA protège, comment, et ses limites.
 - « Oublier le jeton… » le retire du coffre, après confirmation. Révoquez-le aussi dans le tableau de bord Cloudflare si besoin.
 - En ligne de commande, `cma tunnels` (jeton de la surveillance), `cma review` et `cma snapshot` (jeton actif)
   lisent le jeton d'API dans le coffre ; `cma alerts test` y lit les adresses des canaux d'alerte ; `cma
-  availability` ne lit que `availability.json`. Aucune n'accepte de jeton en argument ni n'en affiche.
+  availability` ne lit que `availability.json` (et `config.json`, sans secret, pour les objectifs de `--month`).
+  Avec « Surveiller tous les comptes », `cma tunnels` lit tous les jetons du coffre. Aucune n'accepte de jeton en
+  argument ni n'en affiche.
   `cma review` ne fait que lire : les corrections du bilan se font dans l'interface, après confirmation.
 
 ## Mise à jour de CMA

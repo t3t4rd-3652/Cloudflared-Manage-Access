@@ -133,10 +133,11 @@ Avec un jeton d'API Cloudflare, CMA gère aussi le côté serveur :
   **Santé du compte** de la page Sessions résume tunnels et services en panne, et service tokens à renouveler.
 - **Alertes** vers ntfy (téléphone), Slack, Microsoft Teams, Discord ou un webhook ; **sourdine** d'un tunnel ou d'un
   nom d'hôte pendant une maintenance, **maintenances hebdomadaires** planifiées (pastille « Maintenance » sur les
-  cartes), rappel d'une panne qui dure, **résumé du lundi** de la disponibilité et **journal des envois**
-  (« Envois récents… », sans jamais l'adresse d'un canal).
+  cartes), rappel d'une panne qui dure, **résumé du lundi** de la disponibilité, alerte au passage sous un
+  **objectif de disponibilité** et **journal des envois** (« Envois récents… », sans jamais l'adresse d'un canal).
 - **Disponibilité** de chaque tunnel et service sur 90 jours, par jour local : graphique jour par jour, temps de
-  réponse, incidents, rapport exportable en HTML ou en CSV (aussi en ligne de commande).
+  réponse, incidents, **objectifs** (par objet ou par défaut), tuile de la page Sessions, rapport exportable en HTML
+  ou en CSV, y compris **par mois civil** (aussi en ligne de commande).
 - **Bilan de sécurité** : noms d'hôte publiés sans Access, politiques ouvertes à tout le monde, tokens expirés ou
   inutilisés, DNS vers un tunnel supprimé, règle finale ouverte… Ce que CMA sait corriger se corrige en lot, après
   une confirmation qui liste chaque action.
@@ -144,7 +145,8 @@ Avec un jeton d'API Cloudflare, CMA gère aussi le côté serveur :
   dernières 24 heures par nom d'hôte.
 - **Réseaux privés** d'un tunnel (WARP) : routes vers des plages d'adresses, routage WARP.
 - Menu **Outils** : journal d'audit du compte, **instantanés** de la configuration comparés champ par champ,
-  permissions du jeton vérifiées une à une. Plusieurs jetons d'API pour plusieurs comptes Cloudflare.
+  permissions du jeton vérifiées une à une. Plusieurs jetons d'API pour plusieurs comptes Cloudflare, que la
+  surveillance peut relever tous ensemble (« Surveiller tous les comptes »).
 - Permissions du jeton d'API et détails dans [docs/SECURITE.md](docs/SECURITE.md).
 
 ### Au quotidien
@@ -194,6 +196,7 @@ cma snapshot                 instantané de la configuration Cloudflare, compar�
 cma review [--json] [--all]  bilan de sécurité du compte (code 2 si un constat élevé n'est pas ignoré)
 cma availability [--days 30] disponibilité des tunnels et services relevés (code 2 si un incident est en cours)
 cma availability --output F  écrit le rapport dans le fichier F (.html, .csv ou .json selon l'extension)
+cma availability --month M   rapport du mois civil M (AAAA-MM), avec l'objectif et l'écart ; sans --days
 cma alerts test              envoie un test à chaque canal d'alerte actif (code 1 si l'un échoue)
 cma alerts digest            envoie tout de suite le résumé de la semaine (code 1 sans canal ou si l'un échoue)
 cma doctor                   crée un rapport de diagnostic (zip, sans secrets)

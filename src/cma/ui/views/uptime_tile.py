@@ -167,6 +167,7 @@ def show_availability_on(parent: QWidget, path: Path, key: str | None) -> None:
     """Fonction de module : les tests la remplacent pour ne pas ouvrir de boîte modale. Importée à l'ouverture."""
     from cma.ui.views.cloud.availability import AvailabilityDialog
 
-    dialog = AvailabilityDialog(parent, path)
+    # Le contexte de la fenêtre (objectifs lus et modifiables), comme `show_availability` depuis les outils du compte.
+    dialog = AvailabilityDialog(parent, path, getattr(parent, "ctx", None))
     select_key(dialog, key)
     dialog.exec()
