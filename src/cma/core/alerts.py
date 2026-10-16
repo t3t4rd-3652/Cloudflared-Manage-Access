@@ -9,6 +9,8 @@ est un secret (elle contient souvent un jeton) : elle est dans le coffre, jamais
 from __future__ import annotations
 
 import json
+import socket
+import ssl
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -23,7 +25,31 @@ TIMEOUT = 10.0
 
 
 class AlertError(RuntimeError):
-    """Envoi refusé ou impossible (message lisible, sans l'adresse du canal)."""
+    """Envoi refusé ou impossible (message lisible, sans l'adresse du canal).
+
+    `error_code` est un code stable (`invalid_address`, `refused`, `timeout`, `dns`, `tls`, `unreachable`) et
+    `error_args` ses paramètres, de simples valeurs (code HTTP, nom d'un type d'exception) : jamais d'adresse, de
+    jeton ni de texte libre. Le journal des envois les garde pour traduire le message à l'affichage."""
+
+    def __init__(
+        self, message: str, error_code: str = "", error_args: dict[str, int | str] | None = None
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.error_args: dict[str, int | str] = dict(error_args or {})
+
+
+def _unreachable(exc: BaseException) -> AlertError:
+    """Classe l'échec de connexion : délai dépassé, nom introuvable, TLS, ou autre (nom du type seulement)."""
+    reason: BaseException | str = getattr(exc, "reason", exc)
+    message = tr("Canal injoignable : {error}").format(error=reason)
+    if isinstance(reason, TimeoutError):
+        return AlertError(message, "timeout")
+    if isinstance(reason, socket.gaierror):
+        return AlertError(message, "dns")
+    if isinstance(reason, ssl.SSLError):
+        return AlertError(message, "tls")
+    return AlertError(message, "unreachable", {"type": type(reason).__name__})
 
 
 def kind_label(kind: str) -> str:
@@ -123,13 +149,16 @@ def _b64(text: str) -> str:
 def send_alert(kind: str, url: str, alert: Alert, *, timeout: float = TIMEOUT) -> None:
     """Envoie l'alerte ; AlertError (sans l'adresse, qui est un secret) si le canal la refuse ou ne répond pas."""
     if not url.lower().startswith(("https://", "http://")):
-        raise AlertError(tr("Adresse invalide : elle doit commencer par https://."))
+        raise AlertError(tr("Adresse invalide : elle doit commencer par https://."), "invalid_address")
     request = build_request(kind, url, alert)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             response.read(1024)
     except urllib.error.HTTPError as exc:
-        raise AlertError(tr("Le canal a refusé l'alerte ({status}).").format(status=exc.code)) from exc
+        raise AlertError(
+            tr("Le canal a refusé l'alerte ({status}).").format(status=exc.code),
+            "refused",
+            {"status": exc.code},
+        ) from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        reason = getattr(exc, "reason", exc)
-        raise AlertError(tr("Canal injoignable : {error}").format(error=reason)) from exc
+        raise _unreachable(exc) from exc

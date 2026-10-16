@@ -4,14 +4,17 @@ règle d'écriture de la tâche planifiée."""
 from __future__ import annotations
 
 import json
+import socket
+import ssl
 import threading
+import urllib.error
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 import cma.cli as cli_module
 from cma.core.alertlog import MAX_ENTRIES, MAX_MESSAGE, AlertLog, log_path, scrub, send_and_note
-from cma.core.alerts import Alert, AlertError, secret_key
+from cma.core.alerts import Alert, AlertError, secret_key, send_alert
 from cma.core.alertstate import AlertState
 from cma.core.availability import AvailabilityLog
 from cma.core.cfapi import Tunnel
@@ -355,3 +358,137 @@ def test_unopenable_log_is_not_overwritten(tmp_path, monkeypatch):
     journal.note(channel="Téléphone", kind="ntfy", nature="test")
     monkeypatch.setattr(Path, "open", real_open)
     assert journal.path.read_bytes() == before and len(journal.entries()) == 2
+
+
+# --- Code d'erreur stable (P41) ------------------------------------------------------------------------------------
+
+
+def _fake_urlopen(error: BaseException):
+    def opener(*_args, **_kwargs):
+        raise error
+
+    return opener
+
+
+@pytest.mark.parametrize(
+    ("error", "code", "args"),
+    [
+        (urllib.error.HTTPError(URL, 403, "Forbidden", {}, None), "refused", {"status": 403}),  # type: ignore[arg-type]
+        (urllib.error.URLError(TimeoutError("timed out")), "timeout", {}),
+        (TimeoutError("timed out"), "timeout", {}),
+        (urllib.error.URLError(socket.gaierror(11001, "getaddrinfo failed")), "dns", {}),
+        (urllib.error.URLError(ssl.SSLCertVerificationError("certificat")), "tls", {}),
+        (
+            urllib.error.URLError(ConnectionRefusedError(10061, "refusé")),
+            "unreachable",
+            {"type": "ConnectionRefusedError"},
+        ),
+        (urllib.error.URLError("texte libre"), "unreachable", {"type": "str"}),
+    ],
+)
+def test_send_alert_failures_carry_a_stable_code(monkeypatch, error, code, args):
+    monkeypatch.setattr("cma.core.alerts.urllib.request.urlopen", _fake_urlopen(error))
+    with pytest.raises(AlertError) as raised:
+        send_alert("slack", URL, Alert("t", "x", "info"))
+    assert (raised.value.error_code, raised.value.error_args) == (code, args)
+
+
+def test_invalid_address_has_its_code():
+    with pytest.raises(AlertError) as raised:
+        send_alert("slack", "ftp://x", Alert("t", "x", "info"))
+    assert (raised.value.error_code, raised.value.error_args) == ("invalid_address", {})
+
+
+def test_failure_is_noted_with_code_and_args_and_read_back(journal):
+    def refuse(_kind: str, _url: str, _alert: Alert) -> None:
+        raise AlertError("Le canal a refusé l'alerte (503).", "refused", {"status": 503})
+
+    send_and_note(journal, refuse, "Équipe", "slack", URL, Alert("t", "x", "info"), nature="test")
+    raw = json.loads(journal.path.read_text(encoding="utf-8"))["entries"][0]
+    assert raw["error_code"] == "refused" and raw["error_args"] == {"status": 503}
+    assert raw["error"] == "Le canal a refusé l'alerte (503)."  # le texte reste, pour la compatibilité
+    (entry,) = journal.entries()
+    assert (entry.error_code, entry.error_args, entry.ok) == ("refused", {"status": 503}, False)
+
+
+def test_error_without_code_is_noted_as_other_and_success_has_no_code(journal):
+    def refuse(_kind: str, _url: str, _alert: Alert) -> None:
+        raise AlertError("autre chose")
+
+    send_and_note(journal, refuse, "c", "slack", URL, Alert("t", "x", "info"), nature="test")
+    send_and_note(journal, lambda *_a: None, "c", "slack", URL, Alert("t", "x", "info"), nature="test")
+    failed, ok = journal.entries()
+    assert (failed.error_code, failed.error_args) == ("other", {}) and failed.error == "autre chose"
+    assert (ok.error_code, ok.error_args) == ("", {})
+    assert "error_code" not in json.loads(journal.path.read_text(encoding="utf-8"))["entries"][1]
+
+
+def test_old_entries_without_code_are_still_read(journal):
+    journal.path.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "at": "2026-10-15T08:00:00Z",
+                        "channel": "c",
+                        "kind": "slack",
+                        "nature": "alert",
+                        "subject": "",
+                        "ok": False,
+                        "error": "Le canal a refusé l'alerte (403).",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (entry,) = journal.entries()
+    assert (entry.error, entry.error_code, entry.error_args) == ("Le canal a refusé l'alerte (403).", "", {})
+    journal.note(channel="c", kind="slack", nature="test")  # une nouvelle entrée s'ajoute à l'ancienne
+    assert len(journal.entries()) == 2
+
+
+def test_tampered_code_and_args_are_filtered_on_read(journal):
+    entry = {"at": "2026-10-15T08:00:00Z", "channel": "c", "kind": "slack", "nature": "alert", "ok": False}
+    entry.update(error_code="Code libre !", error_args={"status": True, "x": "a b", "y": [1], "ok": 7})
+    other = dict(entry, error_code="refused", error_args=["pas", "un", "dictionnaire"])
+    journal.path.write_text(json.dumps({"entries": [entry, other, "pas une entrée"]}), encoding="utf-8")
+    first, second = journal.entries()
+    assert (first.error_code, first.error_args) == ("", {"ok": 7})
+    assert (second.error_code, second.error_args) == ("refused", {})
+
+
+def test_error_args_never_hold_an_address_or_a_secret(journal):
+    hostile = {
+        "status": 403,
+        "url": URL,  # une adresse n'est pas un mot simple
+        "token": TOKEN,  # contient un tiret : pas un identifiant
+        "host": "hooks.exemple.invalid",
+        "T0000ABC": "x",  # clé hors format
+        "type": "OSError",
+        "word": "VALEURDEQUERY99",  # mot simple, mais présent dans l'adresse : refusé
+        "topic": "hooks",  # fragment de l'adresse (hôte) : refusé
+        "extra": "texte avec espaces",
+    }
+    journal.note(
+        channel="Équipe",
+        kind="slack",
+        nature="alert",
+        error="Canal injoignable",
+        url=URL,
+        error_code="unreachable",
+        error_args=hostile,  # type: ignore[arg-type]
+    )
+    assert_no_secret(journal.path)
+    (entry,) = journal.entries()
+    assert entry.error_args == {"status": 403, "type": "OSError"}
+    assert "hooks" not in journal.path.read_text(encoding="utf-8")
+
+
+def test_error_args_are_not_written_for_a_success_or_without_code(journal):
+    journal.note(channel="c", kind="slack", nature="test", error_code="refused", error_args={"status": 1})
+    journal.note(channel="c", kind="slack", nature="test", error="x", error_args={"status": 1})
+    ok, failed = journal.entries()
+    assert (ok.error_code, ok.error_args) == ("", {})
+    assert (failed.error_code, failed.error_args) == ("", {})
+    assert "error_args" not in json.loads(journal.path.read_text(encoding="utf-8"))["entries"][1]

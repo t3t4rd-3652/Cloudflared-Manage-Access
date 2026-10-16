@@ -27,10 +27,32 @@ def nature_label(nature: str) -> str:
     }.get(nature, nature)
 
 
+def error_text(entry: SendEntry) -> str:
+    """L'erreur d'un envoi dans la langue de l'interface, d'après son code stable. Code inconnu, paramètre
+    manquant ou entrée ancienne sans code : le texte enregistré, tel quel."""
+    args = entry.error_args
+    status, kind = args.get("status"), args.get("type")
+    match entry.error_code:
+        case "invalid_address":
+            return tr("Adresse invalide : elle doit commencer par https://.")
+        case "refused" if isinstance(status, int):
+            return tr("Le canal a refusé l'alerte ({status}).").format(status=status)
+        case "timeout":
+            return tr("Canal injoignable : délai dépassé.")
+        case "dns":
+            return tr("Canal injoignable : nom introuvable.")
+        case "tls":
+            return tr("Canal injoignable : échec TLS.")
+        case "unreachable" if isinstance(kind, str):
+            return tr("Canal injoignable ({type}).").format(type=kind)
+    return entry.error
+
+
 def result_text(entry: SendEntry) -> str:
     if entry.ok:
         return tr("Réussi")
-    return tr("Échec : {error}").format(error=entry.error) if entry.error else tr("Échec")
+    error = error_text(entry)
+    return tr("Échec : {error}").format(error=error) if error else tr("Échec")
 
 
 class SendsDialog(QDialog):
