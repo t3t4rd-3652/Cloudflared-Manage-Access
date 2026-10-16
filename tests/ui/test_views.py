@@ -641,6 +641,16 @@ def test_ssh_files_tab(qtbot, ssh_gui, threaded_ssh_server, monkeypatch, tmp_pat
     def names() -> list[str]:
         return [files.table.item(r, 0).text() for r in range(files.table.rowCount())]
 
+    def select(name: str) -> None:
+        # Sélection explicite : `selectRow` passe par la commande de sélection de Qt (modificateurs du clavier, ancre)
+        # et laissait parfois la sélection vide sous la charge, d'où un renommage jamais lancé.
+        from PySide6.QtCore import QItemSelectionModel
+
+        index = files.table.model().index(names().index(name), 0)
+        flags = QItemSelectionModel.SelectionFlag.ClearAndSelect | QItemSelectionModel.SelectionFlag.Rows
+        files.table.selectionModel().setCurrentIndex(index, flags)
+        assert [e.name for e in files.selected()] == [name]
+
     def wait_for_names(condition) -> None:
         # Une erreur affichée par l'onglet ne se résorbera pas : l'attente s'arrête alors et dit laquelle, au lieu
         # d'attendre 45 s un tableau qui ne viendra pas.
@@ -689,13 +699,14 @@ def test_ssh_files_tab(qtbot, ssh_gui, threaded_ssh_server, monkeypatch, tmp_pat
     monkeypatch.setattr(files_module, "ask_name", lambda *_a: "rangement")
     files.make_directory()
     wait_for_names(lambda: "rangement" in names())
-    files.table.clearSelection()
-    files.table.selectRow(names().index("envoi.txt"))
+    select("envoi.txt")
     monkeypatch.setattr(files_module, "ask_name", lambda *_a: "renomme.txt")
     files.rename_selected()
+    assert files._busy, (
+        f"renommage non lancé : sélection={[e.name for e in files.selected()]}, liste={names()}"
+    )
     wait_for_names(lambda: "renomme.txt" in names())
-    files.table.clearSelection()
-    files.table.selectRow(names().index("rangement"))
+    select("rangement")
     files.delete_selected()
     wait_for_names(lambda: "rangement" not in names())
     assert not (home / "rangement").exists()
