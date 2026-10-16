@@ -35,7 +35,9 @@ Unicité des clés, vérifiée :
    conseillée), puis par le jeton actif, puis dans l'ordre de la liste.
 4. Les comptes sont lus en même temps, un fil par compte. Un jeton refusé, absent du coffre ou injoignable est
    journalisé (`WatchFailure` : journal de CMA, sortie d'erreur de `cma tunnels`) sans arrêter les autres. Si aucun
-   compte n'est lisible, le relevé échoue comme avant (rien n'est notifié, `cma tunnels` rend le code 1).
+   compte n'est lisible, le relevé échoue comme avant (rien n'est notifié, `cma tunnels` rend le code 1). Depuis P38,
+   un jeton refusé ou absent du coffre passe d'abord la main au jeton suivant du même compte : voir « Repli sur un autre
+   jeton » plus bas.
 5. CMA ouvert (`Monitor`) et tâche planifiée (`cma tunnels --notify`, `_record_and_alert`) suivent la même règle : c'est
    le cœur (`cma.core.cfadmin`) qui l'applique ; les services suivent les tunnels.
 6. Dès que deux comptes au moins sont surveillés (lus ou non), le nom de chaque tunnel et de chaque nom d'hôte est
@@ -84,3 +86,41 @@ Unicité des clés, vérifiée :
   public (sujet ntfy) la verrait. Renommer le compte chez Cloudflare l'évite.
 - Tous les jetons du coffre servent à la surveillance, tâche planifiée comprise : pour un compte qu'on ne fait que
   surveiller, un jeton en lecture seule suffit.
+
+## Repli sur un autre jeton (P38, 2026-10-16)
+
+Dette de P34 : un compte vu par deux jetons n'était relevé que par le premier (point 3). Si ce jeton était refusé
+(révoqué, permission retirée) ou absent du coffre, le compte n'était plus surveillé alors qu'un autre jeton le voyait.
+
+1. **Règle.** Chaque compte a sa liste de jetons, dans l'ordre du point 3 (`CloudflareAdmin._watch_plan`). Le compte est
+   relevé par le premier qui l'accepte : un jeton **refusé** (réponse 401 ou 403, `cma.core.cfadmin.token_refused`) ou
+   **absent du coffre** passe la main au suivant. Les jetons sont essayés l'un après l'autre dans le fil du compte : un
+   compte n'est jamais relevé deux fois, et les jetons qui suivent celui qui a réussi ne sont pas appelés.
+2. **Ordre.** Le jeton de la surveillance (`Settings.watch_token_id`), puis le jeton actif, puis les autres dans l'ordre
+   de `Settings.cloudflare_tokens`. « Voir le même compte » veut dire avoir ce compte pour dernier compte choisi (point
+   2) : aucune requête n'est faite pour découvrir d'autres comptes d'un jeton. Un jeton qui n'a encore choisi aucun
+   compte reste seul (son compte n'est connu qu'à la lecture) : rien ne le remplace.
+3. **Ce qui ne bascule pas.** Une erreur du réseau, une réponse 5xx ou une réponse sans succès (statut 200, `success`
+   faux) n'est pas un refus du jeton : changer de jeton n'y changerait rien et doublerait les requêtes vers une API en
+   difficulté. Le compte est alors un échec, comme avant, sans essayer le jeton suivant. Un 404 ne bascule pas non plus.
+4. **Jamais en silence.** Un repli peut faire lire le compte par un jeton qui sait écrire à la place du jeton en lecture
+   seule de la surveillance. Il est donc journalisé à chaque relevé (avertissement : nom du jeton écarté, raison, compte,
+   nom du jeton utilisé ; jamais un secret) et porté par le relevé (`TunnelSweep.fallbacks`, `ServiceSweep.fallbacks`,
+   des `WatchFallback`). Un compte relu par repli est **lu** : il ne figure pas dans les échecs et le relevé reste
+   complet (`complete=True`), les incidents se ferment normalement. Le jeton refusé est réessayé en tête au relevé
+   suivant : corrigé, il reprend la main sans rien faire.
+5. **Tous refusés.** Si aucun jeton n'accepte le compte, chaque jeton essayé est un échec (`WatchFailure`, un par jeton,
+   avec sa raison) : le relevé est incomplet, et s'il n'a lu aucun compte il échoue comme avant (même message, chaque
+   jeton nommé).
+6. **Ce qui est relevé (`watch_scope`).** Pour chaque compte, le premier de ses jetons présent dans le coffre. Un refus
+   pendant un relevé ne la change pas : le résultat reste valable.
+7. **Un seul compte surveillé** (réglage désactivé) : même règle pour le compte choisi, avec le jeton de la surveillance,
+   le jeton actif, puis les autres jetons dont le dernier compte choisi est celui-là. Avant P38, un jeton de la
+   surveillance absent du coffre laissait déjà la place au jeton actif, mais sans rien dire ; il est maintenant
+   journalisé et porté par le relevé comme un refus. Tous refusés : l'erreur du premier jeton essayé, celle d'avant.
+   `tunnel_states` et `check_services` gardent leur forme (l'interface et ses tests les appellent ou les remplacent) :
+   `watch_tunnels` et `watch_services` recueillent leurs replis par une variable de contexte.
+
+Conséquences : un jeton révoqué coûte une requête refusée de plus par compte et par relevé, tant qu'il reste enregistré.
+L'interface et `cma tunnels` n'affichent pas encore les replis (ils sont dans le journal et dans le relevé) ; les
+montrer est une suite possible.
