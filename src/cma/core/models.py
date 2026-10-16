@@ -446,6 +446,16 @@ def clamp_target(value: float) -> float:
     return min(MAX_TARGET, max(MIN_TARGET, float(value)))
 
 
+MIN_MARGIN = 0.0
+MAX_MARGIN = 1.0
+DEFAULT_MARGIN = 0.05
+
+
+def clamp_margin(value: float) -> float:
+    """Marge de retour d'un objectif ramenée entre 0 et 1 point de pourcentage."""
+    return min(MAX_MARGIN, max(MIN_MARGIN, float(value)))
+
+
 class Settings(Model):
     cloudflared_path: str | None = None
     theme: Theme = Theme.SYSTEM
@@ -498,6 +508,21 @@ class Settings(Model):
     # Surveillance de tous les comptes (P34, ADR 0003) : chaque jeton d'API nommé est relevé avec son dernier compte
     # choisi, au lieu du seul compte de la vue Cloudflare.
     watch_all_accounts: bool = False
+    # Marge de retour (P40, en points de pourcentage, de 0 à 1) : une alerte d'objectif manqué part dès que la
+    # disponibilité passe sous l'objectif, mais son retour n'est annoncé qu'à objectif + marge (100 % au plus).
+    availability_margin: float = DEFAULT_MARGIN
+
+    @field_validator("availability_margin", mode="before")
+    @classmethod
+    def _bounded_margin(cls, value: object) -> float:
+        """Absente ou illisible (texte, NaN, booléen…) → valeur par défaut ; hors de 0 à 1 → ramenée à la borne."""
+        if isinstance(value, bool) or not isinstance(value, int | float | str):
+            return DEFAULT_MARGIN
+        try:
+            number = float(value)
+        except ValueError:
+            return DEFAULT_MARGIN
+        return DEFAULT_MARGIN if math.isnan(number) else clamp_margin(number)
 
     @field_validator("availability_targets", mode="after")
     @classmethod

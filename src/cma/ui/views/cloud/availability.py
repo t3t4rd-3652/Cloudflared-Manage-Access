@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 from cma.core.availability import AvailabilityLog, DayStats, Incident, Stats, daily
 from cma.core.availability_report import build, report_csv, report_html
 from cma.core.fsutil import atomic_write_text
-from cma.core.models import MAX_TARGET, MIN_TARGET, Config
+from cma.core.models import MAX_MARGIN, MAX_TARGET, MIN_MARGIN, MIN_TARGET, Config, clamp_margin
 from cma.core.slo import SloStatus, set_target, status, target_text
 from cma.i18n import tr
 from cma.ui.icons import app_icon
@@ -173,22 +173,31 @@ def ask_report_path(parent: QWidget, days: int) -> Path | None:
 
 @dataclass(frozen=True)
 class TargetChoice:
-    """Réponse de la boîte d'objectif : `value` en %, ou None pour retirer l'objectif."""
+    """Réponse de la boîte d'objectif : `value` en %, ou None pour retirer l'objectif. `margin` : marge de retour en
+    points de pourcentage, seulement quand la boîte la proposait (objectif par défaut), sinon None."""
 
     value: float | None
+    margin: float | None = None
 
 
 class TargetDialog(QDialog):
-    """Objectif de disponibilité sur 30 jours d'un objet (ou objectif par défaut), de 50 à 100 %."""
+    """Objectif de disponibilité sur 30 jours d'un objet (ou objectif par défaut), de 50 à 100 %. Avec `margin`
+    (la marge de retour actuelle, réglage commun à tous les objets), la boîte propose aussi de la régler."""
 
     def __init__(
-        self, parent: QWidget | None, name: str, current: float | None, *, for_default: bool
+        self,
+        parent: QWidget | None,
+        name: str,
+        current: float | None,
+        *,
+        for_default: bool,
+        margin: float | None = None,
     ) -> None:
         super().__init__(parent)
         self.removed = False
         self.setWindowTitle(tr("Objectif de disponibilité"))
         self.setWindowIcon(app_icon())
-        self.resize(520, 260)
+        self.resize(520, 260 if margin is None else 360)
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
         layout.addWidget(title(tr("Objectif de disponibilité : {name}").format(name=name), "SectionTitle"))
@@ -216,6 +225,28 @@ class TargetDialog(QDialog):
         self.spin.setSuffix(" %")
         self.spin.setValue(current if current is not None else SUGGESTED_TARGET)
         layout.addWidget(self.spin)
+        self.margin_spin: QDoubleSpinBox | None = None
+        if margin is not None:
+            layout.addWidget(title(tr("Marge de retour"), "SectionTitle"))
+            layout.addWidget(
+                label(
+                    tr(
+                        "Le retour n'est annoncé que lorsque la disponibilité atteint l'objectif plus cette marge "
+                        "(100 % au plus) : une disponibilité qui oscille autour de l'objectif ne fait plus alterner "
+                        "alertes et retours. 0 : retour dès l'objectif."
+                    ),
+                    "muted",
+                    wrap=True,
+                )
+            )
+            self.margin_spin = QDoubleSpinBox()
+            self.margin_spin.setAccessibleName(tr("Marge de retour (points de pourcentage)"))
+            self.margin_spin.setRange(MIN_MARGIN, MAX_MARGIN)
+            self.margin_spin.setDecimals(2)
+            self.margin_spin.setSingleStep(0.01)
+            self.margin_spin.setSuffix(" " + tr("pt"))
+            self.margin_spin.setValue(clamp_margin(margin))
+            layout.addWidget(self.margin_spin)
         layout.addStretch()
         buttons, self.ok_button = dialog_buttons(self, tr("Enregistrer"))
         self.ok_button.clicked.connect(self.accept)
@@ -231,14 +262,20 @@ class TargetDialog(QDialog):
         self.accept()
 
     def value(self) -> TargetChoice:
-        return TargetChoice(None if self.removed else float(self.spin.value()))
+        margin = None if self.margin_spin is None else round(float(self.margin_spin.value()), 2)
+        return TargetChoice(None if self.removed else float(self.spin.value()), margin)
 
 
 def ask_target(
-    parent: QWidget, name: str, current: float | None, *, for_default: bool = False
+    parent: QWidget,
+    name: str,
+    current: float | None,
+    *,
+    for_default: bool = False,
+    margin: float | None = None,
 ) -> TargetChoice | None:
     """Fonction de module : les tests la remplacent pour ne pas ouvrir de boîte modale. None : annulé."""
-    dialog = TargetDialog(parent, name, current, for_default=for_default)
+    dialog = TargetDialog(parent, name, current, for_default=for_default, margin=margin)
     return dialog.value() if dialog.exec() == QDialog.DialogCode.Accepted else None
 
 
@@ -356,12 +393,20 @@ class AvailabilityDialog(QDialog):
         if self.ctx is None:
             return
         current = self._config().settings.default_availability_target
-        answer = ask_target(self, tr("tous les objets sans objectif propre"), current, for_default=True)
+        answer = ask_target(
+            self,
+            tr("tous les objets sans objectif propre"),
+            current,
+            for_default=True,
+            margin=self._config().settings.availability_margin,
+        )
         if answer is None:
             return
 
         def apply(config: Config) -> None:
             config.settings.default_availability_target = answer.value
+            if answer.margin is not None:
+                config.settings.availability_margin = answer.margin
 
         if self.ctx.update_config(apply):
             self._fill(self._selected_key())
