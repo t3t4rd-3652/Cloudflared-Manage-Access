@@ -541,7 +541,8 @@ def capture_guide_alerts(window, output: Path) -> None:
 def capture_guide_health_menu(window, output: Path) -> None:
     """`guide-menu-pannes.png` : sous-menu « Pannes » de l'icône, avec le tunnel « labo » hors ligne et le service
     `wiki.exemple.fr` injoignable (état injecté, aucun relevé réel)."""
-    from PySide6.QtCore import QPoint
+    import shiboken6
+    from PySide6.QtCore import QEvent, QPoint
 
     from cma.core.cfapi import Tunnel
     from cma.core.hostprobe import HostProbe
@@ -552,14 +553,32 @@ def capture_guide_health_menu(window, output: Path) -> None:
     target = ServiceTarget("wiki.exemple.fr", "", "http://localhost:8080", "t1", "bureau")
     tray._on_services([ServiceResult(target, HostProbe("origin_down", 502), datetime.now())])
     tray._on_tunnels([Tunnel("t2", "labo", "down")])
-    menu = tray._health_menu
-    if menu is None:
-        raise RuntimeError("sous-menu Pannes absent")
-    menu.popup(QPoint(300, 300))
-    for _ in range(10):
-        QApplication.processEvents()
-    menu.grab().save(str(output / "guide-menu-pannes.png"))
-    menu.hide()
+    # Le menu « Pannes » est reconstruit (et l'ancien détruit par `deleteLater`) à chaque changement de configuration
+    # ou d'état SSH, y compris par un signal en attente qui n'arrive qu'au premier tour de la boucle d'événements :
+    # le menu lu avant ce tour peut être détruit au moment de la capture (« Internal C++ object already deleted »).
+    # On laisse donc d'abord la boucle se vider, puis on relit le menu à chaque essai et on vérifie qu'il est valide.
+    saved = False
+    for _attempt in range(6):
+        for _ in range(6):
+            QApplication.processEvents()
+            QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        menu = tray._health_menu
+        if menu is None:
+            raise RuntimeError("sous-menu Pannes absent")
+        try:
+            menu.popup(QPoint(300, 300))
+            for _ in range(10):
+                QApplication.processEvents()
+            if tray._health_menu is not menu or not shiboken6.isValid(menu):
+                continue  # reconstruit pendant l'attente : on reprend avec le nouveau
+            menu.grab().save(str(output / "guide-menu-pannes.png"))
+            saved = True
+            menu.hide()
+            break
+        except RuntimeError:  # objet C++ détruit entre la lecture et la capture
+            continue
+    if not saved:
+        raise RuntimeError("sous-menu Pannes détruit à chaque essai")
     tray.deleteLater()
     QApplication.processEvents()
 
