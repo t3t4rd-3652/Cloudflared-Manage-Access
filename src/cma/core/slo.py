@@ -6,6 +6,9 @@
   Sans aucun relevé sur la période, il n'y a ni état ni événement : un trou n'est pas une panne.
 - `crossings` donne les franchissements à annoncer : le passage sous l'objectif, **une seule fois** tant que l'objet
   reste dessous, puis le retour au-dessus. Ce qui a déjà été annoncé est dans `alert_state.json` (ADR 0002).
+- Marge de retour (P40, `Settings.availability_margin`) : l'alerte part dès que la disponibilité passe sous l'objectif,
+  mais le retour n'est annoncé qu'à objectif + marge (100 % au plus). Entre les deux, l'état annoncé ne change pas :
+  un objet qui oscille autour de l'objectif ne fait plus alterner alerte et retour.
 - `month_report` : rapport d'un mois civil en jours locaux, avec l'objectif et l'écart ; le mois en cours va jusqu'à
   aujourd'hui. Le calcul porte sur des dates locales : le jour d'un changement d'heure reste un seul jour.
 
@@ -22,7 +25,7 @@ from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from cma.core.alertstate import AlertState
 from cma.core.availability import AvailabilityLog, Incident, Stats, local_date
 from cma.core.digest import watched
-from cma.core.models import Config, clamp_target
+from cma.core.models import MAX_TARGET, Config, clamp_target
 from cma.i18n import tr
 
 WINDOW_DAYS = 30
@@ -62,6 +65,16 @@ def target_text(value: float | None) -> str:
 def is_below(percent: float | None, target: float | None) -> bool:
     """Disponibilité (en %) sous l'objectif ; faux sans objectif ou sans relevé."""
     return percent is not None and target is not None and percent + 1e-9 < target
+
+
+def recovery_level(target: float, margin: float) -> float:
+    """Disponibilité (en %) à atteindre pour annoncer le retour : objectif + marge, plafonnée à 100 %."""
+    return min(MAX_TARGET, target + margin)
+
+
+def is_recovered(percent: float | None, target: float | None, margin: float) -> bool:
+    """Disponibilité (en %) revenue au niveau de retour (objectif + marge) ; faux sans objectif ou sans relevé."""
+    return percent is not None and target is not None and percent + 1e-9 >= recovery_level(target, margin)
 
 
 def kind_of(key: str) -> str:
@@ -122,11 +135,14 @@ def crossings(
     """Franchissements dus : un objet sous son objectif qui n'a pas encore été annoncé, ou annoncé qui est remonté.
 
     - Seuls les objets d'un type surveillé, avec un objectif et au moins un relevé sur 30 jours comptent.
+    - Le retour exige objectif + `Settings.availability_margin` (`recovery_level`) : tant que la disponibilité reste
+      entre l'objectif et ce niveau, un objet annoncé reste « sous l'objectif » et un objet correct reste correct.
     - `muted(clé)` : objet en sourdine ou en maintenance → ni alerte ni retour (ils viendront à la fin de la sourdine
       si la situation dure).
     - L'état n'est pas modifié ici, sauf l'oubli des objets qui n'ont plus d'objectif ou de relevé connu : il l'est
       quand l'envoi a réussi (`AlertState.mark_slo`)."""
     moment = now or datetime.now(UTC)
+    margin = config.settings.availability_margin
     found: list[Crossing] = []
     known: set[str] = set()
     for key in log.keys():  # noqa: SIM118 (méthode du journal, pas un dictionnaire)
@@ -139,7 +155,11 @@ def crossings(
         if current.uptime is None:
             continue  # aucun relevé : pas de conclusion, l'état annoncé reste tel quel
         announced = state.slo_below(key)
-        if current.below == announced:
+        # Sous l'objectif, on alerte ; une fois annoncé, on ne revient qu'à objectif + marge (entre les deux : rien).
+        if announced:
+            if not is_recovered(current.uptime, current.target, margin):
+                continue
+        elif not current.below:
             continue
         if muted is not None and muted(key):
             continue

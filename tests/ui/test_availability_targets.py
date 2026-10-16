@@ -154,10 +154,12 @@ def test_define_default_target(qtbot, gui_context, tmp_path, monkeypatch):
     dialog = AvailabilityDialog(None, make_log(tmp_path), ctx)
     qtbot.addWidget(dialog)
     calls: list[tuple[float | None, bool]] = []
+    margins: list[float | None] = []
     answers: list[TargetChoice | None] = [TargetChoice(97.0), None, TargetChoice(None)]
 
-    def fake_ask(parent, name, current, *, for_default=False):
+    def fake_ask(parent, name, current, *, for_default=False, margin=None):
         calls.append((current, for_default))
+        margins.append(margin)
         return answers.pop(0)
 
     monkeypatch.setattr(availability_module, "ask_target", fake_ask)
@@ -169,6 +171,29 @@ def test_define_default_target(qtbot, gui_context, tmp_path, monkeypatch):
     dialog.define_default_target()
     assert ctx.config().settings.default_availability_target is None
     assert calls == [(None, True), (97.0, True), (97.0, True)]
+    assert margins == [0.05, 0.05, 0.05]  # la marge actuelle est proposée à la boîte
+    assert ctx.config().settings.availability_margin == 0.05  # une réponse sans marge ne la touche pas
+
+
+def test_define_default_target_saves_the_margin(qtbot, gui_context, tmp_path, monkeypatch):
+    ctx = gui_context
+    dialog = AvailabilityDialog(None, make_log(tmp_path), ctx)
+    qtbot.addWidget(dialog)
+    asked: list[float | None] = []
+    answers = [TargetChoice(99.5, 0.2), TargetChoice(None, 0.0)]
+
+    def fake_ask(parent, name, current, *, for_default=False, margin=None):
+        asked.append(margin)
+        return answers.pop(0)
+
+    monkeypatch.setattr(availability_module, "ask_target", fake_ask)
+    dialog.define_default_target()
+    settings = ctx.config().settings
+    assert settings.default_availability_target == 99.5 and settings.availability_margin == 0.2
+    dialog.define_default_target()  # retirer l'objectif par défaut garde le réglage de la marge choisi
+    settings = ctx.config().settings
+    assert settings.default_availability_target is None and settings.availability_margin == 0.0
+    assert asked == [0.05, 0.2]
 
 
 def test_refused_update_keeps_the_table(qtbot, gui_context, tmp_path, monkeypatch):
@@ -201,6 +226,38 @@ def test_target_dialog_fields(qtbot):
     assert current.spin.value() == 97.5 and current.remove_button.isEnabled()
     current.remove_button.click()
     assert current.result() == QDialog.DialogCode.Accepted and current.value() == TargetChoice(None)
+
+
+def test_target_dialog_margin_field(qtbot):
+    plain = TargetDialog(None, "wiki", 99.0, for_default=False)
+    qtbot.addWidget(plain)
+    assert plain.margin_spin is None and plain.value().margin is None  # la marge est un réglage commun
+    dialog = TargetDialog(None, "tous", 99.0, for_default=True, margin=0.05)
+    qtbot.addWidget(dialog)
+    spin = dialog.margin_spin
+    assert spin is not None and spin.decimals() == 2
+    assert spin.minimum() == 0.0 and spin.maximum() == 1.0 and spin.value() == 0.05
+    assert accessible_name(spin) == "Marge de retour (points de pourcentage)"
+    spin.setValue(5.0)
+    assert spin.value() == 1.0  # borné
+    spin.setValue(-1.0)
+    assert spin.value() == 0.0
+    spin.setValue(0.126)  # deux décimales
+    assert dialog.value() == TargetChoice(99.0, 0.13)
+    spin.setValue(0.3)
+    assert dialog.value() == TargetChoice(99.0, 0.3)
+    dialog.remove_button.click()
+    assert dialog.value() == TargetChoice(None, 0.3)  # retirer l'objectif garde la marge choisie
+    apply_accessible_names(dialog)
+    assert describe(missing_accessible_names(dialog)) == []
+    verify_tab_order(dialog, min_controls=4)  # objectif, marge, Annuler, Enregistrer, Retirer
+
+
+def test_ask_target_passes_the_margin(qtbot, monkeypatch):
+    monkeypatch.setattr(QDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    assert ask_target(parent, "tous", 96.0, for_default=True, margin=0.4) == TargetChoice(96.0, 0.4)
 
 
 def test_ask_target_module_function(qtbot, monkeypatch):
