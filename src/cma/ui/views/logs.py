@@ -275,6 +275,8 @@ class LogsView(QWidget):
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._context_menu)
         self.table.selectionModel().selectionChanged.connect(lambda *_a: self._on_selection())
+        # La sélection est annoncée avant l'index courant (selectRow) : le détail suit aussi l'index courant.
+        self.table.selectionModel().currentChanged.connect(lambda *_a: self._on_selection())
         self.table.verticalScrollBar().actionTriggered.connect(self._on_user_scroll)
         copy_shortcut = add_shortcut(self.table, QKeySequence.StandardKey.Copy, self._copy_selected)
         copy_shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)

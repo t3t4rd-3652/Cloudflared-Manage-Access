@@ -440,6 +440,28 @@ def test_full_application_start_and_stop(qtbot, qapp, paths, monkeypatch):
 # --- Journaux --------------------------------------------------------------------------------------
 
 
+def test_log_detail_follows_the_current_row_set_after_the_selection(qtbot, gui):
+    """La sélection peut être annoncée avant l'index courant (c'est le cas de `selectRow`, selon l'état précédent) :
+    le détail suit l'index courant quand il arrive, au lieu de rester vide."""
+    from PySide6.QtCore import QItemSelectionModel
+
+    from cma.core.events import LogLine
+
+    _ctx, window = gui
+    view = window.logs
+    view.load_history([LogLine("s1", "Bureau labo", "ERROR", "Access a refusé le jeton")])
+    view.model.flush()
+    selection = view.table.selectionModel()
+    selection.clearCurrentIndex()
+    index = view.proxy.index(0, 0)
+    selection.select(
+        index, QItemSelectionModel.SelectionFlag.ClearAndSelect | QItemSelectionModel.SelectionFlag.Rows
+    )
+    assert view.detail.toPlainText() == ""  # sélection annoncée sans index courant
+    selection.setCurrentIndex(index, QItemSelectionModel.SelectionFlag.NoUpdate)
+    assert "Access a refusé le jeton" in view.detail.toPlainText()
+
+
 def test_logs_view(qtbot, gui, monkeypatch, tmp_path):
     import cma.ui.views.logs as logs_module
     from cma.core.events import LogLine
@@ -622,7 +644,14 @@ def test_ssh_files_tab(qtbot, ssh_gui, threaded_ssh_server, monkeypatch, tmp_pat
     def wait_for_names(condition) -> None:
         # Une erreur affichée par l'onglet ne se résorbera pas : l'attente s'arrête alors et dit laquelle, au lieu
         # d'attendre 45 s un tableau qui ne viendra pas.
-        qtbot.waitUntil(lambda: condition() or not files.error.isHidden(), timeout=45000)
+        # 90 s : sous la charge d'autres suites lancées en même temps sur le poste, une opération SFTP du serveur de
+        # test a déjà dépassé 45 s sans erreur. Si elle échoue encore, le message dit où en était l'onglet.
+        try:
+            qtbot.waitUntil(lambda: condition() or not files.error.isHidden(), timeout=90000)
+        except Exception as exc:
+            raise AssertionError(
+                f"attente dépassée : état « {files.status.text()} », occupé={files._busy}, liste={names()}"
+            ) from exc
         assert condition(), files.error.text()
 
     files.browse_button.click()
