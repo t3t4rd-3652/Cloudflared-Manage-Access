@@ -78,9 +78,10 @@ def test_monitor_watches_every_account(qtbot, gui_context, cf, probes, sent):
     assert "Le tunnel « labo (Compte A) » est hors ligne" in texts[0]
     assert "Le tunnel « api (Compte B) » est hors ligne" in texts[1]
     assert [t.name for t in troubles[-1][0]] == ["api (Compte B)", "labo (Compte A)"]
-    # « Diagnostiquer… » seulement pour le compte de la vue Cloudflare (l'autre n'y est pas affiché).
+    # « Diagnostiquer… » aussi pour l'autre compte (P39) : la vue Cloudflare s'y ouvre avec le jeton qui le donne.
     actions = [action for _level, _text, action in notices]
-    assert isinstance(actions[0], tuple) and actions[0][0] == "Diagnostiquer…" and actions[1] is None
+    assert isinstance(actions[0], tuple) and actions[0][0] == "Diagnostiquer…"
+    assert isinstance(actions[1], tuple) and actions[1][0] == "Diagnostiquer…"
     # Journal : les clés restent celles d'avant ; le libellé porte le compte.
     incident = monitor.availability.open_incident("tunnel", "tunnel:t9")
     assert incident is not None and incident.label == "api (Compte B)"
@@ -97,7 +98,7 @@ def test_monitor_watches_every_account(qtbot, gui_context, cf, probes, sent):
     assert [text for _l, text, _a in notices] == [
         "app.exemple.org (Compte B) : le tunnel répond, mais pas le service derrière lui (erreur 502)."
     ]
-    assert notices[0][2] is None  # service d'un autre compte : pas de « Voir… »
+    assert isinstance(notices[0][2], tuple) and notices[0][2][0] == "Voir…"  # service de l'autre compte (P39)
     assert monitor.availability.open_incident("service", "service:app.exemple.org") is not None
 
 

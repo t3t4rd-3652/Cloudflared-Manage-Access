@@ -19,7 +19,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from cma.core.alertlog import AlertLog, log_path
 from cma.core.alertstate import AlertState, state_path
 from cma.core.availability import AvailabilityLog
-from cma.core.cfadmin import ServiceSweep, TunnelSweep
+from cma.core.cfadmin import ServiceSweep, TunnelSweep, token_secret_key
 from cma.core.cfapi import Tunnel
 from cma.core.monitoring import (
     Event,
@@ -33,7 +33,7 @@ from cma.core.monitoring import (
     service_key,
     tunnel_key,
 )
-from cma.core.servicewatch import ServiceChange, ServiceResult
+from cma.core.servicewatch import ServiceChange, ServiceResult, ServiceTarget
 from cma.core.slo import has_targets
 from cma.core.tunnelwatch import TunnelChange, TunnelWatch
 from cma.i18n import tr
@@ -61,11 +61,14 @@ class Monitor(QObject):
         parent: QObject | None = None,
         *,
         open_tunnel: Callable[[Tunnel | None, bool], None] | None = None,
+        open_service: Callable[[ServiceTarget], None] | None = None,
         start: bool = True,
     ) -> None:
         super().__init__(parent)
         self.ctx = ctx
         self.open_tunnel = open_tunnel or (lambda _tunnel, _diagnose: None)
+        # « Voir… » sur un service d'un autre compte : la vue Cloudflare de ce compte, sur ce nom d'hôte.
+        self.open_service = open_service
         self.tunnel_watch = TunnelWatch()
         self.availability = AvailabilityLog(ctx.paths.data_dir / "availability.json")
         # Journal des envois : noté depuis le fil qui envoie (un envoi de relevé ou de suite à la fois, plus le test
@@ -79,6 +82,8 @@ class Monitor(QObject):
         self._service_account: str | None = None
         # Tous les comptes (ADR 0003) : compte de chaque tunnel du dernier relevé (identifiant du tunnel → du compte).
         self._tunnel_accounts: dict[str, str] = {}
+        # Jeton qui a relevé chaque compte au dernier relevé des tunnels (compte → jeton) : celui qui l'ouvre.
+        self._account_tokens: dict[str, str] = {}
         self._tunnel_timer = QTimer(self)
         self._tunnel_timer.setInterval(TUNNEL_WATCH_MS)
         self._tunnel_timer.timeout.connect(self.check_tunnels)
@@ -150,6 +155,9 @@ class Monitor(QObject):
                     **{t.id: self._tunnel_accounts[t.id] for t in kept},
                     **{tid: watched.account_id for tid, watched in sweep.accounts.items()},
                 }
+                self._account_tokens.update(
+                    {watched.account_id: watched.token_id for watched in sweep.accounts.values()}
+                )
                 self.report_tunnel_changes(self.tunnel_watch.update(sweep.tunnels + kept))
                 self._record(
                     record_tunnels(
@@ -303,12 +311,33 @@ class Monitor(QObject):
 
     def other_account(self, account_id: str | None) -> bool:
         """Objet d'un autre compte que celui de la vue Cloudflare (tous les comptes) : la vue ne le montre pas, aucune
-        action « Diagnostiquer… » ou « Voir… » ne lui est proposée."""
+        action « Diagnostiquer… » ou « Voir… » ne lui est proposée si aucun jeton ne la donne (`can_open`)."""
         return bool(account_id) and account_id != self.ctx.config().settings.cloudflare_account_id
 
     def tunnel_account(self, tunnel_id: str) -> str | None:
         """Compte d'un tunnel du dernier relevé (tous les comptes) ; None avec un seul compte surveillé."""
         return self._tunnel_accounts.get(tunnel_id)
+
+    def token_for_account(self, account_id: str) -> str | None:
+        """Jeton d'API avec lequel la vue Cloudflare peut ouvrir ce compte : celui qui l'a relevé au dernier relevé des
+        tunnels, sinon un jeton dont le dernier compte choisi est celui-là ; dans tous les cas un jeton encore dans le
+        coffre. None quand aucun ne le donne (jeton oublié ou retiré du coffre depuis le relevé)."""
+        admin = self.ctx.manager.cloudflare
+        tokens = admin.tokens()
+        ranked = [self._account_tokens.get(account_id)] + [t.id for t in tokens if t.account_id == account_id]
+        known = {t.id for t in tokens}
+        for token_id in ranked:
+            if token_id in known and admin.secrets.get(token_secret_key(token_id)):
+                return token_id
+        return None
+
+    def can_open(self, account_id: str | None) -> bool:
+        """L'objet d'un autre compte peut-il être ouvert (un jeton enregistré donne ce compte) ? Toujours vrai pour le
+        compte de la vue Cloudflare. Ouvrir ne fait que lire : « Diagnostiquer… » et « Voir… » lisent le compte
+        (connecteurs, noms d'hôte) sans rien modifier."""
+        return not self.other_account(account_id) or (
+            account_id is not None and self.token_for_account(account_id) is not None
+        )
 
     def report_tunnel_changes(self, changes: list[TunnelChange]) -> None:
         config = self.ctx.config()
@@ -317,7 +346,7 @@ class Monitor(QObject):
                 continue
             action: Action = (
                 None
-                if change.recovered or self.other_account(self.tunnel_account(change.tunnel.id))
+                if change.recovered or not self.can_open(self.tunnel_account(change.tunnel.id))
                 else (tr("Diagnostiquer…"), lambda t=change.tunnel: self.open_tunnel(t, True))
             )
             self.notice.emit(change.level, change.message(), action)
@@ -329,10 +358,17 @@ class Monitor(QObject):
                 continue
             action: Action = (
                 None
-                if change.recovered or self.other_account(change.target.account_id)
-                else (tr("Voir…"), lambda: self.open_tunnel(None, False))
+                if change.recovered or not self.can_open(change.target.account_id)
+                else (tr("Voir…"), lambda t=change.target: self._view_service(t))
             )
             self.notice.emit(change.level, change.message(), action)
+
+    def _view_service(self, target: ServiceTarget) -> None:
+        """« Voir… » : la vue Cloudflare ; pour un service d'un autre compte, ce compte et ce nom d'hôte."""
+        if self.open_service is not None and self.other_account(target.account_id):
+            self.open_service(target)
+        else:
+            self.open_tunnel(None, False)
 
     def current_troubles(self) -> tuple[list[Tunnel], list[ServiceResult]]:
         """Tunnels et services en panne au dernier relevé, sans ce qui est en sourdine (maintenance)."""

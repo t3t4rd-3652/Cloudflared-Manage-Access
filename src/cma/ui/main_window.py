@@ -32,7 +32,7 @@ from cma.core.expiry import TokenExpiry, expiring_tokens
 from cma.core.links import Link, LinkError, is_link, parse_link, profile_from_share, read_share
 from cma.core.models import Config
 from cma.core.secrets import EncryptedFileSecretStore
-from cma.core.servicewatch import ServiceResult, troubled_services_summary
+from cma.core.servicewatch import ServiceResult, ServiceTarget, troubled_services_summary
 from cma.core.sessions import SessionInfo, SessionKind, SessionState
 from cma.core.ssh.discovery import RemotePort
 from cma.core.tunnelwatch import troubled_summary
@@ -233,7 +233,10 @@ class MainWindow(QMainWindow):
         # Surveillance du compte (tunnels, services, disponibilité, alertes) : objet à part (ADR 0001). Les anciens
         # noms restent sur la fenêtre pour la palette, la zone de notification et les tests.
         self.monitor = Monitor(
-            ctx, self, open_tunnel=lambda tunnel, diagnose: self.open_tunnel(tunnel, diagnose=diagnose)
+            ctx,
+            self,
+            open_tunnel=lambda tunnel, diagnose: self.open_tunnel(tunnel, diagnose=diagnose),
+            open_service=self.open_target,
         )
         self.monitor.notice.connect(lambda level, text, action: self.notify(level, text, action=action))
         self.monitor.troubled.connect(self._on_troubled)
@@ -443,7 +446,19 @@ class MainWindow(QMainWindow):
 
     def open_tunnel(self, tunnel: Tunnel | None, *, diagnose: bool = False) -> None:
         """Vue Cloudflare, onglet Tunnels, relue, puis le tunnel sélectionné ; avec `diagnose`, l'état des connecteurs
-        du tunnel s'ouvre."""
+        du tunnel s'ouvre. Un tunnel d'un autre compte (surveillance de tous les comptes) ouvre d'abord ce compte."""
+        account = self.monitor.tunnel_account(tunnel.id) if tunnel is not None else None
+        if tunnel is not None and self.monitor.other_account(account):
+            found = tunnel
+
+            def select_other() -> None:
+                if not reveal_tunnel(self.cloud, found.id):
+                    self.notify("warning", tr("Cet objet ne figure plus dans le compte Cloudflare ouvert."))
+                elif diagnose:
+                    self.cloud.check_connectors(found)
+
+            self._open_in_account(account, select_other)
+            return
         self.show_view("cloud")
         self.cloud.tabs.setCurrentIndex(0)
         if tunnel is None:
@@ -458,12 +473,38 @@ class MainWindow(QMainWindow):
         if diagnose:
             self.cloud.check_connectors(tunnel)
 
+    def _open_in_account(self, account_id: str | None, then: Callable[[], None]) -> None:
+        """Vue Cloudflare sur le compte d'un objet en panne qui n'est pas celui de la vue : un jeton qui le voit, ce
+        compte, relu, puis `then` (sélection de l'objet). Sans jeton qui le donne : un message, rien n'est changé."""
+        token_id = self.monitor.token_for_account(account_id) if account_id else None
+        if account_id is None or token_id is None:
+            self.notify(
+                "warning",
+                tr(
+                    "Aucun jeton d'API enregistré ne donne accès à ce compte Cloudflare : "
+                    "l'objet ne peut pas être ouvert."
+                ),
+            )
+            return
+        self.show_view("cloud")
+        self.cloud.tabs.setCurrentIndex(0)
+        self.cloud.show_account(token_id, account_id, then)
+
     def open_availability(self, key: str | None = None) -> None:
         """Boîte Disponibilité des outils du compte, positionnée sur l'objet `key` (clé du journal)."""
         show_availability_on(self, self.ctx.paths.data_dir / "availability.json", key)
 
-    def open_service(self, hostname: str, path: str = "") -> None:
-        """Vue Cloudflare, onglet Tunnels, relue, puis la règle du nom d'hôte publié sélectionnée."""
+    def open_service(self, hostname: str, path: str = "", account_id: str | None = None) -> None:
+        """Vue Cloudflare, onglet Tunnels, relue, puis la règle du nom d'hôte publié sélectionnée. Pour un nom d'un
+        autre compte (`account_id`, surveillance de tous les comptes), ce compte est ouvert d'abord."""
+        if self.monitor.other_account(account_id):
+
+            def select_other() -> None:
+                if not reveal_service(self.cloud, hostname, path):
+                    self.notify("warning", tr("Cet objet ne figure plus dans le compte Cloudflare ouvert."))
+
+            self._open_in_account(account_id, select_other)
+            return
         self.show_view("cloud")
         self.cloud.tabs.setCurrentIndex(0)
 
@@ -471,6 +512,10 @@ class MainWindow(QMainWindow):
             reveal_service(self.cloud, hostname, path)
 
         self.cloud.refresh(then=select)
+
+    def open_target(self, target: ServiceTarget) -> None:
+        """Nom d'hôte surveillé (avec son compte) : vue Cloudflare sur ce nom."""
+        self.open_service(target.hostname, target.path, target.account_id or None)
 
     def publish_port(self, server: str, port: RemotePort) -> None:
         """« Publier sur Cloudflare… » d'un port découvert : la boîte de publication de la vue Cloudflare, préremplie."""

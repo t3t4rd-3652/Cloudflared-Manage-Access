@@ -130,7 +130,9 @@ def test_health_menu_entries_are_wired(qtbot, gui, monkeypatch):
     tray = Tray(ctx, window)
     opened: list[object] = []
     monkeypatch.setattr(window, "open_tunnel", lambda t, **_kw: opened.append(t))
-    monkeypatch.setattr(window, "open_service", lambda host, path="": opened.append((host, path)))
+    monkeypatch.setattr(
+        window, "open_service", lambda host, path="", account_id=None: opened.append((host, path))
+    )
     target = ServiceTarget("wiki.exemple.fr", "", "http://localhost:8080", "t1", "bureau")
     tray._on_tunnels([Tunnel("t2", "labo", "down")])
     tray._on_services([ServiceResult(target, HostProbe("origin_down", 502), datetime.now())])
