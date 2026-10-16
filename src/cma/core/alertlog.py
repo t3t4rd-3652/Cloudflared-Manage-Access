@@ -5,7 +5,8 @@ plus (les plus récentes). Une entrée : date UTC, nom et type du canal, nature 
 `digest`, `slo`, `test`), objet (libellé d'un tunnel ou d'un nom d'hôte, vide pour un résumé ou un test), résultat.
 
 Aucun secret : ni l'adresse du canal ni un fragment d'adresse (`scrub`), et un message d'erreur court (200
-caractères). La lecture est tolérante (fichier absent ou illisible = journal vide) et l'écriture atomique ; un
+caractères) ; le code d'erreur stable (`error_code`) et ses paramètres simples (`error_args` : code HTTP, nom d'un
+type d'exception) permettent de traduire le message à l'affichage, le texte restant le repli. La lecture est tolérante (fichier absent ou illisible = journal vide) et l'écriture atomique ; un
 journal qui ne s'écrit pas ne doit jamais empêcher une alerte de partir. Comme pour le journal de disponibilité, la
 tâche planifiée n'écrit que si CMA est fermé ; CMA ouvert, plusieurs fils peuvent noter en même temps (envois des
 relevés, rappels, test des Paramètres) : un verrou de processus sérialise « lire, ajouter, écrire ».
@@ -17,7 +18,7 @@ import logging
 import re
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -37,6 +38,10 @@ _FRAGMENT_MIN = 8  # un morceau d'adresse plus court n'est pas un secret, et mas
 _LAST_SEGMENT_MIN = 4  # dernier segment du chemin (sujet ntfy, jeton de webhook) : masqué même court
 _URL = re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://\S+")
 _SPLIT = re.compile(r"[/?&=#:@;,]+")
+_CODE = re.compile(r"[a-z][a-z_]{0,31}")
+_ARG_KEY = re.compile(r"[a-z][a-z_]{0,15}")
+_ARG_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
+_MAX_ARGS = 4
 
 NATURES = ("alert", "recovery", "reminder", "digest", "slo", "test")
 
@@ -58,6 +63,33 @@ class SendEntry:
     subject: str
     ok: bool
     error: str = ""
+    error_code: str = ""
+    error_args: dict[str, int | str] = field(default_factory=dict[str, int | str])
+
+
+def safe_code(value: Any) -> str:
+    """Un code d'erreur est un court identifiant en minuscules, sinon vide."""
+    return value if isinstance(value, str) and _CODE.fullmatch(value) else ""
+
+
+def _simple_value(item: Any, url: str) -> bool:
+    if isinstance(item, int):
+        return not isinstance(item, bool)
+    return isinstance(item, str) and bool(_ARG_WORD.fullmatch(item)) and item.lower() not in url.lower()
+
+
+def safe_args(value: Any, url: str = "") -> dict[str, int | str]:
+    """Ne garde que des valeurs simples : un entier (code HTTP) ou un mot identifiant (nom d'un type d'exception),
+    quelques clés au plus ; jamais un texte libre, ni rien qui figure dans l'adresse du canal."""
+    if not isinstance(value, dict):
+        return {}
+    kept: dict[str, int | str] = {}
+    for key, item in cast(dict[Any, Any], value).items():
+        if len(kept) >= _MAX_ARGS or not (isinstance(key, str) and _ARG_KEY.fullmatch(key)):
+            continue
+        if _simple_value(item, url):
+            kept[key] = item
+    return kept
 
 
 def scrub(text: str, url: str = "", kind: str = "", *, known_secrets: bool = True) -> str:
@@ -104,6 +136,8 @@ def _parse(value: Any) -> SendEntry | None:
         subject if isinstance(subject, str) else "",
         raw.get("ok") is True,
         error if isinstance(error, str) else "",
+        safe_code(raw.get("error_code")),
+        safe_args(raw.get("error_args")),
     )
 
 
@@ -118,6 +152,10 @@ def _dump(entry: SendEntry) -> dict[str, Any]:
     }
     if entry.error:
         data["error"] = entry.error
+    if entry.error_code:
+        data["error_code"] = entry.error_code
+        if entry.error_args:
+            data["error_args"] = entry.error_args
     return data
 
 
@@ -162,8 +200,12 @@ class AlertLog:
         error: str | None = None,
         url: str = "",
         at: datetime | None = None,
+        error_code: str = "",
+        error_args: dict[str, int | str] | None = None,
     ) -> None:
-        """Note un envoi (`error` None = réussi). `url` n'est jamais écrite : elle sert à masquer le message."""
+        """Note un envoi (`error` None = réussi). `url` n'est jamais écrite : elle sert à masquer le message.
+        `error_code` et `error_args` (valeurs simples, filtrées par `safe_args`) servent à traduire l'erreur."""
+        failed = error is not None
         entry = SendEntry(
             at or datetime.now(UTC),
             channel,
@@ -172,6 +214,8 @@ class AlertLog:
             subject,
             error is None,
             scrub(error, url, kind) if error is not None else "",
+            safe_code(error_code) if failed else "",
+            safe_args(error_args, url) if failed else {},
         )
         with _lock:
             if not self._readable():
@@ -212,7 +256,16 @@ def send_and_note(
         send(kind, url, alert)
     except AlertError as exc:
         if journal is not None:
-            journal.note(channel=name, kind=kind, nature=nature, subject=subject, error=str(exc), url=url)
+            journal.note(
+                channel=name,
+                kind=kind,
+                nature=nature,
+                subject=subject,
+                error=str(exc),
+                url=url,
+                error_code=exc.error_code or "other",
+                error_args=exc.error_args,
+            )
         # L'appelant l'affiche : jamais l'adresse du canal non plus (la rédaction globale reste au journal).
         return scrub(str(exc), url, kind, known_secrets=False)
     if journal is not None:

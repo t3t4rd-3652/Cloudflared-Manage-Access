@@ -167,3 +167,102 @@ def test_monitor_notes_new_outages_and_failures(qtbot, gui_context, monkeypatch)
     (entry,) = journal.entries()
     assert (entry.nature, entry.subject, entry.ok) == ("alert", "bureau", False)
     assert "ntfy.sh" not in log_path(ctx.paths.data_dir).read_text(encoding="utf-8")
+
+
+# --- Erreurs traduites à l'affichage (P41) -------------------------------------------------------------------------
+
+GERMAN = {  # le catalogue allemand n'a pas encore ces textes (i18n_p41.json) : injectés pour le test
+    "Canal injoignable : délai dépassé.": "Kanal nicht erreichbar: Zeitüberschreitung.",
+    "Canal injoignable : nom introuvable.": "Kanal nicht erreichbar: Name nicht gefunden.",
+    "Canal injoignable : échec TLS.": "Kanal nicht erreichbar: TLS-Fehler.",
+    "Canal injoignable ({type}).": "Kanal nicht erreichbar ({type}).",
+}
+
+
+def _in_german(monkeypatch):
+    from cma.i18n import catalog, get_language, set_language
+
+    for text, translated in GERMAN.items():
+        monkeypatch.setitem(catalog("de"), text, translated)
+    previous = get_language()
+    set_language("de")
+    return lambda: set_language(previous)
+
+
+def failed_log(tmp_path) -> AlertLog:
+    journal = AlertLog(tmp_path / "alert_log.json")
+    for code, args, text in (
+        ("refused", {"status": 403}, "Le canal a refusé l'alerte (403)."),
+        ("timeout", {}, "Canal injoignable : timed out"),
+        ("dns", {}, "Canal injoignable : [Errno 11001] getaddrinfo failed"),
+        ("tls", {}, "Canal injoignable : certificate verify failed"),
+        ("unreachable", {"type": "ConnectionRefusedError"}, "Canal injoignable : refusé"),
+        ("invalid_address", {}, "Adresse invalide : elle doit commencer par https://."),
+    ):
+        journal.note(
+            channel="Équipe", kind="slack", nature="alert", error=text, error_code=code, error_args=args
+        )
+    return journal
+
+
+def test_new_entries_show_their_error_in_the_interface_language(qtbot, tmp_path, monkeypatch):
+    restore = _in_german(monkeypatch)
+    try:
+        dialog = SendsDialog(None, failed_log(tmp_path))
+        qtbot.addWidget(dialog)
+        results = [cells(dialog, row)[4] for row in range(dialog.table.rowCount())][::-1]  # du plus ancien
+    finally:
+        restore()
+    assert results == [
+        "Fehlgeschlagen: Der Kanal hat die Warnung abgelehnt (403).",
+        "Fehlgeschlagen: Kanal nicht erreichbar: Zeitüberschreitung.",
+        "Fehlgeschlagen: Kanal nicht erreichbar: Name nicht gefunden.",
+        "Fehlgeschlagen: Kanal nicht erreichbar: TLS-Fehler.",
+        "Fehlgeschlagen: Kanal nicht erreichbar (ConnectionRefusedError).",
+        "Fehlgeschlagen: Ungültige Adresse: Sie muss mit https:// beginnen.",
+    ]
+
+
+def test_old_or_unknown_errors_keep_their_recorded_text(qtbot, tmp_path, monkeypatch):
+    journal = AlertLog(tmp_path / "alert_log.json")
+    journal.note(channel="a", kind="slack", nature="alert", error="Ancien texte français")  # sans code
+    journal.note(channel="b", kind="slack", nature="alert", error="Texte brut", error_code="other")
+    journal.note(channel="c", kind="slack", nature="alert", error="Code futur", error_code="inconnu_demain")
+    journal.note(channel="d", kind="slack", nature="alert", error="Statut perdu", error_code="refused")
+    journal.note(channel="e", kind="slack", nature="alert", error="", error_code="timeout")  # code sans texte
+    journal.note(channel="f", kind="slack", nature="alert", error="")  # échec sans rien d'autre
+    restore = _in_german(monkeypatch)
+    try:
+        dialog = SendsDialog(None, journal)
+        qtbot.addWidget(dialog)
+        results = [cells(dialog, row)[4] for row in range(dialog.table.rowCount())][::-1]
+    finally:
+        restore()
+    assert results[:4] == [
+        "Fehlgeschlagen: Ancien texte français",
+        "Fehlgeschlagen: Texte brut",
+        "Fehlgeschlagen: Code futur",
+        "Fehlgeschlagen: Statut perdu",
+    ]
+    assert results[4] == "Fehlgeschlagen: Kanal nicht erreichbar: Zeitüberschreitung."
+    assert results[5] == "Fehlgeschlagen"
+
+
+def test_old_file_without_codes_is_displayed_with_its_text(qtbot, tmp_path):
+    path = tmp_path / "alert_log.json"
+    path.write_text(
+        '{"entries": [{"at": "2026-10-15T08:00:00Z", "channel": "Équipe", "kind": "slack", "nature": "alert", '
+        '"subject": "bureau", "ok": false, "error": "Le canal a refusé l\'alerte (403)."}]}',
+        encoding="utf-8",
+    )
+    dialog = SendsDialog(None, AlertLog(path))
+    qtbot.addWidget(dialog)
+    assert cells(dialog, 0)[4] == "Échec : Le canal a refusé l'alerte (403)."
+
+
+def test_corrupt_log_still_opens_empty(qtbot, tmp_path):
+    path = tmp_path / "alert_log.json"
+    path.write_text("{ pas du json", encoding="utf-8")
+    dialog = SendsDialog(None, AlertLog(path))
+    qtbot.addWidget(dialog)
+    assert dialog.table.rowCount() == 0 and not dialog.empty.isHidden()
