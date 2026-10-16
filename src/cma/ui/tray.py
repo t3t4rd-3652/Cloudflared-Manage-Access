@@ -180,7 +180,7 @@ class Tray(QObject):
         """Ouvre la vue Cloudflare (onglet Tunnels, relu) sur la règle du service en panne."""
         self.window.bring_to_front()
         target = service_result.target
-        self.window.open_service(target.hostname, target.path)
+        self.window.open_service(target.hostname, target.path, target.account_id or None)
 
     def _mute_tunnel_for_one_hour(self, tunnel: Tunnel) -> None:
         """Met en sourdine le tunnel pendant 1 heure."""

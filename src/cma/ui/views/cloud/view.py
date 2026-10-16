@@ -38,6 +38,7 @@ from cma.core.cfadmin import CloudflareAdmin, Overview
 from cma.core.cfapi import (
     TOKENS_PAGE,
     Account,
+    CloudflareApiError,
 )
 from cma.i18n import tr
 from cma.ui.context import GuiContext
@@ -99,6 +100,8 @@ class CloudView(QWidget):
         self._loading = False
         self._refresh_again = False
         self._after_refresh: list[Callable[[], None]] = []  # actions à jouer une fois le compte relu
+        # Change à chaque bascule de jeton ou de compte : la réponse d'une lecture partie avant ne vaut plus.
+        self._epoch = 0
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 20, 24, 16)
         layout.setSpacing(4)
@@ -400,12 +403,59 @@ class CloudView(QWidget):
             return
         if active is not None and chosen == active.id:
             return
+        self._invalidate()
         self.admin.switch_token(str(chosen))
         self.overview = None
         self.read_at = None
         self.account.clear()
         self._fill(None)
         self.connect_account(use_saved=True)
+
+    def _invalidate(self) -> None:
+        """Une lecture ou une connexion en cours (jeton ou compte d'avant) est abandonnée : sa réponse sera ignorée, et
+        ce qui attendait la fin de la lecture (sélection d'un objet) tombe avec elle."""
+        self._epoch += 1
+        self._loading = False
+        self._refresh_again = False
+        self._after_refresh.clear()
+        self.connect_button.setEnabled(True)
+
+    def show_account(self, token_id: str, account_id: str, then: Callable[[], None] | None = None) -> None:
+        """Affiche le compte `account_id` lu avec le jeton `token_id` (jeton et compte actifs changés s'il le faut, comme
+        par les listes de la vue), le relit, puis joue `then` : c'est « Ouvrir » sur la panne d'un autre compte
+        (surveillance de tous les comptes). Une lecture en cours est abandonnée, jamais mélangée. Le jeton de la
+        surveillance (`watch_token_id`) n'est pas touché."""
+        active = self.admin.active_token()
+        same_token = active is not None and active.id == token_id
+        current = self.account.currentData()
+        if same_token and isinstance(current, Account) and current.id == account_id:
+            self.refresh(then=then)
+            return
+        self._invalidate()
+        try:
+            if not same_token:
+                self.admin.switch_token(token_id)
+            self.admin.select_account(account_id)
+        except CloudflareApiError as exc:
+            self._error(exc)
+            return
+        self.overview = None
+        self.read_at = None
+        self.tabs.setEnabled(False)  # les lignes affichées appartiennent à l'ancien compte
+        known = next((i for i in range(self.account.count()) if self._account_at(i) == account_id), None)
+        if same_token and known is not None:
+            with QSignalBlocker(self.account):
+                self.account.setCurrentIndex(known)
+            self._fill(None)
+            self.refresh(then=then)
+            return
+        self.account.clear()
+        self._fill(None)
+        self.connect_account(use_saved=True, then=then, expect=account_id)
+
+    def _account_at(self, index: int) -> str | None:
+        account = self.account.itemData(index)
+        return account.id if isinstance(account, Account) else None
 
     def start_add_token(self) -> None:
         """Page de connexion pour un jeton de plus, avec retour au compte en cours."""
@@ -440,7 +490,12 @@ class CloudView(QWidget):
 
     # --- Connexion ---------------------------------------------------------------------------------------
 
-    def connect_account(self, use_saved: bool = False) -> None:
+    def connect_account(
+        self, use_saved: bool = False, then: Callable[[], None] | None = None, expect: str | None = None
+    ) -> None:
+        """Se connecte (jeton enregistré ou collé) puis lit le compte ; `then` est joué une fois la lecture affichée.
+        Avec `expect`, le compte attendu : si le jeton ne le donne plus, rien n'est ouvert et l'utilisateur est prévenu."""
+        epoch = self._epoch
         token = None if use_saved else self.token_field.text().strip()
         if token == "":
             self.ctx.notify("error", tr("Collez d'abord un jeton d'API Cloudflare."))
@@ -450,6 +505,8 @@ class CloudView(QWidget):
         self.status.setText(tr("Connexion…"))
 
         def done(accounts: list[Account]) -> None:
+            if epoch != self._epoch:
+                return  # jeton ou compte changé depuis : cette réponse ne vaut plus
             self.connect_button.setEnabled(True)
             self.token_field.set_text("")
             self.token_name.clear()
@@ -461,9 +518,24 @@ class CloudView(QWidget):
                 if account.id == current:
                     self.account.setCurrentIndex(self.account.count() - 1)
             self.permission_hint.setVisible(any(a.inferred for a in accounts))
-            self.refresh()
+            follow = then
+            if expect is not None and expect not in {a.id for a in accounts}:
+                self.tabs.setEnabled(True)
+                self.ctx.notify(
+                    "warning",
+                    tr(
+                        "Aucun jeton d'API enregistré ne donne accès à ce compte Cloudflare : "
+                        "l'objet ne peut pas être ouvert."
+                    ),
+                )
+                follow = None
+            self.refresh(then=follow)
 
-        self.ctx.run(self.admin.connect(token, self.token_name.text()), done, self._error)
+        def failed(error: BaseException) -> None:
+            if epoch == self._epoch:
+                self._error(error)
+
+        self.ctx.run(self.admin.connect(token, self.token_name.text()), done, failed)
 
     def forget(self) -> None:
         if not confirm(
@@ -476,6 +548,7 @@ class CloudView(QWidget):
             tr("Oublier le jeton"),
         ):
             return
+        self._invalidate()
         self.admin.forget()
         self.overview = None
         self.read_at = None
@@ -510,10 +583,13 @@ class CloudView(QWidget):
             return
         self._loading = True
         self._refresh_again = False
+        epoch = self._epoch
         self.refresh_button.setEnabled(False)
         self.status.setText(tr("Lecture du compte…"))
 
         def done(overview: Overview) -> None:
+            if epoch != self._epoch:
+                return  # lecture d'un autre jeton ou compte : abandonnée
             self._loading = False
             self.refresh_button.setEnabled(True)
             self.tabs.setEnabled(True)
@@ -526,7 +602,11 @@ class CloudView(QWidget):
             for action in pending:
                 action()
 
-        self.ctx.run(self.admin.overview(account), done, self._error)
+        def failed(error: BaseException) -> None:
+            if epoch == self._epoch:
+                self._error(error)
+
+        self.ctx.run(self.admin.overview(account), done, failed)
 
     def _show_summary(self) -> None:
         overview = self.overview
