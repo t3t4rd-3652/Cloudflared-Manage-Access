@@ -70,7 +70,9 @@ def report_lines(report: MonthReport) -> list[str]:
     incidents, nom). Liste vide si rien n'a été relevé."""
     lines: list[str] = []
     for row in report.rows:
-        uptime = f"{math.floor(row.uptime * 100 + 1e-9) / 100:6.2f} %" if row.uptime is not None else "     — "
+        uptime = (
+            f"{math.floor(row.uptime * 100 + 1e-9) / 100:6.2f} %" if row.uptime is not None else "     — "
+        )
         mean = f"{row.stats.mean_ms:5.0f} ms" if row.stats.mean_ms is not None else "        "
         target = target_text(row.target).rjust(8)
         lines.append(f"{uptime}  {target}  {_gap(row.gap):>6}  {mean}  {row.incidents:>3}  {row.label}")
