@@ -862,11 +862,11 @@ Statut : À FAIRE
 | P35 | FAIT | 7535bf0 | 760 ✓ | 2026-10-16 |
 | P36 | FAIT | f06f21d, dee9945 | 760 ✓ | 2026-10-16 |
 | P37 | FAIT | a82e631, f76c35d | 760 ✓ | 2026-10-16 |
-| P38 | À FAIRE | — | — | — |
-| P39 | À FAIRE | — | — | — |
-| P40 | À FAIRE | — | — | — |
-| P41 | À FAIRE | — | — | — |
-| P42 | À FAIRE | — | — | — |
+| P38 | EN COURS | — | — | — |
+| P39 | EN COURS | — | — | — |
+| P40 | EN COURS | — | — | — |
+| P41 | EN COURS | — | — | — |
+| P42 | EN COURS | — | — | — |
 | P43 | À FAIRE | — | — | — |
 
 **Prochaine action exacte :** lancer les agents I (P38, Opus), J (P39), K (P40), L (P41) et M (P42) en
