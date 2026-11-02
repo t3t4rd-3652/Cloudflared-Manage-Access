@@ -6,6 +6,46 @@ et la façon de livrer. La situation et la suite du projet sont dans [docs/PLAN.
 
 Le dépôt est public : rien de personnel ni de secret ici (pas de jeton, pas de chemin propre à un poste).
 
+**Organisation (02/11/2026)** : ce fichier ne garde que ce qui sert à presque chaque tour (le projet, les
+règles de sécurité et interdits, les vérifications avant commit, la CI, les pièges des outils de la session).
+Le reste est déplacé tel quel, sans résumé ni suppression, dans `docs/claude/` (correspondance :
+[docs/claude/README.md](docs/claude/README.md)) et n'est plus chargé d'office : avant d'agir, lire le fichier
+que désigne l'index ci-dessous.
+
+## Index des déclencheurs (lire le fichier avant d'agir)
+
+- Secret, coffre (keyring, mode portable, clés `cfapi:token`, `cfapi:token:<id>`, `alert:<id>`), jeton d'API,
+  vrai compte Cloudflare (recette, `--ecriture`, 403 du test depuis Internet), trousseau du poste, tâche
+  planifiée, export, journal des envois, politiques Access, DNS, ingress, écoute de cloudflared, bilan de sécurité,
+  états affichés, imports à la demande, fuseau d'un test, éléments et filtre d'événements Qt, `ruff`, adresse
+  d'exemple, attentes d'état des tests, copie installée → section « Règles de sécurité et interdits » ci-dessous.
+- Avant d'écrire un secret de test → [docs/claude/pieges.md](docs/claude/pieges.md), « Tests et CI : ».
+- Avant de modifier, déboguer ou expliquer un comportement (démarrage, listes et tunnels en cartes, compte et API
+  Cloudflare, réglages d'application, journal des accès, lecture en parallèle, surveillance des tunnels et des
+  services, reprise après la veille, outils du compte, liens `cma://`, jeton de la surveillance, disponibilité,
+  alertes, maintenance, rappels et résumé, objectifs, plusieurs comptes, `~/.ssh/config`, « Quoi de neuf »)
+  → [docs/claude/decisions.md](docs/claude/decisions.md), puce en gras du sujet.
+- Test qui ouvre une boîte modale, filtre par période ou remplace une fonction d'envoi, agents en worktrees
+  → [docs/claude/decisions.md](docs/claude/decisions.md), puces **Boîtes modales et tests**, **Dates de test
+  relatives**, **Disponibilité et alertes**, **Travail en agents parallèles**.
+- Échec, gel ou erreur intermittente d'un test (local ou CI), sélection, menus, accessibilité, clavier, faux serveur
+  HTTP, `pre-commit` → [docs/claude/pieges.md](docs/claude/pieges.md), « Qt et PySide : » et « Tests et CI : ».
+- Arrêt simultané des processus de travail de xdist (`0x80010002`, piste P42, `tests/diagnostic_workers.py`,
+  `CMA_TEST_DIAG`), ou pour y ajouter un piège → [docs/claude/pieges.md](docs/claude/pieges.md), « Tests et CI : »,
+  puce « Arrêt simultané de tous les processus de travail de xdist ».
+- Captures par `scripts/capture_screenshots.py` (menu « Pannes » reconstruit, `shiboken6.isValid`)
+  → [docs/claude/pieges.md](docs/claude/pieges.md), « Tests et CI : », puce « `scripts/capture_screenshots.py` ».
+- Sortie de la CLI redirigée sous Windows (cp1252, `cli.safe_output()`, `capsys`)
+  → [docs/claude/pieges.md](docs/claude/pieges.md), « Tests et CI : », puce « La CLI écrit dans une console UTF-8 ».
+- Comparer des chemins (séparateur Linux) → [docs/claude/pieges.md](docs/claude/pieges.md), « Tests et CI : »,
+  puce « Comparer des chemins par leurs parties ».
+- Supprimer un service token par l'API, erreur asyncssh ou SSL, socket Unix, code jugé inaccessible par pyright
+  → [docs/claude/pieges.md](docs/claude/pieges.md), « Réseau et bibliothèques : ».
+- Publier une version (`__version__`, CHANGELOG, tag, `release.yml`, winget, Scoop), suivre une release
+  → [docs/claude/publication.md](docs/claude/publication.md) (point 5 : section ci-dessous).
+- Étape passée, phase Pn, release, ce qui a été retiré → [docs/claude/historique.md](docs/claude/historique.md).
+- Mise à jour de cette mémoire : dans le fichier qui porte le sujet (ici ou dans `docs/claude/`), sans recopie.
+
 ## Le projet en bref
 
 **Cloudflared Manage Access (CMA)** : application de bureau PySide6 qui ouvre des accès locaux vers des
@@ -19,6 +59,114 @@ service tokens) avec un jeton d'API.
 - Sécurité et modèle de menace : [docs/SECURITE.md](docs/SECURITE.md). Scripts serveur : [docs/SERVEUR.md](docs/SERVEUR.md).
 - Conventions de code : [CONTRIBUTING.md](CONTRIBUTING.md) (identifiants en anglais, textes et commentaires en
   français, `tr("…")` littéral, `cma.core` sans Qt, écritures atomiques, aucun secret en argument ou en journal).
+
+## Règles de sécurité et interdits
+
+Puces déplacées telles quelles, dans leur ordre d'origine ; une ligne « → » marque leur place. De
+« Décisions à connaître » ([docs/claude/decisions.md](docs/claude/decisions.md)) :
+
+- **Écoute de cloudflared** : « Start Websocket listener » est écrit avant l'ouverture du port. L'écoute est
+  confirmée par un `bind` qui doit échouer, jamais par une connexion (elle déclencherait l'authentification Access).
+  Une option invalide sort avec le code 0 : tout arrêt avant l'écoute est une erreur.
+- **Secrets** : jamais en argument (le secret du service token passe par l'environnement), jamais dans
+  `config.json`, masqués dans les journaux. Coffre système (keyring) ou fichier chiffré en mode portable.
+- **Politiques Access** : une règle que CMA ne comprend pas devient `PolicyRule("raw")` et repart telle quelle à
+  l'enregistrement ; `exclude`, `require` et les champs inconnus (`AccessPolicy.extra`, dont `connection_rules`
+  du RDP) aussi. Ne pas « simplifier » cette conservation.
+- **Politiques réutilisables** : sur un vrai compte, elles le sont toutes (`reusable`, `app_count`). Elles se
+  modifient par `/access/policies/{id}` et s'attachent par un PUT complet de l'application (relue, champs calculés
+  retirés). Cloudflare refuse une politique legacy sur une application nouvelle : `allow_service_token` réutilise
+  ou crée une politique du compte. Le faux serveur reproduit ce modèle ; ne pas revenir à `/apps/{id}/policies`.
+- **Recette sur un vrai compte** : `scripts/cloudflare_recette.py` (lecture seule par défaut). Le classifieur de
+  la session refuse toute écriture sur le compte Cloudflare réel, même jetable : le mode `--ecriture` est lancé
+  par le propriétaire. La recette ne crée aucun DNS : une règle de test est posée directement dans la
+  configuration du tunnel de test, jamais par `publish_hostname` (qui crée le CNAME).
+- **Secrets de la 2.3** : « Changer le secret » (`…/rotate`) révoque l'ancien secret chez Cloudflare, d'où la
+  confirmation ; le jeton d'un connecteur de tunnel passe par `register_secret` et n'est jamais conservé.
+- **États affichés** (`cma.ui.states`) : libellé, teinte, symbole et actions d'une session, d'une liaison SSH ou
+  d'un favori viennent de là (les tables `STATUS_OF_STATE`… y sont, `cma.ui.theme` les réexporte). Ne pas en
+  refaire une copie dans une vue : c'est ce qui avait fait diverger la zone de notification et le tableau de bord.
+- **DNS des noms d'hôte** (`cma.core.dnscheck`, appelé par `CloudflareAdmin.overview`) : une lecture par zone
+  utilisée ; une zone illisible donne « unknown », jamais une alerte. « Corriger » passe par `ensure_cname`, qui
+  refuse de remplacer un A ou un AAAA : ne pas l'assouplir.
+- **Tâche planifiée** (`cma.platform.schedule`) : lance l'exécutable fenêtré avec `tunnels --notify` (pas de
+  console qui clignote) ; `gui_main` passe cette commande à la CLI. Les tests remplacent `_schtasks` : ne jamais
+  créer de vraie tâche dans un test. Notification système : `cma.platform.notify` (texte par l'environnement).
+- **Test depuis Internet** (`cma.core.hostprobe`) : la requête ne suit pas les redirections (une redirection vers
+  `cloudflareaccess.com` signifie Access). Sur le vrai compte, les 403 sans navigateur venaient de la protection
+  contre les robots (`cf-mitigated: challenge`), pas d'Access ni du service : ne pas les lire comme un refus.
+- **Jetons d'API nommés** (`Settings.cloudflare_tokens`, `CloudflareAdmin.tokens`, `active_token`,
+  `switch_token`) : le premier jeton garde la clé du coffre `cfapi:token` (`LEGACY_TOKEN_ID`), les suivants
+  `cfapi:token:<id>`. Un poste d'avant les jetons nommés n'a rien à migrer : son jeton apparaît sous « Principal ».
+  Les surveillances suivent `cloudflare_account_id`, qui change avec le jeton : elles repartent d'elles-mêmes.
+- **Bilan de sécurité** (`cma.core.security.review`, analyse pure ; lecture et corrections dans `CloudflareAdmin`) :
+  « Protéger par Access » crée une application sans politique, donc ferme le service ; il n'est jamais coché
+  d'office (le vrai compte a des sites publics voulus). Un constat accepté est gardé par `Finding.ident` dans
+  `Settings.ignored_findings`. « Exiger Access au niveau du tunnel » écrit `originRequest.access` (`required`,
+  `teamName` lu dans `/access/organizations`, `audTag` de l'application qui couvre le nom).
+- **Outils du compte chargés à la demande** (`cloud/account_tools.py`) : chaque boîte est importée à son ouverture
+  par une fonction de module du même nom (`show_security_review`…), que les tests remplacent. Ne pas remettre ces
+  imports en tête de module : ils pèsent sur le démarrage.
+- **Mesure du démarrage** (`scripts/startup_benchmark.py`, `CMA_STARTUP_BENCHMARK=1`) : coffre vide en mémoire
+  (`ui/app._open_secret_store`), jamais le trousseau du poste, qui est global à l'utilisateur et contient le vrai
+  jeton. Comparer deux versions en mesures **alternées** (ancienne version dans un `git worktree`) : deux séries
+  prises à des moments différents ont déjà fait annoncer un gain qui n'était que du bruit.
+- **Jours locaux de la disponibilité** (`cma.core.availability`, `availability.json` en version 2) : le jour d'un
+  relevé est sa date locale ; les jours enregistrés avant la version 2 (UTC) gardent leur date, sans conversion
+  possible. Le fuseau (`tz`) est un paramètre de `record_check`, `stats`, `daily`, `report`… pour les tests ; `tzdata`
+  n'est pas installé sous Windows : tester avec des fuseaux fixes (`timezone(timedelta(hours=…))`) ou une petite
+  classe `tzinfo` simulée (changement d'heure), jamais `ZoneInfo`.
+- **Export des alertes** (`cma.core.transfer`, clés facultatives `alert_channels`, `maintenance_windows`,
+  `alert_settings`) : l'adresse d'un canal est un secret comme les autres (`alert:<id>`), chiffrée dans les
+  secrets d'un export protégé, jamais dans un export en clair. Un canal importé sans adresse est créé
+  **désactivé** (il échouerait à chaque alerte) et l'aperçu l'annonce ; pas de doublon (même type et même nom,
+  maintenance identique) ; les réglages des rappels ne sont repris que si l'utilisateur le coche.
+- **Journal des envois** (`cma.core.alertlog`, `ui/dialogs/sends.py`) : `alert_log.json`, à part de la
+  configuration et de `alert_state.json`, 200 entrées au plus. Plusieurs fils notent en même temps : un verrou
+  de processus sérialise « lire, ajouter, écrire », et un journal qui ne s'écrit pas n'empêche jamais une alerte
+  de partir. Aucune adresse, même en morceaux : messages passés par `scrub` (200 caractères). La tâche planifiée
+  ne l'écrit que si CMA est fermé ; `cma alerts test` et `digest` y notent leurs envois. Depuis P41, un échec garde
+  aussi `error_code` (`invalid_address`, `refused`, `timeout`, `dns`, `tls`, `unreachable`, `other` ; porté par
+  `AlertError`) et `error_args` (code HTTP, nom de type d'exception ; `safe_args` refuse tout ce qui n'est pas un
+  entier ou un mot simple absent de l'adresse), traduits à l'affichage par `sends.error_text` ; le texte `error`
+  reste le repli (anciennes entrées, code inconnu). Un nouveau code se traduit dans `error_text`.
+- **Verrou des règles d'ingress** (`cfapi._INGRESS_LOCK`, P36) : toute modification de la configuration d'un tunnel
+  (lecture, changement, PUT complet) passe par `@_ingress_exclusive`. Une instance de `CloudflareApi` est recréée à chaque
+  appel de `CloudflareAdmin.api()` : le verrou est donc global au module (un `RLock`), pas un attribut de l'instance.
+  Sans lui, trois « Monter » rapprochés lisaient la même configuration et le dernier écrasait les autres. Une nouvelle
+  méthode qui écrit l'ingress prend le même décorateur.
+
+De « Pièges déjà rencontrés » ([docs/claude/pieges.md](docs/claude/pieges.md)), « Qt et PySide : » puis
+« Tests et CI : » :
+
+- Pas de filtre d'événements Python installé sur la `QApplication` : PySide y passe des enveloppes au type
+  incomplet, d'où des `AttributeError` intermittentes. Préférer un signal (`focusWindowChanged`) ou un minuteur.
+- Ne jamais reconstruire un `QTreeWidget` pendant le signal `itemChanged` d'un de ses éléments : violation d'accès.
+- Ne jamais laisser Qt détruire les éléments d'un `QTreeWidget`, `QTableWidget` ou `QListWidget` (`clear()`,
+  `setRowCount()` qui retire des lignes, `setItem` sur une case occupée) : utiliser `clear_items(widget,
+  keep_rows)` (`ui/widgets.py`), qui reprend chaque élément côté Python. Ces éléments ne sont pas des `QObject` :
+  PySide ne voit pas leur destruction par Qt et peut les libérer une seconde fois. C'était le SIGABRT
+  intermittent du job Linux (`free(): invalid pointer` dans `Shiboken::Object::destroy`) : d'abord sur l'arbre
+  des tunnels, puis sur le tableau des service tokens après un premier correctif limité aux arbres. Reproduit
+  dans un conteneur avec la suite complète répétée (un abandon toutes les deux ou trois exécutions) ou la vue
+  Cloudflare en boucle avec `pytest --no-qt-log -s` (Python 3.14 affiche alors la pile C).
+
+**Tests et CI :**
+
+- Ne jamais lancer `ruff --unsafe-fixes` : SIM118 a cassé `QStyleFactory.keys()`.
+- Adresses d'exemple (tests, guide, captures) : `192.0.2.x` (RFC 5737), `10.0.0.x` ; jamais une adresse du réseau du
+  propriétaire.
+- En parallèle (`-n auto`), la machine est chargée : une poignée de main SSH vers le serveur de test peut dépasser
+  10 s. Les attentes d'état des tests (`wait_state`, `wait_listening`) vont jusqu'à 45 s et rendent la main dès que
+  l'état est atteint ; ne pas les raccourcir.
+
+Point 5 de « Publier une version » ([docs/claude/publication.md](docs/claude/publication.md)) :
+
+5. Mettre à jour une copie installée : désinstaller en silence (`unins000.exe /VERYSILENT /SUPPRESSMSGBOXES
+   /NORESTART`), puis lancer le nouvel installeur avec les mêmes options. Les données (`%APPDATA%\CloudflaredManager`)
+   ne sont pas touchées. Ne jamais fermer ou réinstaller une copie en service sans l'accord de l'utilisateur.
+   La désinstallation retire la tâche planifiée « Surveillance des tunnels » : vérifier avant
+   (`schtasks /Query /TN "Cloudflared Manage Access\Surveillance des tunnels"`) et la recréer après si elle existait.
 
 ## Vérifier avant de committer
 
@@ -52,24 +200,7 @@ Depuis Windows, l'environnement est `.venv` (uv n'est pas forcément dans le PAT
   triés sans tenir compte de la casse (`str.casefold`). Les mots-clés de la saisie des politiques (`groupe`,
   `tout le monde`, `tout service token`) sont lus dans tous les catalogues : les traduire change ce qui est compris.
 
-## Publier une version
-
-1. `__version__` dans `src/cma/__init__.py`, section `## [X.Y.Z] - date` dans `CHANGELOG.md` (à la place de
-   `## [Non publié]`), exemple `Get-FileHash` du `README.md`. Le titre doit garder la forme `## [X.Y.Z] - date` :
-   « Quoi de neuf » le lit (`cma.core.changelog`), et `tests/unit/test_changelog.py` exige la section de la version.
-2. Commit « Version X.Y.Z », tag `vX.Y.Z`, `git push origin main vX.Y.Z`.
-3. Le workflow `release.yml` enchaîne `windows` (onedir PyInstaller, zip portable, installeur Inno Setup, SBOM,
-   manifestes winget et Scoop), `linux` (AppImage et tar.gz), `publish` (release GitHub « latest », notes
-   extraites du CHANGELOG, `SHA256SUMS.txt`) puis `scoop` (commit automatique de `bucket/`). Environ 5 minutes.
-4. La release contient `winget-manifests-X.Y.Z.zip` ; la soumission (`wingetcreate submit`) se fait avec le
-   compte GitHub du propriétaire, pas depuis la CI.
-5. Mettre à jour une copie installée : désinstaller en silence (`unins000.exe /VERYSILENT /SUPPRESSMSGBOXES
-   /NORESTART`), puis lancer le nouvel installeur avec les mêmes options. Les données (`%APPDATA%\CloudflaredManager`)
-   ne sont pas touchées. Ne jamais fermer ou réinstaller une copie en service sans l'accord de l'utilisateur.
-   La désinstallation retire la tâche planifiée « Surveillance des tunnels » : vérifier avant
-   (`schtasks /Query /TN "Cloudflared Manage Access\Surveillance des tunnels"`) et la recréer après si elle existait.
-6. Suivre la release sans l'API : l'API GitHub anonyme est limitée à 60 requêtes par heure, vite épuisées par une
-   boucle d'attente. `curl -sfL …/releases/download/vX.Y.Z/SHA256SUMS.txt` répond dès que la release est publiée.
+## Intégration continue (CI)
 
 La CI (`ci.yml`) tourne à chaque push : lint et typage, tests Windows, Linux et macOS avec couverture, vrai
 cloudflared (Windows et Linux), audit pip-audit, scripts serveur (shellcheck, bats sous Debian, Ubuntu, Alpine),
@@ -78,312 +209,10 @@ Les journaux des jobs ne sont lisibles qu'aux administrateurs ; l'API publique d
 et les annotations : un échec de tests y est résumé (lignes `FAILED`, total, couverture) par l'étape « Résumé de
 l'échec en annotations » (`check-runs` du commit, puis `annotations_url` du job).
 
-## Historique des étapes
+## Pièges déjà rencontrés (extrait)
 
-| Période | Étape |
-| --- | --- |
-| 2025-07 → 2025-12 | v1 Tkinter (`CloudflaredManageAccess.py`, versions 1.0 à 1.4.0) : profils, redirections SSH paramiko, script `ports-report`. |
-| 2026-09-29 | Réécriture v2 : PySide6, moteur asyncio, asyncssh, coffre de secrets, CLI `cma`, migration automatique des fichiers v1, Job Object, CI complète. |
-| 2026-09-29 | Compte Cloudflare (API v4), serveurs Windows (`ports-report.ps1`), mise à jour automatique. |
-| 2026-09-30 | Refonte de l'interface d'après une spécification externe (navigation par intention, jetons de couleur, contrastes vérifiés). Retrait de la v1 et de son dossier d'icônes. Release **2.0.0**. |
-| 2026-09-30 | Purge de l'historique git (`dist/` et `build/` avaient été commités) ; une sauvegarde bundle a été gardée hors du dépôt. |
-| 2026-10-01 | Écarts de la spécification comblés ; palette Ctrl+K, espaces de travail, « Tester le service », diagnostic guidé ; SOCKS, redirection inverse, ProxyJump ; coffre portable mémorisé par DPAPI et verrouillage ; distribution Linux, Scoop, mise à jour de la version portable. Release **2.1.0**. |
-| 2026-10-01 | Jeton d'API sans compte visible : il manquait la permission « Account Settings : Read ». La page de connexion la liste désormais. |
-| 2026-10-01 | Vue Cloudflare redessinée (en-tête du compte, tuiles, connexion en trois étapes), puis tunnels en cartes. Release **2.1.1**. |
-| 2026-10-02 | Ménage : spécification de refonte, anciens plans (`docs/archive/`) et banc d'essai v1 (`scripts/bench_tunnel.py`, groupe `bench`) retirés ; vérification des contrastes reprise dans `tests/unit/test_contrast.py`. Ce fichier et `docs/PLAN.md` créés. |
-| 2026-10-05 | Dependabot entièrement fusionné (`upload-artifact` v7, `download-artifact` v8). Délai par test en local, journal des tests en artefact. Compte Cloudflare déduit des zones sans « Account Settings : Read ». |
-| 2026-10-06 | Release à blanc (`release.yml` sans tag), vues `cloud` et `ssh` découpées en paquets. Release **2.2.0**. Puis 2.3 réalisée (non publiée) : échéance et renouvellement des service tokens, état des connecteurs, modification d'un nom d'hôte publié, politiques Access, création de tunnel. |
-| 2026-10-07 | P3 terminée : historique des sessions, SFTP, macOS, AppImage mise à jour en un clic, allemand et espagnol. Abandon intermittent du job Linux corrigé (`clear_items`). Recette en écriture sur un vrai compte réussie. Release **2.3.0**. |
-| 2026-10-08 | Accès Cloudflare, Service tokens et Serveurs SSH redessinés dans le style de la vue Cloudflare (listes en cartes, en-tête d'objet, formulaires en sections). Release **2.4.0**. |
-| 2026-10-08 | P4 : surveillance des tunnels, Paramètres en sections, mises à jour vérifiées par signature, tests en parallèle et sous macOS (socket Unix trop long corrigé). Release **2.5.0**. |
-| 2026-10-08 | P5 : tunnels en panne visibles en permanence, `cma tunnels`, tests macOS bloquants ; logique des vues extraite (`cma.ui.states`, `cloud/summary.py`). Release **2.6.0**. |
-| 2026-10-08 | P6 : règles d'ingress complètes, réglages et journal des accès Access, applications et tokens en cartes, surveillance même CMA fermé (tâche planifiée). Recette en écriture réussie. Release **2.7.0**. |
-| 2026-10-08 | P7 : DNS des noms d'hôte vérifié et corrigeable, journal des accès pour un audit (période, CSV), onglet Applications sorti de `cloud/view.py`. Release **2.8.0**. |
-| 2026-10-09 | P8 : lecture du compte en parallèle (7-10 s → 2 s), test d'un nom d'hôte depuis Internet, historique des notifications. Release **2.9.0**. |
-| 2026-10-09 | P9 à P12 : surveillance des services publiés, reprise après la veille, réseaux privés WARP, journal d'audit, instantanés, permissions du jeton, trafic, liens `cma://` et partage, jetons d'API nommés, vues découpées, guide d'utilisation. Release **2.10.0**. |
-| 2026-10-09 → 10-14 | P13 à P22, Release **2.11.0** : bilan de sécurité, Access exigé au niveau du tunnel, jeton de la surveillance, disponibilité (graphique, rapport HTML/CSV), alertes ntfy/Slack/Teams/Discord, sourdine, import de `~/.ssh/config`, carte « Santé du compte », surveillance sortie de la fenêtre (`ui/monitor.py`, ADR 0001), `cma review`, `cma availability`, `cma alerts test`, publication d'un port découvert, « Quoi de neuf », raccourcis (F1). |
-| 2026-10-14 → 10-15 | P23 à P28 en agents parallèles (worktrees, Sonnet et Haiku, intégration et juges Opus) : disponibilité par jour local, maintenance planifiée, rappel des pannes longues, résumé hebdomadaire, `cma alerts digest`, `cma availability --output`, pannes dans le menu de l'icône, touche Tab libérée des tableaux. Deux juges, écarts corrigés. Release **2.12.0**. |
-| 2026-10-15 | P29 à P32, un agent Sonnet à la fois (quota) : pastille « Maintenance », incidents clos quand une surveillance est coupée, canaux d'alerte et maintenances dans l'export (adresse seulement chiffrée), journal des envois (`alert_log.json`, « Envois récents… »). Juge : écarts corrigés. Release **2.13.0**. |
-| 2026-10-15 → 10-16 | P33 à P37, quatre agents en parallèle (Sonnet, Opus pour P34) : objectifs de disponibilité et rapport mensuel, surveillance de plusieurs comptes (ADR 0003), tuile Disponibilité, traductions relues et verrou des règles d'ingress. Deux juges, écarts corrigés. Release **2.14.0**. |
-
-Tout ce qui a été retiré reste lisible dans l'historique git (`git log --diff-filter=D --name-only`).
-
-## Décisions à connaître
-
-- **Écoute de cloudflared** : « Start Websocket listener » est écrit avant l'ouverture du port. L'écoute est
-  confirmée par un `bind` qui doit échouer, jamais par une connexion (elle déclencherait l'authentification Access).
-  Une option invalide sort avec le code 0 : tout arrêt avant l'écoute est une erreur.
-- **Secrets** : jamais en argument (le secret du service token passe par l'environnement), jamais dans
-  `config.json`, masqués dans les journaux. Coffre système (keyring) ou fichier chiffré en mode portable.
-- **Démarrage** : asyncssh et cryptography sont importés à la demande (`cma.core.ssh._lazy`) puis préchargés après
-  l'affichage ; le budget CI est de 6 s.
-- **Listes en cartes des vues liste–détail** (`EntryTree`, `EntryDelegate`, `ObjectHeader`, `FormCard` dans
-  `ui/views/common.py`) : même principe que les tunnels, le délégué lit le `ListEntry` rangé dans `ENTRY_ROLE` ;
-  le texte des éléments (`★ nom`, `Groupe (2)`) reste celui d'avant pour l'accessibilité et les tests. Les champs
-  côte à côte (`side_by_side`) sont de petites `QFormLayout` : `apply_accessible_names` les nomme sans aide.
-- **Tunnels en cartes** (`TunnelTree` et `TunnelDelegate` dans `ui/views/cloud/cards.py`) : le `QTreeWidget` reste le
-  modèle de données et de sélection (menu contextuel, import, retrait et tests s'appuient dessus) ; seul le rendu
-  change. Les colonnes 1 et 2 sont masquées mais gardent service et état pour l'accessibilité et les tests.
-- **Compte Cloudflare** : `/accounts` vide signifie presque toujours qu'il manque « Account Settings : Read ».
-  Dans ce cas, le compte est déduit des zones (`accounts_from_zones`, `Account.inferred`) et la vue l'explique.
-- **Politiques Access** : une règle que CMA ne comprend pas devient `PolicyRule("raw")` et repart telle quelle à
-  l'enregistrement ; `exclude`, `require` et les champs inconnus (`AccessPolicy.extra`, dont `connection_rules`
-  du RDP) aussi. Ne pas « simplifier » cette conservation.
-- **Politiques réutilisables** : sur un vrai compte, elles le sont toutes (`reusable`, `app_count`). Elles se
-  modifient par `/access/policies/{id}` et s'attachent par un PUT complet de l'application (relue, champs calculés
-  retirés). Cloudflare refuse une politique legacy sur une application nouvelle : `allow_service_token` réutilise
-  ou crée une politique du compte. Le faux serveur reproduit ce modèle ; ne pas revenir à `/apps/{id}/policies`.
-- **Recette sur un vrai compte** : `scripts/cloudflare_recette.py` (lecture seule par défaut). Le classifieur de
-  la session refuse toute écriture sur le compte Cloudflare réel, même jetable : le mode `--ecriture` est lancé
-  par le propriétaire. La recette ne crée aucun DNS : une règle de test est posée directement dans la
-  configuration du tunnel de test, jamais par `publish_hostname` (qui crée le CNAME).
-- **Secrets de la 2.3** : « Changer le secret » (`…/rotate`) révoque l'ancien secret chez Cloudflare, d'où la
-  confirmation ; le jeton d'un connecteur de tunnel passe par `register_secret` et n'est jamais conservé.
-- **États affichés** (`cma.ui.states`) : libellé, teinte, symbole et actions d'une session, d'une liaison SSH ou
-  d'un favori viennent de là (les tables `STATUS_OF_STATE`… y sont, `cma.ui.theme` les réexporte). Ne pas en
-  refaire une copie dans une vue : c'est ce qui avait fait diverger la zone de notification et le tableau de bord.
-- **DNS des noms d'hôte** (`cma.core.dnscheck`, appelé par `CloudflareAdmin.overview`) : une lecture par zone
-  utilisée ; une zone illisible donne « unknown », jamais une alerte. « Corriger » passe par `ensure_cname`, qui
-  refuse de remplacer un A ou un AAAA : ne pas l'assouplir.
-- **Vue Cloudflare découpée** : `cloud/tunnels_tab.py` (`TunnelsTab`), `cloud/apps_tab.py` (`AppsTab`) et
-  `cloud/tokens_tab.py` (`TokensTab`) portent leurs onglets ; la vue garde les anciens noms par délégation
-  (`view.tree`, `view.publish`, `view.apps`, `view.allow_token`…). Les tests remplacent les boîtes dans le module de
-  l'onglet (`tunnels_module.ask_service`, `apps_module.ask_allow`…), pas dans `view` ; `confirm` sert aux deux
-  (oublier le jeton dans la vue, retirer un nom d'hôte dans l'onglet). Même principe pour `profile_editor.py`
-  (éditeur de profil) et `settings_updates.py` (mises à jour des Paramètres) : `self_update_possible` et
-  `refresh_cloudflared_version` restent sur la vue, que les tests et le script de captures remplacent.
-- **Dates de test relatives** : tout ce qui filtre par période (journal des accès) se teste avec des dates calculées
-  depuis maintenant (`_ago` du faux serveur) ; une date fixe ferait échouer le test quelques semaines plus tard.
-- **Règles d'ingress** : une règle est identifiée par (nom d'hôte, chemin) (`cfapi._same_rule`). Republier met la
-  règle à jour sur place (position, `originRequest`, `id` gardés) ; retirer ne supprime le CNAME que si plus aucune
-  règle n'utilise le nom d'hôte. La règle finale (sans nom d'hôte) reste toujours la dernière.
-- **Réglages d'application** : même PUT complet que les politiques (application relue), politiques renvoyées en liens
-  `{id, precedence}` ; `self_hosted` seulement ; `allowed_idps` rendu tel quel (liste des fournisseurs souvent illisible).
-- **Journal des accès** : demande « Access: Audit Logs : Read » (`cfapi.AUDIT_PERMISSION`) ; un 403 le dit. Le faux
-  serveur reproduit le refus avec `audit_allowed = False`.
-- **Tâche planifiée** (`cma.platform.schedule`) : lance l'exécutable fenêtré avec `tunnels --notify` (pas de
-  console qui clignote) ; `gui_main` passe cette commande à la CLI. Les tests remplacent `_schtasks` : ne jamais
-  créer de vraie tâche dans un test. Notification système : `cma.platform.notify` (texte par l'environnement).
-- **Surveillance des tunnels** (`cma.core.tunnelwatch`, relevé dans `MainWindow.check_tunnels`) : seuls
-  « degraded » et « down » alertent, le retour n'est annoncé que vers « healthy » (hors ligne → inactif est un
-  tunnel arrêté pour de bon). Un relevé en échec est seulement journalisé, jamais notifié toutes les 5 minutes.
-- **Signature des mises à jour** (`updates.signature_policy`) : une copie signée n'accepte qu'une mise à jour
-  signée par le même éditeur ; tant que CMA n'est pas signé, non signé reste accepté (l'empreinte suffit).
-- **Lecture du compte en parallèle** (`CloudflareAdmin.overview`, 8 fils) : chaque appel reste synchrone dans
-  `CloudflareApi` ; seul `overview` les répartit. Un appel ajouté à la lecture du compte passe par le même pool.
-- **Test depuis Internet** (`cma.core.hostprobe`) : la requête ne suit pas les redirections (une redirection vers
-  `cloudflareaccess.com` signifie Access). Sur le vrai compte, les 403 sans navigateur venaient de la protection
-  contre les robots (`cf-mitigated: challenge`), pas d'Access ni du service : ne pas les lire comme un refus.
-- **Surveillance des services** (`cma.core.servicewatch`, relevé dans `MainWindow.check_services`, résultats
-  partagés par `GuiContext.services`) : seuls 502/504, 1033 et « nom introuvable » alertent ; la page Access et la
-  vérification de navigateur sont normales. « unreachable » ne change pas l'état connu. Les noms des tunnels
-  inactifs ou hors ligne ne sont pas testés (la surveillance des tunnels en parle déjà).
-- **Reprise après la veille** (`cma.ui.wake.WakeWatcher`) : saut de l'horloge murale entre deux tics de 30 s, et
-  `QNetworkInformation` pour le réseau. `Session.wake()` écourte l'attente d'une reconnexion ; une session
-  abandonnée (`gave_up`) est relancée par `SessionManager.resume_after_network`.
-- **Outils du compte (P10)** : chaque fonction a son module du cœur (`privnet`, `audit`, `traffic`, `snapshot`,
-  `permissions`) qui lit l'API par `CloudflareApi.get`, `get_list`, `send` et `graphql` (le cœur est typé en
-  strict : pas d'accès aux méthodes privées). Routes et trafic sont des lectures facultatives de `overview` : une
-  permission manquante ne la fait pas échouer. Journal d'audit : `/logs/audit` (v2, curseur), permission
-  « Account Settings : Read ». Analytique : GraphQL `httpRequestsAdaptiveGroups`, refus « authz » sans
-  « Analytics : Read ». Un instantané retire les champs volatils (`VOLATILE`) : deux instantanés d'un compte
-  inchangé sont identiques, vérifié sur le vrai compte.
-- **Jetons d'API nommés** (`Settings.cloudflare_tokens`, `CloudflareAdmin.tokens`, `active_token`,
-  `switch_token`) : le premier jeton garde la clé du coffre `cfapi:token` (`LEGACY_TOKEN_ID`), les suivants
-  `cfapi:token:<id>`. Un poste d'avant les jetons nommés n'a rien à migrer : son jeton apparaît sous « Principal ».
-  Les surveillances suivent `cloudflare_account_id`, qui change avec le jeton : elles repartent d'elles-mêmes.
-- **Liens** : `__main__.split_link` retire un `cma://…` ou un `.cma` des arguments ; une instance déjà ouverte le
-  reçoit par le canal local (`{"cmd": "link"}`), puis `MainWindow.handle_link`. Une connexion par lien passe par
-  `execute` (comme la CLI) après confirmation.
-- **Bilan de sécurité** (`cma.core.security.review`, analyse pure ; lecture et corrections dans `CloudflareAdmin`) :
-  « Protéger par Access » crée une application sans politique, donc ferme le service ; il n'est jamais coché
-  d'office (le vrai compte a des sites publics voulus). Un constat accepté est gardé par `Finding.ident` dans
-  `Settings.ignored_findings`. « Exiger Access au niveau du tunnel » écrit `originRequest.access` (`required`,
-  `teamName` lu dans `/access/organizations`, `audTag` de l'application qui couvre le nom).
-- **Jeton de la surveillance** (`Settings.watch_token_id`) : les relevés l'essaient en premier, puis le jeton actif,
-  puis les autres jetons du même compte (repli de P38, `CloudflareAdmin._watch_plan` et `_read_with_fallback`) ;
-  `watch_api` reste pour un usage direct ; tout le reste utilise le jeton actif.
-- **Disponibilité et alertes** (`cma.core.availability`, `alerts`, `monitoring`) : `record_tunnels` et
-  `record_services` tiennent le journal et renvoient les incidents ouverts ou fermés ; CMA ouvert et la tâche
-  planifiée s'en servent de la même façon (la tâche n'écrit que si CMA est fermé). La sourdine (`Settings.muted`,
-  clés `tunnel:<id>` et `service:<nom d'hôte et chemin>`) coupe notifications, alertes et badge, pas le relevé.
-  Les fonctions d'envoi ou de test remplaçables (`send_events(sender=…)`, `probe_targets(prober=…)`) se résolvent à
-  l'appel : une valeur par défaut figée empêche les tests de les remplacer.
-- **Import de `~/.ssh/config`** (`cma.core.sshconfig`) : le premier réglage d'un bloc l'emporte (comme ssh) ;
-  blocs génériques et `Match` ignorés, `Include` suivi ; un hôte illisible (`%h`) est sauté, pas bloquant.
-- **Surveillance hors de la fenêtre** (`cma.ui.monitor.Monitor`, ADR 0001) : relevés des tunnels et services,
-  journal de disponibilité et alertes ; la fenêtre ne fait que l'afficher (signaux `troubled`, `notice`) et garde
-  les anciens noms par délégation (`window.check_tunnels`, `window.availability`…).
-- **Outils du compte chargés à la demande** (`cloud/account_tools.py`) : chaque boîte est importée à son ouverture
-  par une fonction de module du même nom (`show_security_review`…), que les tests remplacent. Ne pas remettre ces
-  imports en tête de module : ils pèsent sur le démarrage.
-- **« Quoi de neuf »** (`ui/dialogs/whatsnew.py`) : `Settings.last_seen_version` ; une première installation
-  (assistant ou migration) note la version sans rien montrer ; CMA démarré dans la zone de notification reçoit une
-  notification au lieu de la boîte. Le CHANGELOG manquant (installation par pip) n'est jamais une erreur.
-- **Mesure du démarrage** (`scripts/startup_benchmark.py`, `CMA_STARTUP_BENCHMARK=1`) : coffre vide en mémoire
-  (`ui/app._open_secret_store`), jamais le trousseau du poste, qui est global à l'utilisateur et contient le vrai
-  jeton. Comparer deux versions en mesures **alternées** (ancienne version dans un `git worktree`) : deux séries
-  prises à des moments différents ont déjà fait annoncer un gain qui n'était que du bruit.
-- **Boîtes modales et tests** : chaque boîte ouverte par la vue Cloudflare passe par une fonction de module
-  (`ask_*`, `show_*`) que les tests remplacent ; `exec()` bloquerait le test jusqu'au délai de 180 s.
-- **Jours locaux de la disponibilité** (`cma.core.availability`, `availability.json` en version 2) : le jour d'un
-  relevé est sa date locale ; les jours enregistrés avant la version 2 (UTC) gardent leur date, sans conversion
-  possible. Le fuseau (`tz`) est un paramètre de `record_check`, `stats`, `daily`, `report`… pour les tests ; `tzdata`
-  n'est pas installé sous Windows : tester avec des fuseaux fixes (`timezone(timedelta(hours=…))`) ou une petite
-  classe `tzinfo` simulée (changement d'heure), jamais `ZoneInfo`.
-- **Maintenance, rappels et résumé** (`cma.core.monitoring`, `alertstate`, `digest`) : une maintenance hebdomadaire
-  (`MaintenanceWindow`) joue comme la sourdine (`is_muted`) ; les rappels (`alert_repeat_hours`) et le résumé du
-  lundi (`weekly_digest`, dû à partir de 9 h locales, une fois par semaine ISO) notent leur envoi dans
-  `alert_state.json` seulement quand un canal l'a reçu. Rien n'est rappelé pour un objet en sourdine ou en
-  maintenance. La tâche planifiée n'écrit cet état que si CMA est fermé, comme le journal. `cma alerts digest`
-  envoie le résumé sans toucher à l'état. Voir l'ADR 0002. On ne rappelle que ce qui est encore relevé
-  (`digest.watched` : surveillance des tunnels ou des services active) ; un relevé **réussi** clôt les incidents
-  des objets qui n'y figurent plus (`complete=True` côté `Monitor` et côté tâche quand `check_services` a
-  réussi), un relevé en échec ne clôt rien. `alert_state.json` garde aussi le tunnel de chaque nom d'hôte.
-- **Export des alertes** (`cma.core.transfer`, clés facultatives `alert_channels`, `maintenance_windows`,
-  `alert_settings`) : l'adresse d'un canal est un secret comme les autres (`alert:<id>`), chiffrée dans les
-  secrets d'un export protégé, jamais dans un export en clair. Un canal importé sans adresse est créé
-  **désactivé** (il échouerait à chaque alerte) et l'aperçu l'annonce ; pas de doublon (même type et même nom,
-  maintenance identique) ; les réglages des rappels ne sont repris que si l'utilisateur le coche.
-- **Journal des envois** (`cma.core.alertlog`, `ui/dialogs/sends.py`) : `alert_log.json`, à part de la
-  configuration et de `alert_state.json`, 200 entrées au plus. Plusieurs fils notent en même temps : un verrou
-  de processus sérialise « lire, ajouter, écrire », et un journal qui ne s'écrit pas n'empêche jamais une alerte
-  de partir. Aucune adresse, même en morceaux : messages passés par `scrub` (200 caractères). La tâche planifiée
-  ne l'écrit que si CMA est fermé ; `cma alerts test` et `digest` y notent leurs envois. Depuis P41, un échec garde
-  aussi `error_code` (`invalid_address`, `refused`, `timeout`, `dns`, `tls`, `unreachable`, `other` ; porté par
-  `AlertError`) et `error_args` (code HTTP, nom de type d'exception ; `safe_args` refuse tout ce qui n'est pas un
-  entier ou un mot simple absent de l'adresse), traduits à l'affichage par `sends.error_text` ; le texte `error`
-  reste le repli (anciennes entrées, code inconnu). Un nouveau code se traduit dans `error_text`.
-- **Objectifs de disponibilité** (`cma.core.slo`, `slo_report`, P33) : objectif par objet
-  (`Settings.availability_targets`, clés `tunnel:<id>` et `service:<nom>`) puis `default_availability_target`, de 50 à
-  100 %, comparé à la disponibilité des 30 derniers jours locaux. Les objets déjà annoncés sous leur objectif sont dans
-  l'état `slo` de `alert_state.json` (ADR 0002) : **une alerte par franchissement**, puis le retour (aux canaux qui
-  veulent les retours) ; l'état note l'envoi seulement quand un canal l'a reçu (le retour, dans tous les cas). Rien pour
-  un objet en sourdine ou en maintenance, ni sans relevé (un trou n'est pas une panne). **Marge de retour** (P40,
-  `Settings.availability_margin`, 0,05 point par défaut, de 0 à 1, commune à tous les objets) : l'alerte part sous
-  l'objectif, le retour seulement à objectif + marge, plafonné à 100 % (`slo.recovery_level`, `is_recovered`) ;
-  entre les deux, l'état annoncé ne change pas. La marge est lue à chaque relevé : `alert_state.json` ne change pas. Les alertes partent aussi CMA
-  ouvert sans rappels ni résumé (`has_targets` garde le calcul quand aucun objectif n'existe). `cma availability --month`
-  vit dans `cli.show_month_availability` (code 0, 1 si mois invalide ou à venir) ; le mois se calcule sur des dates
-  locales, pas des instants.
-- **Plusieurs comptes** (P34, [ADR 0003](docs/adr/0003-surveillance-de-plusieurs-comptes.md)) : avec
-  `watch_all_accounts`, `CloudflareAdmin.watch_tunnels` et `watch_services` relèvent **chaque jeton d'API avec son
-  dernier compte choisi** (`ApiToken.account_id` ; pour le jeton actif, le compte de la vue), pas tous les comptes qu'il
-  voit : deux comptes d'un même jeton, c'est le jeton enregistré deux fois. Un compte lu par deux jetons n'est relevé
-  qu'une fois (jeton de la surveillance, puis jeton actif). **Clés non préfixées** : `tunnel:<id>` et `service:<nom>`
-  gardent leur forme (identifiants uniques chez Cloudflare), donc journal, sourdines, maintenances et `alert_state.json`
-  n'ont rien à migrer ; seul le libellé reçoit « (Compte A) » dès que deux comptes sont surveillés. Un jeton en échec est
-  journalisé (`WatchFailure`) sans arrêter les autres, et le relevé incomplet (`complete=False`) ne clôt aucun incident.
-  **Repli** (P38) : un jeton refusé (401, 403) ou absent du coffre laisse la place au jeton suivant enregistré sur le
-  même compte, jamais sur une erreur réseau, un 5xx ou un 404 ; le repli est journalisé et porté par
-  `TunnelSweep.fallbacks` / `ServiceSweep.fallbacks`, et un échec est noté par jeton essayé. **Ouvrir un autre
-  compte** (P39) : `Monitor.token_for_account` / `can_open` cherchent un jeton du compte (dernier relevé, sinon
-  `ApiToken.account_id`, présent dans le coffre) ; `CloudView.show_account` bascule jeton et compte actifs (enregistrés
-  comme le sélecteur, jamais `watch_token_id`) puis sélectionne l'objet ; le compteur `_epoch` (`_invalidate`) fait
-  ignorer une lecture ou une connexion lancée avant la bascule. Limite connue : la carte
-  « Santé du compte » ne nomme le compte que pour une panne unique. Les tests de durée utilisent `delay` du faux serveur
-  (`two_accounts`).
-- **Verrou des règles d'ingress** (`cfapi._INGRESS_LOCK`, P36) : toute modification de la configuration d'un tunnel
-  (lecture, changement, PUT complet) passe par `@_ingress_exclusive`. Une instance de `CloudflareApi` est recréée à chaque
-  appel de `CloudflareAdmin.api()` : le verrou est donc global au module (un `RLock`), pas un attribut de l'instance.
-  Sans lui, trois « Monter » rapprochés lisaient la même configuration et le dernier écrasait les autres. Une nouvelle
-  méthode qui écrit l'ingress prend le même décorateur.
-- **Travail en agents parallèles** : chaque agent a son `git worktree` sous `.claude/worktrees/`, et lance les
-  tests depuis ce worktree avec `PYTHONPATH=src` et le `.venv` du dépôt principal. Les traductions passent par un
-  JSON que l'orchestrateur réapplique à l'intégration : les trois catalogues entrent en conflit à la fusion. Une
-  capture lancée par un script qui importe `tests/conftest.py` doit forcer `QT_QPA_PLATFORM=windows` : ce fichier
-  impose `offscreen`, sans police sur ce poste. Depuis un worktree, pyright demande `--pythonpath` vers le
-  `python.exe` du `.venv` principal ; sous Git Bash, `PYTHONPATH=src` seul (`src:.` charge le `cma` du dépôt
-  principal par l'installation éditable). Cinq agents qui lancent chacun `-n auto` saturent la machine : les
-  tests qui démarrent un vrai processus (cloudflared, PowerShell) échouent alors ; relancés seuls, ils passent.
-
-## Pièges déjà rencontrés
-
-Qt et PySide :
-
-- Pas de filtre d'événements Python installé sur la `QApplication` : PySide y passe des enveloppes au type
-  incomplet, d'où des `AttributeError` intermittentes. Préférer un signal (`focusWindowChanged`) ou un minuteur.
-- Ne jamais reconstruire un `QTreeWidget` pendant le signal `itemChanged` d'un de ses éléments : violation d'accès.
-- Ne jamais laisser Qt détruire les éléments d'un `QTreeWidget`, `QTableWidget` ou `QListWidget` (`clear()`,
-  `setRowCount()` qui retire des lignes, `setItem` sur une case occupée) : utiliser `clear_items(widget,
-  keep_rows)` (`ui/widgets.py`), qui reprend chaque élément côté Python. Ces éléments ne sont pas des `QObject` :
-  PySide ne voit pas leur destruction par Qt et peut les libérer une seconde fois. C'était le SIGABRT
-  intermittent du job Linux (`free(): invalid pointer` dans `Shiboken::Object::destroy`) : d'abord sur l'arbre
-  des tunnels, puis sur le tableau des service tokens après un premier correctif limité aux arbres. Reproduit
-  dans un conteneur avec la suite complète répétée (un abandon toutes les deux ou trois exécutions) ou la vue
-  Cloudflare en boucle avec `pytest --no-qt-log -s` (Python 3.14 affiche alors la pile C).
-- `table.selectRow(n)` laisse parfois la sélection vide sous la charge (suite en parallèle) : un test qui en dépend
-  sélectionne explicitement par le modèle de sélection (`selectionModel().setCurrentIndex(index, ClearAndSelect | Rows)`,
-  test SFTP de `test_views.py`).
-- `selectRow` annonce la sélection **avant** de poser l'index courant : un détail qui dépend de l'index courant doit
-  aussi suivre `currentChanged`, sinon il reste parfois vide (détail des journaux, corrigé en P37).
-- `monkeypatch.setattr(QMenu, "exec", …)` n'intercepte pas l'appel : le menu modal bloque le test. Séparer la
-  construction du menu de son `exec`.
-- Un widget d'une vue non affichée a `isVisible() == False` : afficher la vue avant de tester la visibilité.
-- `app.quit()` peut être refusé quand la fermeture envoie dans la zone de notification : utiliser `app.exit(0)`.
-- Dans un délégué, l'index peut être un `QPersistentModelIndex` sans `siblingAtColumn` pour pyright :
-  passer par `index.model().index(row, column, index.parent())`.
-- `tr()` exige un texte littéral (le test d'i18n extrait les chaînes par analyse statique).
-- `cma.ui.a11y.accessible_name` lit l'interface d'accessibilité : pour une `QComboBox` non modifiable, Windows
-  annonce le nom posé, Linux et macOS le texte affiché. Un test compare `widget.accessibleName()` à la valeur
-  attendue, et ne demande à l'interface qu'un nom non vide (échec en CI seulement, 2026-10-14).
-- Navigation au clavier : `QTableWidget` et `QTableView` ont `tabKeyNavigation=True` par défaut, et Tab y reste
-  piégé de case en case. Les fabriques (`data_table`, `_table`…) posent `setTabKeyNavigation(False)`. Un test de
-  tabulation envoie de vraies touches (`QTest.keyClick(focusWidget, Qt.Key.Key_Tab)`) et exige d'atteindre chaque
-  bouton : `focusNextChild()` contourne le tableau et ne voit pas le piège (test de P27 passé à tort, 2026-10-14).
-- Un `QLabel` à retour à la ligne annonce une largeur minimale élevée : dans un en-tête, il bloque le rétrécissement
-  de toute la fenêtre. Lui donner une petite `setMinimumWidth` explicite.
-- Un attribut `self.actions` sur un QWidget masque la méthode `actions()` de Qt (pyright le signale).
-
-Tests et CI :
-
-- Un test qui s'arrête sans rien dire se diagnostique avec `-o faulthandler_timeout=40`. La CI impose un délai
-  par test (pytest-timeout).
-- Un secret de test trop court est masqué partout par le module de rédaction et casse d'autres tests selon
-  l'ordre : utiliser des secrets de test longs.
-- Le plugin pytest-qt charge Qt au démarrage : tout job Linux qui lance pytest installe libegl1,
-  libxkbcommon0, libfontconfig1, libdbus-1-3 et libgl1.
-- En CI Windows, `powershell.exe` 5.1 lancé depuis pwsh 7 hérite de `PSModulePath` et perd
-  `Get-AuthenticodeSignature` : retirer `PSModulePath` de l'environnement (`powershell_env`).
-- Comparer des chemins par leurs parties, pas par leur texte : le séparateur diffère sous Linux.
-- `pre-commit run --all-files` ne voit que les fichiers suivis : passer `--files` pour les nouveaux.
-- Ne jamais lancer `ruff --unsafe-fixes` : SIM118 a cassé `QStyleFactory.keys()`.
-- Un faux serveur HTTP de test (`http.server`) lit le corps de la requête avant de répondre
-  (`self.rfile.read(Content-Length)`) : sinon, sous Windows, la fermeture envoie un RST et le client reçoit
-  WinError 10053 ou 10054, de façon intermittente.
-- La CLI écrit dans une console UTF-8, mais une sortie redirigée sous Windows est en cp1252 : `cli.safe_output()`
-  (appelé par `run`) remplace l'impossible par « ? ». `capsys` capture en UTF-8 et ne voit pas ce cas : le tester
-  avec un `io.TextIOWrapper(..., encoding="cp1252")` (`test_redirected_output_never_breaks_on_symbols`).
-- Adresses d'exemple (tests, guide, captures) : `192.0.2.x` (RFC 5737), `10.0.0.x` ; jamais une adresse du réseau du
-  propriétaire.
-- En parallèle (`-n auto`), la machine est chargée : une poignée de main SSH vers le serveur de test peut dépasser
-  10 s. Les attentes d'état des tests (`wait_state`, `wait_listening`) vont jusqu'à 45 s et rendent la main dès que
-  l'état est atteint ; ne pas les raccourcir.
-- Arrêt simultané de tous les processus de travail de xdist (code Windows `0x80010002`, une fois sur huit passages
-  le 2026-10-16) : cause non établie. Piste mesurée en P42 : la **mémoire validée du système** peut tomber à
-  quelques dizaines de Mo (43 Mo relevés) alors que la RAM est libre, quand plusieurs sessions lancent `-n auto`
-  (un processus de test UI valide environ 150 Mo) ; les démarrages de processus échouent alors. Diagnostic
-  permanent (`tests/diagnostic_workers.py`) : `%TEMP%\cma-pytest-diag\<pid du contrôleur>\<pid>.log`, gardé
-  seulement si un processus a été perdu ou si la session échoue (chemin affiché en fin de test). Le journal
-  **sans ligne de fin normale** est celui du processus mort : lire son dernier test, puis `commit_free`, puis
-  `controleur_vivant`, puis le disque. `CMA_TEST_DIAG=0` le coupe, `CMA_TEST_DIAG_KEEP=1` garde le dossier. Sous
-  charge, lancer `-n 8`. Les tests n'ouvrent plus le backend réseau COM du système (`_no_system_network_backend`,
-  `CMA_TEST_REAL_NETWORK=1` pour le rétablir).
-- `scripts/capture_screenshots.py` : le menu « Pannes » est reconstruit (`Tray._rebuild_menu`, `deleteLater` de
-  l'ancien) à chaque `config_changed` ; le relire (`tray._health_menu`) après avoir vidé la boucle d'événements et
-  vérifier `shiboken6.isValid` avant `grab`.
-
-Réseau et bibliothèques :
-
-- Cloudflare refuse de supprimer un service token cité par une politique (400, code 12139) : supprimer d'abord
-  les politiques qui le citent. Les erreurs de l'API ne se découvrent souvent qu'avec la recette sur un vrai compte.
-
-- `asyncssh.ChannelListenError` n'hérite pas de `asyncssh.Error` : l'attraper explicitement.
-- Un socket Unix a un chemin limité (104 octets sous macOS, 108 sous Linux) : `ipc_address` se replie sur
-  `XDG_RUNTIME_DIR` ou le dossier temporaire. Le dossier temporaire de macOS est long (`/var/folders/…`).
-- Pyright, pour une plateforme donnée, juge inaccessible le code après `if sys.platform == …: return` : un
-  import qui n'y sert que là est « inutilisé ». Le mettre dans une fonction à part.
-- Une `SSLError` peut ne pas avoir d'attribut `reason` : `getattr(error, "reason", None)`.
+Les autres pièges (Qt et PySide, tests et CI, réseau et bibliothèques) :
+[docs/claude/pieges.md](docs/claude/pieges.md).
 
 Outils de la session (Windows) :
 
